@@ -44,7 +44,37 @@ export type Template = {
   profile: GuardProfile
 }
 
-export type Observed = { path: string; how: 'read' | 'edited' }
+export type FileCategory = 'source' | 'test' | 'config' | 'docs' | 'generated' | 'secret'
+
+export type Observed = { path: string; how: 'read' | 'edited'; count?: number; lastAt?: number }
+
+// One changed region of a file against HEAD, in the file's new line numbers.
+export type Hunk = { from: number; to: number; added: number; removed: number }
+
+export type Changed = {
+  files: string[]
+  added: number
+  removed: number
+  // Last time SmartWorkbench saw each file edited by a tool call.
+  edits?: Record<string, number>
+  hunks?: Record<string, Hunk[]>
+}
+
+// A checked-in rule from .claude/smartworkbench.json; the first match decides.
+export type ProjectRule = {
+  tool?: string
+  command?: string
+  path?: string
+  policy: Policy
+  reason?: string
+}
+
+export type ProjectPolicy = {
+  source: string
+  profile?: GuardProfile
+  rules: ProjectRule[]
+  errors: string[]
+}
 
 export type Risk = 'low' | 'medium' | 'high'
 
@@ -88,10 +118,10 @@ export type Task = {
 export type Workbench = {
   schemaVersion: 1
   task: Task
-  context: { pins: ContextPin[]; observed: Observed[] }
+  context: { pins: ContextPin[]; observed: Observed[]; excluded?: string[] }
   execution: { profile: GuardProfile; isPaused: boolean; recentCalls: ToolCallRecord[] }
   evidence: EvidenceRecord[]
-  changed: { files: string[]; added: number; removed: number }
+  changed: Changed
 }
 
 export type Tab = 'intent' | 'context' | 'run' | 'evidence'
@@ -104,6 +134,7 @@ export type Live = {
   contextWindow?: number
   pinWarnings: string[]
   lastSummary?: string
+  policy?: ProjectPolicy
 }
 
 declare module 'claude-code' {

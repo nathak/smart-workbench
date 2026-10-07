@@ -1,6 +1,7 @@
 import type { EvidenceRecord, ToolCallRecord, Workbench } from '../types'
 import { rangeLabel } from './context'
-import { completionOf, latestOf, markOf, statusOf } from './evidence'
+import { coverageOf, hunkLabel, lastCheckedEdit } from './diff'
+import { completionOf, isStale, latestOf, markOf, statusOf } from './evidence'
 
 function when(ms: number): string {
   return new Date(ms).toISOString().replace('T', ' ').slice(0, 16)
@@ -9,7 +10,8 @@ function when(ms: number): string {
 // A handoff another session or developer can pick the task up from.
 export function handoffMarkdown(wb: Workbench, now: number): string {
   const { task } = wb
-  const { met, total, isComplete } = completionOf(task, wb.evidence)
+  const lastEdit = lastCheckedEdit(wb.changed)
+  const { met, total, isComplete } = completionOf(task, wb.evidence, lastEdit)
   const out: string[] = [
     `# SmartWorkbench handoff`,
     '',
@@ -33,12 +35,12 @@ export function handoffMarkdown(wb: Workbench, now: number): string {
   if (task.doneConditions.length > 0) {
     out.push('', '## Done conditions', '')
     for (const one of task.doneConditions) {
-      const status = statusOf(one, wb.evidence)
+      const status = statusOf(one, wb.evidence, lastEdit)
       const latest = one.link ? latestOf(wb.evidence, one.link) : undefined
       const proof = one.manual
         ? `manual ${one.manual.status} (${when(one.manual.at)}): ${one.manual.note}`
         : latest
-          ? `${latest.ok === null ? 'ran' : latest.ok ? 'passed' : 'failed'}: \`${latest.command}\``
+          ? `${latest.ok === null ? 'ran' : latest.ok ? 'passed' : 'failed'}: \`${latest.command}\`${isStale(latest, lastEdit) ? ' (code changed since; re-run)' : ''}`
           : one.link
             ? `no ${one.link} run yet`
             : 'not linked to evidence'
@@ -57,9 +59,22 @@ export function handoffMarkdown(wb: Workbench, now: number): string {
     }
   }
 
-  if (wb.changed.files.length > 0) {
+  const coverage = coverageOf(wb.changed, wb.evidence)
+  if (coverage.length > 0) {
     const stat = wb.changed.added + wb.changed.removed > 0 ? ` (+${wb.changed.added} −${wb.changed.removed})` : ''
-    out.push('', `## Changed files${stat}`, '', ...wb.changed.files.map(path => `- \`${path}\``))
+    const say: Record<(typeof coverage)[number]['state'], string> = {
+      proven: 'a check passed after the last edit',
+      failing: 'a check failed after the last edit',
+      unproven: 'no check since the last edit',
+      docs: 'docs/generated',
+      untracked: 'changed outside the tools',
+    }
+    out.push('', `## Changed files${stat}`, '')
+    for (const one of coverage) {
+      const ranges = one.hunks.length > 0 ? ` ${hunkLabel(one.hunks, 6)}` : ''
+      const by = one.provenBy ? ` (\`${one.provenBy.command}\`)` : one.failedBy ? ` (\`${one.failedBy.command}\`)` : ''
+      out.push(`- \`${one.path}\`${ranges} — ${say[one.state]}${by}`)
+    }
   }
 
   const recent = wb.evidence.slice(-10).reverse()

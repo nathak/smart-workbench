@@ -15,6 +15,7 @@ import type {
   Workbench,
 } from '../types'
 import { parsePinSpec, rangeLabel } from './context'
+import { lastCheckedEdit, type ParsedDiff } from './diff'
 import { completionOf, guessLink } from './evidence'
 
 export const MAX_CALLS = 100
@@ -35,11 +36,15 @@ export function emptyWorkbench(): Workbench {
   return {
     schemaVersion: 1,
     task: emptyTask(),
-    context: { pins: [], observed: [] },
+    context: { pins: [], observed: [], excluded: [] },
     execution: { profile: 'balanced', isPaused: false, recentCalls: [] },
     evidence: [],
-    changed: { files: [], added: 0, removed: 0 },
+    changed: emptyChanged(),
   }
+}
+
+export function emptyChanged(): Workbench['changed'] {
+  return { files: [], added: 0, removed: 0, edits: {}, hunks: {} }
 }
 
 export const EMPTY_LIVE: Live = { activeTab: 'intent', isPreviewOpen: false, pinWarnings: [] }
@@ -50,7 +55,11 @@ export function isWorkbench(value: unknown): value is Workbench {
 
 // What a saved workbench becomes on load: a call still running when the session ended never finished.
 export function restore(saved: unknown): Workbench {
-  const wb = isWorkbench(saved) ? { ...emptyWorkbench(), ...saved } : emptyWorkbench()
+  const empty = emptyWorkbench()
+  // Fields added in later versions are filled in for state saved by an earlier one.
+  const wb = isWorkbench(saved)
+    ? { ...empty, ...saved, context: { ...empty.context, ...saved.context }, changed: { ...empty.changed, ...saved.changed } }
+    : empty
   const recentCalls = wb.execution.recentCalls.map(one => (one.outcome === 'running' ? { ...one, outcome: 'error' as const } : one))
 
   return withStatus({ ...wb, execution: { ...wb.execution, recentCalls } })
@@ -59,7 +68,7 @@ export function restore(saved: unknown): Workbench {
 // Complete only when every condition is verified or waived; never from the model's words.
 export function withStatus(wb: Workbench): Workbench {
   const { task } = wb
-  const { isComplete } = completionOf(task, wb.evidence)
+  const { isComplete } = completionOf(task, wb.evidence, lastCheckedEdit(wb.changed))
   const isVerifying = task.doneConditions.some(one => one.manual || (one.link && wb.evidence.some(ev => ev.kind === one.link)))
   const status: TaskStatus = task.goal.trim() === '' ? 'draft' : isComplete ? 'complete' : isVerifying ? 'verifying' : 'active'
 
@@ -157,7 +166,7 @@ export function toggleLock(wb: Workbench): Workbench {
 }
 
 export function newTask(wb: Workbench): Workbench {
-  return { ...wb, task: emptyTask(), evidence: [], changed: { files: [], added: 0, removed: 0 } }
+  return { ...wb, task: emptyTask(), evidence: [], changed: emptyChanged() }
 }
 
 export function clearAll(wb: Workbench): Workbench {
@@ -231,7 +240,7 @@ export function applyTemplate(wb: Workbench, template: Template): Workbench {
     context: { ...wb.context, pins: template.pins.map(one => ({ ...one, id: newId('p') })) },
     execution: { ...wb.execution, profile: template.profile },
     evidence: [],
-    changed: { files: [], added: 0, removed: 0 },
+    changed: emptyChanged(),
   }
 }
 
@@ -266,14 +275,35 @@ export function addEvidence(wb: Workbench, record: EvidenceRecord): Workbench {
   return { ...wb, evidence: [...wb.evidence, record].slice(-MAX_EVIDENCE) }
 }
 
-export function observe(wb: Workbench, tool: string, path: string): Workbench {
+export function observe(wb: Workbench, tool: string, path: string, at: number): Workbench {
   const how = EDIT_TOOLS.has(tool) ? 'edited' : 'read'
   const was = wb.context.observed.find(one => one.path === path)
   const others = wb.context.observed.filter(one => one.path !== path)
-  const observed = [...others, { path, how: was?.how === 'edited' ? 'edited' : how } as const].slice(-MAX_OBSERVED)
-  const files = how === 'edited' && !wb.changed.files.includes(path) ? [...wb.changed.files, path] : wb.changed.files
+  const seen = { path, how: was?.how === 'edited' ? 'edited' : how, count: (was?.count ?? 0) + 1, lastAt: at } as const
+  const observed = [...others, seen].slice(-MAX_OBSERVED)
 
-  return { ...wb, context: { ...wb.context, observed }, changed: { ...wb.changed, files } }
+  if (how !== 'edited') {
+    return { ...wb, context: { ...wb.context, observed } }
+  }
+
+  const files = wb.changed.files.includes(path) ? wb.changed.files : [...wb.changed.files, path]
+
+  return { ...wb, context: { ...wb.context, observed }, changed: { ...wb.changed, files, edits: { ...wb.changed.edits, [path]: at } } }
+}
+
+// Hides a file from Suggested; Unhide brings it back.
+export function toggleExcluded(wb: Workbench, path: string): Workbench {
+  const excluded = wb.context.excluded ?? []
+  const next = excluded.includes(path) ? excluded.filter(one => one !== path) : [...excluded, path]
+
+  return { ...wb, context: { ...wb.context, excluded: next } }
+}
+
+// The diff against HEAD replaces the last one; files changed outside the tools join the list.
+export function applyDiff(wb: Workbench, diff: ParsedDiff): Workbench {
+  const files = [...new Set([...wb.changed.files, ...Object.keys(diff.hunks)])]
+
+  return { ...wb, changed: { ...wb.changed, files, hunks: diff.hunks, added: diff.added, removed: diff.removed } }
 }
 
 export function isEditTool(tool: string): boolean {
@@ -284,16 +314,18 @@ export function cut(text: string, width: number): string {
   return text.length <= width ? text : `${text.slice(0, Math.max(1, width - 1))}…`
 }
 
-export function guardLabel(wb: Workbench): string {
-  return wb.execution.isPaused ? 'PAUSED' : wb.execution.profile.toUpperCase()
+export function guardLabel(wb: Workbench, live: Live): string {
+  const profile = live.policy?.profile ?? wb.execution.profile
+
+  return wb.execution.isPaused ? 'PAUSED' : `${profile.toUpperCase()}${live.policy ? '*' : ''}`
 }
 
 export function bandText(wb: Workbench, live: Live): string {
-  const { met, total } = completionOf(wb.task, wb.evidence)
+  const { met, total } = completionOf(wb.task, wb.evidence, lastCheckedEdit(wb.changed))
   const dot = wb.task.locked ? '●' : '○'
   const title = wb.task.goal.trim() === '' ? 'No goal set' : wb.task.goal.trim()
   const ctx = live.contextPercent === undefined ? '' : ` · ${live.contextPercent}%`
   const warn = live.pinWarnings.length > 0 ? ` ⚠${live.pinWarnings.length}` : ''
 
-  return `WB ${dot} ${cut(title, 28)} │ Ctx +${wb.context.pins.length} pins${ctx}${warn} │ Done ${met}/${total} │ Guard ${guardLabel(wb)}`
+  return `WB ${dot} ${cut(title, 28)} │ Ctx +${wb.context.pins.length} pins${ctx}${warn} │ Done ${met}/${total} │ Guard ${guardLabel(wb, live)}`
 }

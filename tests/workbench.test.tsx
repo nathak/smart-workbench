@@ -314,3 +314,142 @@ test('tool rows keep the engine row and gain a risk or evidence line', async ($,
   expect(await plain.find({ type: 'Text', text: /WB ·/ })).toBe(undefined)
   await plain.unmount()
 })
+
+test('a checked-in guard file sets the profile and adds rules at session start', async ($, on) => {
+  const files: Record<string, string> = {
+    '.claude/smartworkbench.json': JSON.stringify({
+      profile: 'strict',
+      rules: [
+        { tool: 'Bash', command: 'terraform\\s+apply', policy: 'block', reason: 'infra changes go through CI' },
+        { tool: 'Bash', command: 'reset --hard', policy: 'allow' },
+      ],
+    }),
+  }
+  const workbench = world(on, {}, files)
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  const ran: string[] = []
+  let answer = 'Allow'
+  on('tool.call', ($, e) => {
+    if (e.tool === 'AskUserQuestion') {
+      return { result: { questions: e.questions, answers: { [e.questions[0]?.question ?? '']: answer } } }
+    }
+    ran.push('command' in e ? String(e.command) : String(e.tool))
+    return { result: { stdout: '', stderr: '', interrupted: false } }
+  })
+
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+
+  const blocked = await $.tool.call({ tool: 'Bash', command: 'terraform apply -auto-approve' })
+  expect(JSON.stringify(blocked)).toContain('infra changes go through CI')
+  // The file cannot loosen a built-in block.
+  await $.tool.call({ tool: 'Bash', command: 'git reset --hard' })
+  expect(ran).toEqual([])
+
+  // Strict from the file: a workspace edit is asked.
+  answer = 'Block'
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/a.ts`, old_string: 'a', new_string: 'b' })
+  expect(ran).toEqual([])
+  expect(workbench().execution.recentCalls.map(one => one.outcome)).toEqual(['blocked', 'blocked', 'declined'])
+
+  const shown = await $.command.run({ command: 'swb', args: 'policy', ...COMMAND })
+  expect(shown.text).toContain('profile strict, 2 rules')
+})
+
+test('policy init writes a starter guard file only when none exists', async ($, on) => {
+  const files: Record<string, string> = {}
+  world(on, {}, files)
+  on('fs.exists', ($, e) => ({ value: Object.keys(files).some(name => e.path === name || e.path.endsWith(`/${name}`)) }))
+
+  const first = await $.command.run({ command: 'swb', args: 'policy init', ...COMMAND })
+  expect(first.text).toContain('Wrote .claude/smartworkbench.json')
+  expect(Object.keys(files).some(name => name.endsWith('.claude/smartworkbench.json'))).toBe(true)
+
+  const second = await $.command.run({ command: 'swb', args: 'policy init', ...COMMAND })
+  expect(second.text).toContain('already exists')
+})
+
+test('an edit after a passing test makes the condition need a re-run; the diff maps changed regions', async ($, on) => {
+  const store: Record<string, unknown> = {}
+  const clock = mock.clock(on, { now: 1000 })
+  on('store.get', ($, e) => ({ value: store[e.key] }))
+  on('store.set', ($, e) => {
+    store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: Object.keys(store) }))
+  on('session.cwd', () => ({ value: CWD }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('fs.read', ($, e) => {
+    throw new Error(`ENOENT: ${e.path}`)
+  })
+  on('fs.stat', ($, e) => {
+    throw new Error(`ENOENT: ${e.path}`)
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.log', () => ({ value: undefined }))
+  on('process.run', () => ({
+    value: {
+      exitCode: 0,
+      stdout: ['diff --git a/src/auth.ts b/src/auth.ts', '--- a/src/auth.ts', '+++ b/src/auth.ts', '@@ -10 +10,2 @@', '-a', '+b', '+c'].join('\n'),
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('tool.call', () => ({ result: { stdout: 'ok', stderr: '', interrupted: false } }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  const workbench = () => store[`ws:${CWD}`] as Workbench
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  await ui.input({ key: 'goal', text: 'Fix it' })
+  await ui.input({ key: 'add-condition', text: 'Tests pass' })
+
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.ts`, old_string: 'a', new_string: 'b' })
+  await clock.set(2000)
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(workbench().task.status).toBe('complete')
+
+  await clock.set(3000)
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.ts`, old_string: 'b', new_string: 'c' })
+  expect(workbench().task.status).toBe('verifying')
+
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(workbench().changed.hunks?.['src/auth.ts']).toEqual([{ from: 10, to: 11, added: 2, removed: 1 }])
+
+  await ui.press({ key: 'tab-evidence' })
+  expect(await ui.find({ type: 'Text', text: /code changed since, re-run/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /no check since the last edit L10-11/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('files the work keeps returning to are suggested and can be pinned or hidden', async ($, on) => {
+  const workbench = world(on)
+  on('tool.call', ($, e) =>
+    e.tool === 'AskUserQuestion'
+      ? { result: { questions: e.questions, answers: { [e.questions[0]?.question ?? '']: 'Allow' } } }
+      : { result: { stdout: '', stderr: '', interrupted: false } },
+  )
+
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/src/session.ts` })
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/src/session.ts` })
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/src/once.ts` })
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/.env` })
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/tests/session.test.ts`, old_string: 'a', new_string: 'b' })
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  expect(await ui.find({ key: 'pinsug-src/session.ts' })).toBeDefined()
+  expect(await ui.find({ key: 'pinsug-tests/session.test.ts' })).toBeDefined()
+  expect(await ui.find({ key: 'pinsug-src/once.ts' })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /secret · read/ })).toBeDefined()
+  expect(await ui.find({ key: 'pinobs-.env' })).toBe(undefined)
+
+  await ui.press({ key: 'pinsug-src/session.ts' })
+  await ui.press({ key: 'hide-tests/session.test.ts' })
+  expect(workbench().context.pins.map(one => (one.kind === 'file' ? one.path : ''))).toEqual(['src/session.ts'])
+  expect(workbench().context.excluded).toEqual(['tests/session.test.ts'])
+  expect(await ui.find({ key: 'pinsug-tests/session.test.ts' })).toBe(undefined)
+  await ui.unmount()
+})
