@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { EvidenceRecord, Task } from '../types'
+import { parsePinSpec, sliceLines } from '../hooks/context'
 import { completionOf, evidenceKindOf, guessLink, statusOf } from '../hooks/evidence'
 import { serializeContract } from '../hooks/intent'
 
@@ -59,5 +60,15 @@ describe('evidence', () => {
     expect(text).not.toContain('Off for now')
     expect(text).toContain('<condition id="dc-2">Typecheck passes</condition>')
     expect(serializeContract({ ...task, locked: false })).toBe(undefined)
+  })
+})
+
+describe('pins and reports', () => {
+  test('pin specs parse paths and line ranges', async () => {
+    expect(parsePinSpec('src/a.ts')).toEqual({ path: 'src/a.ts' })
+    expect(parsePinSpec('src/a.ts:10-40')).toEqual({ path: 'src/a.ts', lines: { from: 10, to: 40 } })
+    expect(parsePinSpec('src/a.ts#L12')).toEqual({ path: 'src/a.ts', lines: { from: 12, to: 12 } })
+    expect(parsePinSpec('src/a.ts:40-10')).toEqual({ path: 'src/a.ts', lines: { from: 10, to: 40 } })
+    expect(sliceLines('a\nb\nc', { from: 2, to: 3 })).toBe('b\nc')
   })
 })

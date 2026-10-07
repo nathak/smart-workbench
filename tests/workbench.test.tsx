@@ -12,6 +12,7 @@ const PANE = {
 } as const
 
 const COMPOSER = { wait: false, origin: { kind: 'composer' } } as const
+const COMMAND = { origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } } as const
 
 // The world beneath the plugin: a project folder, a store the test can read, a clock.
 function world(on: On, store: Record<string, unknown> = {}, files: Record<string, string> = { 'src/auth.ts': 'export const ttl = 30' }) {
@@ -19,6 +20,11 @@ function world(on: On, store: Record<string, unknown> = {}, files: Record<string
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
     store[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: Object.keys(store) }))
+  on('fs.write', ($, e) => {
+    files[e.path] = e.text
     return { value: undefined }
   })
   on('session.cwd', () => ({ value: CWD }))
@@ -197,4 +203,114 @@ test('ask rules wait for the person: Allow runs the call, Block does not', async
   expect(ran).toEqual(['git push origin main'])
   expect(JSON.stringify(declined)).toContain('declined')
   expect(workbench().execution.recentCalls.map(one => one.outcome)).toEqual(['ok', 'declined'])
+})
+
+test('line-range and snapshot pins carry exactly the text they promise', async ($, on) => {
+  const files: Record<string, string> = { 'src/auth.ts': 'line1\nline2\nline3\nline4', 'src/config.ts': 'ttl = 30' }
+  world(on, {}, files)
+  let context = ''
+  on('prompt.submit', ($, e) => {
+    context = (e.context ?? []).join('\n')
+    return { text: e.text, context: e.context }
+  })
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  await ui.input({ key: 'pin-file', text: 'src/auth.ts:2-3' })
+  await ui.input({ key: 'pin-file', text: 'src/config.ts' })
+
+  await $.prompt.submit({ text: 'go', ...COMPOSER })
+  expect(context).toContain('<file path="src/auth.ts" lines="2-3">\nline2\nline3\n  </file>')
+  expect(context).not.toContain('line4')
+
+  // Freeze config.ts, then change it on disk: the prompt keeps the pinned text.
+  const modeKey = (await ui.findAll({ type: 'Button', text: 'Live' }))[1]?.key ?? ''
+  await ui.press({ key: modeKey })
+  expect(await ui.find({ type: 'Button', text: 'Snap' })).toBeDefined()
+  files['src/config.ts'] = 'ttl = 60'
+
+  await $.prompt.submit({ text: 'go again', ...COMPOSER })
+  expect(context).toContain('ttl = 30')
+  expect(context).not.toContain('ttl = 60')
+  expect(context).toMatch(/snapshot_sha256="[0-9a-f]{12}"/)
+  await ui.unmount()
+})
+
+test('templates save and load the setup without its results; export writes a handoff', async ($, on) => {
+  const files: Record<string, string> = { 'src/auth.ts': 'x' }
+  const store: Record<string, unknown> = {}
+  const workbench = world(on, store, files)
+  on('tool.call', ($, e) =>
+    e.tool === 'AskUserQuestion'
+      ? { result: { questions: e.questions, answers: { [e.questions[0]?.question ?? '']: 'Load template' } } }
+      : { result: { stdout: 'ok', stderr: '', interrupted: false } },
+  )
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  await ui.input({ key: 'goal', text: 'Ship auth fix' })
+  await ui.input({ key: 'add-constraint', text: 's: keep the patch small' })
+  await ui.input({ key: 'add-condition', text: 'Tests pass' })
+  await ui.press({ key: 'tab-context' })
+  await ui.input({ key: 'pin-note', text: 'API unchanged' })
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(workbench().task.status).toBe('complete')
+
+  const saved = await $.command.run({ command: 'swb', args: 'save auth-fix', ...COMMAND })
+  expect(saved.text).toContain('Saved template "auth-fix"')
+
+  await $.command.run({ command: 'swb', args: 'load auth-fix', ...COMMAND })
+  const wb = workbench()
+  expect(wb.task.goal).toBe('Ship auth fix')
+  expect(wb.task.constraints[0]?.priority).toBe('soft')
+  expect(wb.task.doneConditions.map(one => one.link)).toEqual(['test'])
+  expect(wb.evidence).toEqual([])
+  expect(wb.task.status).toBe('active')
+  expect(wb.task.locked).toBe(false)
+
+  const listed = await $.command.run({ command: 'swb', args: 'templates', ...COMMAND })
+  expect(listed.text).toContain('auth-fix')
+
+  const exported = await $.command.run({ command: 'swb', args: 'export', ...COMMAND })
+  expect(exported.text).toContain('.claude/smartworkbench-handoff.md')
+  const handoff = Object.entries(files).find(([name]) => name.endsWith('smartworkbench-handoff.md'))?.[1] ?? ''
+  expect(handoff).toContain('## Goal\n\nShip auth fix')
+  expect(handoff).toContain('[S] keep the patch small')
+  expect(handoff).toContain('Note: API unchanged')
+  await ui.unmount()
+})
+
+test('tool rows keep the engine row and gain a risk or evidence line', async ($, on) => {
+  const workbench = world(on)
+  on('tool.call', () => ({ result: { stdout: 'ok', stderr: '', interrupted: false } }))
+  on('ui.render', { component: 'ToolUse' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>Bash(row)</Text>
+  })
+
+  await $.tool.call({ tool: 'Bash', command: 'git reset --hard' })
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  // The engine mints each call's id; the rows are looked up by it.
+  const [resetId = '', testId = '', lsId = ''] = workbench().execution.recentCalls.map(one => one.id)
+
+  const row = (id: string, command: string) => ({
+    plugin: PLUGIN,
+    surface: 'terminal' as const,
+    component: 'ToolUse' as const,
+    requestId: id,
+    props: { tool_use_id: id, tool: 'Bash', input: { command }, isRunning: false, isErrored: false, isInterrupted: false },
+  })
+  const blocked = await $.ui.mount(row(resetId, 'git reset --hard'))
+  expect(await blocked.find({ type: 'Text', text: 'Bash(row)' })).toBeDefined()
+  expect(await blocked.find({ type: 'Text', text: /WB · HIGH · Blocked/ })).toBeDefined()
+  await blocked.unmount()
+
+  const tested = await $.ui.mount(row(testId, 'npm test'))
+  expect(await tested.find({ type: 'Text', text: /WB · test passed/ })).toBeDefined()
+  await tested.unmount()
+
+  const plain = await $.ui.mount(row(lsId, 'ls'))
+  expect(await plain.find({ type: 'Text', text: /WB ·/ })).toBe(undefined)
+  await plain.unmount()
 })

@@ -1,10 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { ConditionStatus, EvidenceKind, EvidenceRecord, GuardProfile, Live, Tab, ToolCallRecord, Workbench } from '../types'
-import { estimateTokens, injectionOf, type Injection, type PinContent } from './context'
+import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Tab, Template, ToolCallRecord, Workbench } from '../types'
+import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
 import { completionOf, evidenceKindOf, latestOf, markOf, statusOf, turnSummary } from './evidence'
 import * as model from './model'
+import { badgeOf, handoffMarkdown } from './report'
 import { classify, decide, summarize } from './risk'
 
 type $ = EngineInterface
@@ -32,12 +33,20 @@ const HELP = [
   '  /smartworkbench verify     open the Evidence tab',
   '  /smartworkbench status     text summary (works without UI)',
   '  /smartworkbench preview    show the context added to each prompt',
+  '  /smartworkbench save <name>      save the contract, pins and guard as a template',
+  '  /smartworkbench load <name>      start a task from a template',
+  '  /smartworkbench templates        list templates and context sets',
+  '  /smartworkbench export [path]    write a Markdown handoff (default .claude/smartworkbench-handoff.md)',
   "  /smartworkbench clear      reset this project's workbench",
   'Alias: /swb (/workbench is deprecated).',
 ].join('\n')
 
 const wbAtom = atom({ plugin: 'smartworkbench', key: 'wb' } as const, model.emptyWorkbench())
 const liveAtom = atom({ plugin: 'smartworkbench', key: 'live' } as const, model.EMPTY_LIVE)
+const badgesAtom = atom({ plugin: 'smartworkbench', key: 'badges' } as const, {} as Record<string, string>)
+const MAX_BADGES = 200
+const MAX_SNAPSHOT = 64 * 1024
+const HANDOFF_PATH = '.claude/smartworkbench-handoff.md'
 
 // ---- state: $.state for drawing, $.store (per project) to survive restarts
 
@@ -68,7 +77,7 @@ async function injection($: $, wb: Workbench): Promise<Injection> {
   const contents: PinContent[] = []
 
   for (const pin of wb.context.pins) {
-    if (pin.kind === 'note') {
+    if (pin.kind === 'note' || (pin.mode === 'snapshot' && pin.snapshot)) {
       contents.push({ pin })
       continue
     }
@@ -119,6 +128,69 @@ async function askToFinish($: $, wb: Workbench): Promise<void> {
   await $.prompt.submit({
     text: `Finish the SmartWorkbench task. These done conditions are not met yet:\n${unmet.join('\n')}\nFix what is failing and run the checks that prove each one.`,
   })
+}
+
+// Freezes a file pin at its current text; too large a file stays Live.
+async function snapshotPin($: $, pin: ContextPin): Promise<void> {
+  if (pin.kind !== 'file') return
+  const text = await $.fs.read(pin.path).catch(() => undefined)
+
+  if (text === undefined) {
+    $.ui.toast(`SmartWorkbench: cannot read ${pin.path}`)
+    return
+  }
+  if (text.length > MAX_SNAPSHOT) {
+    $.ui.toast(`SmartWorkbench: ${pin.path} is over 64 KB; pin a line range to snapshot it`)
+    return
+  }
+  const snapshot = { text, sha256: await sha256(text), at: await $.clock.now() }
+  await mutate($, wb => model.setPinMode(wb, pin.id, snapshot))
+}
+
+async function pinSize($: $, pin: ContextPin): Promise<number> {
+  if (pin.kind === 'note' || pin.snapshot) {
+    return pinText(pin, undefined)?.length ?? 0
+  }
+  if (pin.lines) {
+    const text = await $.fs.read(pin.path).catch(() => undefined)
+    return text === undefined ? -1 : (pinText(pin, text)?.length ?? 0)
+  }
+
+  return $.fs.stat(pin.path).then(stat => stat.size, () => -1)
+}
+
+async function saveSet($: $, name: string): Promise<void> {
+  const clean = name.trim()
+  const wb = await read($, wbAtom)
+  if (clean === '' || wb.context.pins.length === 0) return
+  await $.store.set(`set:${clean}`, wb.context.pins)
+  $.ui.toast(`SmartWorkbench: saved context set "${clean}" (${wb.context.pins.length} pins)`)
+}
+
+async function loadSet($: $, name: string): Promise<void> {
+  const pins = await $.store.get(`set:${name}`)
+  if (Array.isArray(pins)) {
+    await mutate($, wb => model.applySet(wb, pins as ContextPin[]))
+  }
+}
+
+async function savedNames($: $, prefix: 'set:' | 'tpl:'): Promise<string[]> {
+  return (await $.store.keys()).filter(key => key.startsWith(prefix)).map(key => key.slice(prefix.length))
+}
+
+async function exportHandoff($: $, path: string): Promise<string> {
+  const target = path.trim() || HANDOFF_PATH
+  await $.fs.write(target, handoffMarkdown(await read($, wbAtom), await $.clock.now()))
+
+  return target
+}
+
+// The line a tool row gets under it, from the call's record and any evidence it produced.
+async function badge($: $, call: ToolCallRecord): Promise<void> {
+  const wb = await read($, wbAtom)
+  const text = badgeOf(call, wb.evidence.find(one => one.id === call.id), wb)
+  if (text === undefined) return
+  await update($, badgesAtom, all => Object.fromEntries([...Object.entries(all), [call.id, text]].slice(-MAX_BADGES)))
 }
 
 // ---- commands
@@ -184,8 +256,46 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     return { text: 'SmartWorkbench cleared.' }
   }
 
+  const name = args.trim().slice(word.length).trim()
+
   if (word === 'save') {
-    return { text: 'Templates arrive in a later version; nothing was saved.' }
+    if (name === '') return { text: 'Usage: /smartworkbench save <name>' }
+    const wb = await read($, wbAtom)
+    await $.store.set(`tpl:${name}`, model.toTemplate(wb, name, await $.clock.now()))
+
+    return { text: `Saved template "${name}": goal, ${wb.task.constraints.length} constraints, ${wb.task.doneConditions.length} done conditions, ${wb.context.pins.length} pins, guard ${wb.execution.profile}.` }
+  }
+
+  if (word === 'load') {
+    const template = (await $.store.get(`tpl:${name}`)) as Template | undefined
+    if (name === '' || template === undefined) {
+      const names = await savedNames($, 'tpl:')
+      return { text: `No template "${name}". Templates: ${names.length > 0 ? names.join(', ') : 'none'}` }
+    }
+    const wb = await read($, wbAtom)
+    if (wb.task.goal.trim() !== '') {
+      const answer = await $.ui
+        .ask(`Replace the current task with template "${name}"? Its evidence is cleared.`, ['Load template', 'Keep current'])
+        .catch(() => 'Keep current')
+      if (answer !== 'Load template') return { text: 'Kept the current task.' }
+    }
+    await mutate($, current => model.applyTemplate(current, template))
+    await openPane($, 'intent')
+
+    return { text: `Loaded template "${name}". Review it, then Lock.` }
+  }
+
+  if (word === 'templates') {
+    const templates = await savedNames($, 'tpl:')
+    const sets = await savedNames($, 'set:')
+
+    return { text: `Templates: ${templates.length > 0 ? templates.join(', ') : 'none'}\nContext sets: ${sets.length > 0 ? sets.join(', ') : 'none'}` }
+  }
+
+  if (word === 'export') {
+    const target = await exportHandoff($, name)
+
+    return { text: `Handoff written to ${target}.` }
   }
 
   return { text: HELP }
@@ -287,12 +397,14 @@ function intentTab($: $, { els, wb, width }: View): RenderElement {
 }
 
 async function contextTab($: $, { els, wb, live, width, room }: View): Promise<RenderElement> {
-  const { Box, Text, Button, Input, Markdown } = els
+  const { Box, Text, Button, Input, Markdown, Select } = els
   const added = await injection($, wb)
+  const sets = await savedNames($, 'set:')
   const sizes = new Map<string, number>()
 
+  // Sized from what the prompt carries: a note, a snapshot or a range, else the file on disk.
   for (const pin of wb.context.pins) {
-    sizes.set(pin.id, pin.kind === 'file' ? await $.fs.stat(pin.path).then(stat => stat.size, () => -1) : pin.text.length)
+    sizes.set(pin.id, await pinSize($, pin))
   }
 
   const usage =
@@ -315,13 +427,22 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
         return (
           <Box key={`pin-${pin.id}`} gap={1}>
             <Text color={size < 0 ? 'error' : undefined}>{size < 0 ? '⚠' : '●'}</Text>
-            <Text wrap="truncate-end">{model.cut(pin.kind === 'file' ? pin.path : `Note: ${pin.text}`, width - 16)}</Text>
+            <Text wrap="truncate-end">{model.cut(pin.kind === 'file' ? `${pin.path}${rangeLabel(pin.lines)}` : `Note: ${pin.text}`, width - 24)}</Text>
             <Text dimColor>{size < 0 ? 'missing' : estimateTokens(size)}</Text>
+            {pin.kind === 'file' && (
+              <Button
+                key={`mode-${pin.id}`}
+                plain
+                dimColor={pin.mode === 'live'}
+                label={pin.mode === 'snapshot' ? 'Snap' : 'Live'}
+                onPress={() => void (pin.mode === 'snapshot' ? mutate($, wb => model.setPinMode(wb, pin.id, undefined)) : snapshotPin($, pin))}
+              />
+            )}
             <Button key={`unpin-${pin.id}`} plain dimColor label="×" onPress={() => void mutate($, wb => model.unpin(wb, pin.id))} />
           </Box>
         )
       })}
-      <Input key="pin-file" placeholder="+ file path to pin (Live)" value="" submitLabel="pin" onSubmit={value => void mutate($, wb => model.pinFile(wb, value))} />
+      <Input key="pin-file" placeholder="+ file to pin (path or path:10-40)" value="" submitLabel="pin" onSubmit={value => void mutate($, wb => model.pinFile(wb, value))} />
       <Input key="pin-note" placeholder="+ note to pin" value="" submitLabel="pin" onSubmit={value => void mutate($, wb => model.pinNote(wb, value))} />
       <Text bold>OBSERVED</Text>
       {observed.length === 0 && <Text dimColor>nothing yet</Text>}
@@ -333,6 +454,10 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
           <Button key={`pinobs-${one.path}`} plain label="Pin" onPress={() => void mutate($, wb => model.pinFile(wb, one.path))} />
         </Box>
       ))}
+      <Input key="save-set" placeholder="save pins as a context set: name" value="" submitLabel="save" onSubmit={value => void saveSet($, value)} />
+      {sets.length > 0 && (
+        <Select key="load-set" label="Add set" value="" options={[{ value: '', label: '—' }, ...sets.map(value => ({ value }))]} onSelect={value => void (value !== '' && loadSet($, value))} />
+      )}
       <Button
         key="preview"
         hotkey="p"
@@ -479,7 +604,15 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
           {model.cut(path, width - 2)}
         </Text>
       ))}
-      {hasUnmet && <Button key="finish" variant="primary" hotkey="f" label="Ask Claude to finish" onPress={() => void askToFinish($, wb)} />}
+      <Box gap={1}>
+        {hasUnmet && <Button key="finish" variant="primary" hotkey="f" label="Ask Claude to finish" onPress={() => void askToFinish($, wb)} />}
+        <Button
+          key="export"
+          hotkey="x"
+          label="Export handoff"
+          onPress={() => void exportHandoff($, '').then(target => $.ui.toast(`SmartWorkbench: handoff written to ${target}`))}
+        />
+      </Box>
     </Box>
   )
 }
@@ -518,7 +651,7 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const argumentHint = '[new|context|run|verify|status|preview|clear]'
+    const argumentHint = '[new|context|run|verify|status|preview|save|load|templates|export|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
@@ -569,6 +702,7 @@ export const register: Register = on => {
 
     if (policy === 'block') {
       await mutate($, current => model.recordCall(current, { ...call, outcome: 'blocked', durationMs: 0 }))
+      await badge($, { ...call, outcome: 'blocked' })
 
       return {
         deny: `SmartWorkbench blocked this ${e.tool} call: ${verdict.reason}. The user's guard policy forbids it; do not retry it another way. Ask the user if it is really needed.`,
@@ -583,6 +717,7 @@ export const register: Register = on => {
       if (answer !== 'Allow') {
         const durationMs = (await $.clock.now()) - startedAt
         await mutate($, current => model.recordCall(current, { ...call, outcome: 'declined', durationMs }))
+        await badge($, { ...call, outcome: 'declined' })
 
         return { deny: `The user declined this ${e.tool} call in SmartWorkbench (${verdict.reason}).` }
       }
@@ -610,6 +745,7 @@ export const register: Register = on => {
 
       return path && isOk ? model.observe(updated, e.tool, path) : updated
     })
+    await badge($, { ...call, outcome })
 
     return ran
   }).catch(($, e, next) => {
@@ -667,6 +803,29 @@ export const register: Register = on => {
 
     return pane($, $.ui.resolve(e), Math.max(24, e.props.bodyColumns ?? 48), e.viewport?.rows ?? 30)
   })
+
+  // Keeps the engine's own tool row and adds one line of risk, policy and evidence under it.
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    const row = await next(e)
+    const text = (await read($, badgesAtom))[e.props.tool_use_id]
+
+    if (text === undefined) {
+      return row
+    }
+
+    const { Box, Text } = $.ui.resolve(e)
+    const color = /Blocked|Declined|failed/.test(text) ? 'error' : /passed/.test(text) ? 'success' : 'warning'
+
+    return (
+      <Box flexDirection="column">
+        {row}
+        <Text color={color} dimColor wrap="truncate-end">
+          {'  '}
+          {text}
+        </Text>
+      </Box>
+    )
+  }).catch(($, e, next) => next(e))
 
   // Composes with whatever else draws the band: ours goes under it, never over it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

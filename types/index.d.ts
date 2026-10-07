@@ -24,9 +24,25 @@ export type DoneCondition = {
   manual?: ManualMark
 }
 
+export type LineRange = { from: number; to: number }
+
+export type Snapshot = { text: string; sha256: string; at: number }
+
 export type ContextPin =
-  | { id: string; kind: 'file'; path: string; mode: 'live' }
+  | { id: string; kind: 'file'; path: string; mode: 'live' | 'snapshot'; lines?: LineRange; snapshot?: Snapshot }
   | { id: string; kind: 'note'; text: string }
+
+// A reusable task setup: the contract without its results, plus pins and guard profile.
+export type Template = {
+  name: string
+  savedAt: number
+  goal: string
+  constraints: Constraint[]
+  nonGoals: string[]
+  doneConditions: { text: string; link?: EvidenceKind }[]
+  pins: ContextPin[]
+  profile: GuardProfile
+}
 
 export type Observed = { path: string; how: 'read' | 'edited' }
 
@@ -92,6 +108,6 @@ export type Live = {
 
 declare module 'claude-code' {
   interface PluginState {
-    smartworkbench: { wb: Workbench; live: Live }
+    smartworkbench: { wb: Workbench; live: Live; badges: Record<string, string> }
   }
 }
