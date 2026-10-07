@@ -1,0 +1,9 @@
+{
+  "name": "smartworkbench",
+  "version": "0.1.0",
+  "description": "SmartWorkbench for Claude Code: set the task contract, pin context, guard tool calls and verify the result",
+  "author": {
+    "name": "nathak"
+  },
+  "types": "./types/index.d.ts"
+}
