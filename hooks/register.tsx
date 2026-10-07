@@ -3,8 +3,11 @@ import type { Elements, EngineInterface, Register, RenderElement } from 'claude-
 
 import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Tab, Template, ToolCallRecord, Workbench } from '../types'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
-import { completionOf, evidenceKindOf, latestOf, markOf, statusOf, turnSummary } from './evidence'
+import { coverageOf, hunkLabel, lastCheckedEdit, parseDiff, type Coverage } from './diff'
+import { completionOf, evidenceKindOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
+import { categoryOf, suggestionsOf } from './files'
 import * as model from './model'
+import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy } from './policy'
 import { badgeOf, handoffMarkdown } from './report'
 import { classify, decide, summarize } from './risk'
 
@@ -37,6 +40,7 @@ const HELP = [
   '  /smartworkbench load <name>      start a task from a template',
   '  /smartworkbench templates        list templates and context sets',
   '  /smartworkbench export [path]    write a Markdown handoff (default .claude/smartworkbench-handoff.md)',
+  '  /smartworkbench policy [init|reload]  show, create or re-read the project guard file (.claude/smartworkbench.json)',
   "  /smartworkbench clear      reset this project's workbench",
   'Alias: /swb (/workbench is deprecated).',
 ].join('\n')
@@ -121,7 +125,7 @@ async function waive($: $, id: string, text: string): Promise<void> {
 
 async function askToFinish($: $, wb: Workbench): Promise<void> {
   const unmet = wb.task.doneConditions
-    .map(one => ({ one, status: statusOf(one, wb.evidence) }))
+    .map(one => ({ one, status: statusOf(one, wb.evidence, lastCheckedEdit(wb.changed)) }))
     .filter(({ status }) => status !== 'verified' && status !== 'waived')
     .map(({ one, status }) => `- [${status}] ${one.id}: ${one.text}${one.link ? ` (needs a passing ${one.link} run)` : ''}`)
 
@@ -193,6 +197,39 @@ async function badge($: $, call: ToolCallRecord): Promise<void> {
   await update($, badgesAtom, all => Object.fromEntries([...Object.entries(all), [call.id, text]].slice(-MAX_BADGES)))
 }
 
+// Re-reads the checked-in guard file; no file means the person's own profile and the built-in rules.
+async function loadPolicy($: $): Promise<void> {
+  const text = await $.fs.read(POLICY_PATH).catch(() => undefined)
+  const policy = text === undefined ? undefined : parsePolicy(text)
+  await setLive($, ({ policy: _old, ...live }) => (policy ? { ...live, policy } : live))
+
+  if (policy && policy.errors.length > 0) {
+    $.ui.toast(`SmartWorkbench: ${POLICY_PATH}: ${policy.errors[0]}${policy.errors.length > 1 ? ` (+${policy.errors.length - 1} more)` : ''}`)
+  }
+}
+
+function profileOf(wb: Workbench, live: Live): GuardProfile {
+  return live.policy?.profile ?? wb.execution.profile
+}
+
+function policyText(live: Live): string {
+  const policy = live.policy
+  if (!policy) {
+    return `No project guard file. /smartworkbench policy init writes a starter ${POLICY_PATH}.`
+  }
+  const rules = policy.rules.map(
+    (one, i) =>
+      `  ${i + 1}. ${one.policy.toUpperCase()} ${[one.tool && `tool=${one.tool}`, one.command && `command=/${one.command}/`, one.path && `path=${one.path}`].filter(Boolean).join(' ')}${one.reason ? ` — ${one.reason}` : ''}`,
+  )
+
+  return [
+    `${policy.source}: profile ${policy.profile ?? '(not set)'}, ${policy.rules.length} rules`,
+    ...rules,
+    ...policy.errors.map(one => `  ⚠ ${one}`),
+    'Project rules can tighten the built-in guard, never loosen a block or a secrets check.',
+  ].join('\n')
+}
+
 // ---- commands
 
 function statusText(wb: Workbench, live: Live): string {
@@ -204,7 +241,8 @@ function statusText(wb: Workbench, live: Live): string {
     `Goal: ${wb.task.goal || '—'} (${wb.task.locked ? 'locked' : 'unlocked'}, ${wb.task.status})`,
     ...(constraints.length > 0 ? ['Constraints:', ...constraints] : []),
     ...(pins.length > 0 ? ['Pins:', ...pins] : []),
-    ...(wb.task.doneConditions.length > 0 ? [turnSummary(wb.task, wb.evidence)] : []),
+    ...(live.policy ? [`Guard file: ${live.policy.source} (${live.policy.rules.length} rules${live.policy.profile ? `, profile ${live.policy.profile}` : ''})`] : []),
+    ...(wb.task.doneConditions.length > 0 ? [turnSummary(wb.task, wb.evidence, lastCheckedEdit(wb.changed))] : []),
   ].join('\n')
 }
 
@@ -292,6 +330,21 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     return { text: `Templates: ${templates.length > 0 ? templates.join(', ') : 'none'}\nContext sets: ${sets.length > 0 ? sets.join(', ') : 'none'}` }
   }
 
+  if (word === 'policy') {
+    if (name === 'init') {
+      if (await $.fs.exists(POLICY_PATH)) {
+        return { text: `${POLICY_PATH} already exists.\n${policyText(await read($, liveAtom))}` }
+      }
+      await $.fs.write(POLICY_PATH, POLICY_TEMPLATE)
+      await loadPolicy($)
+
+      return { text: `Wrote ${POLICY_PATH} with example rules; edit it and commit it so the team shares it.\n${policyText(await read($, liveAtom))}` }
+    }
+    await loadPolicy($)
+
+    return { text: policyText(await read($, liveAtom)) }
+  }
+
   if (word === 'export') {
     const target = await exportHandoff($, name)
 
@@ -370,7 +423,7 @@ function intentTab($: $, { els, wb, width }: View): RenderElement {
       <Text bold>Done conditions</Text>
       {task.doneConditions.length === 0 && <Text dimColor>none</Text>}
       {task.doneConditions.map(one => {
-        const status = statusOf(one, wb.evidence)
+        const status = statusOf(one, wb.evidence, lastCheckedEdit(wb.changed))
 
         return (
           <Box key={`d-${one.id}`} gap={1}>
@@ -411,8 +464,13 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
     live.contextTokens !== undefined
       ? `${Math.round(live.contextTokens / 1000)}K / ${Math.round((live.contextWindow ?? 0) / 1000)}K`
       : 'usage after the first turn'
-  const pinned = new Set(wb.context.pins.flatMap(one => (one.kind === 'file' ? [one.path] : [])))
-  const observed = wb.context.observed.filter(one => !pinned.has(one.path)).slice(-Math.max(3, room - wb.context.pins.length - 10))
+  const excluded = wb.context.excluded ?? []
+  const suggested = suggestionsOf(wb.context.observed, wb.context.pins, excluded)
+  const shown = new Set([...suggested.map(one => one.path), ...wb.context.pins.flatMap(one => (one.kind === 'file' && !one.lines ? [one.path] : []))])
+  const observed = wb.context.observed
+    .filter(one => !shown.has(one.path))
+    .slice(-Math.max(3, room - wb.context.pins.length - suggested.length - 12))
+    .reverse()
 
   return (
     <Box flexDirection="column">
@@ -444,16 +502,40 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
       })}
       <Input key="pin-file" placeholder="+ file to pin (path or path:10-40)" value="" submitLabel="pin" onSubmit={value => void mutate($, wb => model.pinFile(wb, value))} />
       <Input key="pin-note" placeholder="+ note to pin" value="" submitLabel="pin" onSubmit={value => void mutate($, wb => model.pinNote(wb, value))} />
-      <Text bold>OBSERVED</Text>
-      {observed.length === 0 && <Text dimColor>nothing yet</Text>}
-      {observed.map(one => (
-        <Box key={`obs-${one.path}`} gap={1}>
-          <Text dimColor>○</Text>
-          <Text wrap="truncate-end">{model.cut(one.path, width - 18)}</Text>
-          <Text dimColor>{one.how}</Text>
-          <Button key={`pinobs-${one.path}`} plain label="Pin" onPress={() => void mutate($, wb => model.pinFile(wb, one.path))} />
+      {suggested.length > 0 && <Text bold>SUGGESTED</Text>}
+      {suggested.map(one => (
+        <Box key={`sug-${one.path}`} gap={1}>
+          <Text color="suggestion">◇</Text>
+          <Text wrap="truncate-end">{model.cut(one.path, width - 30)}</Text>
+          <Text dimColor>
+            {categoryOf(one.path)} · {one.how === 'edited' ? 'edited' : `read ×${one.count ?? 1}`}
+          </Text>
+          <Button key={`pinsug-${one.path}`} plain label="Pin" onPress={() => void mutate($, wb => model.pinFile(wb, one.path))} />
+          <Button key={`hide-${one.path}`} plain dimColor label="Hide" onPress={() => void mutate($, wb => model.toggleExcluded(wb, one.path))} />
         </Box>
       ))}
+      <Text bold>OBSERVED</Text>
+      {observed.length === 0 && <Text dimColor>nothing yet</Text>}
+      {observed.map(one => {
+        const category = categoryOf(one.path)
+        const isHidden = excluded.includes(one.path)
+
+        return (
+          <Box key={`obs-${one.path}`} gap={1}>
+            <Text dimColor>○</Text>
+            <Text wrap="truncate-end" dimColor={isHidden}>
+              {model.cut(one.path, width - 30)}
+            </Text>
+            <Text color={category === 'secret' ? 'warning' : undefined} dimColor={category !== 'secret'}>
+              {category} · {one.how}
+            </Text>
+            {category !== 'secret' && category !== 'generated' && (
+              <Button key={`pinobs-${one.path}`} plain label="Pin" onPress={() => void mutate($, wb => model.pinFile(wb, one.path))} />
+            )}
+            {isHidden && <Button key={`unhide-${one.path}`} plain dimColor label="Unhide" onPress={() => void mutate($, wb => model.toggleExcluded(wb, one.path))} />}
+          </Box>
+        )
+      })}
       <Input key="save-set" placeholder="save pins as a context set: name" value="" submitLabel="save" onSubmit={value => void saveSet($, value)} />
       {sets.length > 0 && (
         <Select key="load-set" label="Add set" value="" options={[{ value: '', label: '—' }, ...sets.map(value => ({ value }))]} onSelect={value => void (value !== '' && loadSet($, value))} />
@@ -478,7 +560,7 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
   )
 }
 
-function runTab($: $, { els, wb, width, room }: View): RenderElement {
+function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
   const { Box, Text, Button, Select } = els
   const calls = wb.execution.recentCalls
   const running = calls.filter(one => one.outcome === 'running')
@@ -489,17 +571,30 @@ function runTab($: $, { els, wb, width, room }: View): RenderElement {
 
   return (
     <Box flexDirection="column">
-      <Select
-        key="profile"
-        label="Guard profile"
-        value={wb.execution.profile}
-        options={[
-          { value: 'permissive', label: 'Permissive' },
-          { value: 'balanced', label: 'Balanced' },
-          { value: 'strict', label: 'Strict' },
-        ]}
-        onSelect={value => void mutate($, wb => model.setProfile(wb, value as GuardProfile))}
-      />
+      {live.policy?.profile ? (
+        <Text>
+          Guard profile: <Text bold>{live.policy.profile}</Text> <Text dimColor>(set by {POLICY_PATH})</Text>
+        </Text>
+      ) : (
+        <Select
+          key="profile"
+          label="Guard profile"
+          value={wb.execution.profile}
+          options={[
+            { value: 'permissive', label: 'Permissive' },
+            { value: 'balanced', label: 'Balanced' },
+            { value: 'strict', label: 'Strict' },
+          ]}
+          onSelect={value => void mutate($, wb => model.setProfile(wb, value as GuardProfile))}
+        />
+      )}
+      {live.policy ? (
+        <Text dimColor={live.policy.errors.length === 0} color={live.policy.errors.length > 0 ? 'warning' : undefined} wrap="truncate-end">
+          {POLICY_PATH}: {live.policy.rules.length} rules{live.policy.errors.length > 0 ? ` · ⚠ ${live.policy.errors[0]}` : ''}
+        </Text>
+      ) : (
+        <Text dimColor>No project guard file · /swb policy init</Text>
+      )}
       <Text bold>RUNNING</Text>
       {running.length === 0 && <Text dimColor>idle</Text>}
       {running.map(one => (
@@ -544,8 +639,10 @@ function runTab($: $, { els, wb, width, room }: View): RenderElement {
 
 function evidenceTab($: $, { els, wb, width }: View): RenderElement {
   const { Box, Text, Button, Select } = els
-  const { met, total, isComplete } = completionOf(wb.task, wb.evidence)
+  const lastEdit = lastCheckedEdit(wb.changed)
+  const { met, total, isComplete } = completionOf(wb.task, wb.evidence, lastEdit)
   const hasUnmet = met < total
+  const coverage = coverageOf(wb.changed, wb.evidence)
 
   return (
     <Box flexDirection="column">
@@ -554,12 +651,12 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
       </Text>
       {total === 0 && <Text dimColor>Add done conditions in the Intent tab.</Text>}
       {wb.task.doneConditions.map(one => {
-        const status = statusOf(one, wb.evidence)
+        const status = statusOf(one, wb.evidence, lastEdit)
         const latest = one.link ? latestOf(wb.evidence, one.link) : undefined
         const detail = one.manual
           ? `manual ${one.manual.status}: ${one.manual.note}`
           : latest
-            ? `${latest.ok === null ? 'ran' : latest.ok ? 'passed' : 'failed'} · ${latest.command}`
+            ? `${latest.ok === null ? 'ran' : latest.ok ? 'passed' : 'failed'} · ${latest.command}${isStale(latest, lastEdit) ? ' · code changed since, re-run' : ''}`
             : one.link
               ? `waiting for a ${one.link} run`
               : 'link evidence or verify by hand'
@@ -598,12 +695,23 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
         Changed: {wb.changed.files.length} files
         {wb.changed.added + wb.changed.removed > 0 ? ` · +${wb.changed.added} −${wb.changed.removed}` : ''}
       </Text>
-      {wb.changed.files.slice(-5).map(path => (
-        <Text key={`chg-${path}`} dimColor wrap="truncate-start">
-          {'  '}
-          {model.cut(path, width - 2)}
-        </Text>
-      ))}
+      {coverage.slice(-8).map(one => {
+        const { mark, color, note } = coverageMark(one)
+        const ranges = one.hunks.length > 0 ? ` ${hunkLabel(one.hunks)}` : ''
+
+        return (
+          <Box key={`chg-${one.path}`} flexDirection="column">
+            <Box gap={1}>
+              <Text color={color}>{mark}</Text>
+              <Text wrap="truncate-start">{model.cut(one.path, width - 4)}</Text>
+            </Box>
+            <Text dimColor wrap="truncate-end">
+              {'    '}
+              {model.cut(`${note}${ranges}`, width - 4)}
+            </Text>
+          </Box>
+        )
+      })}
       <Box gap={1}>
         {hasUnmet && <Button key="finish" variant="primary" hotkey="f" label="Ask Claude to finish" onPress={() => void askToFinish($, wb)} />}
         <Button
@@ -615,6 +723,25 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
       </Box>
     </Box>
   )
+}
+
+function coverageMark(one: Coverage): { mark: string; color?: string; note: string } {
+  const added = one.hunks.reduce((sum, hunk) => sum + hunk.added, 0)
+  const removed = one.hunks.reduce((sum, hunk) => sum + hunk.removed, 0)
+  const size = one.hunks.length > 0 ? `+${added} −${removed} ·` : ''
+
+  switch (one.state) {
+    case 'proven':
+      return { mark: '✓', color: 'success', note: `${size} ${one.provenBy?.kind} passed after the last edit`.trim() }
+    case 'failing':
+      return { mark: '✕', color: 'error', note: `${size} ${one.failedBy?.kind} failed after the last edit`.trim() }
+    case 'unproven':
+      return { mark: '!', color: 'warning', note: `${size} no check since the last edit`.trim() }
+    case 'docs':
+      return { mark: '·', note: `${size} docs/generated, no check needed`.trim() }
+    case 'untracked':
+      return { mark: '?', note: `${size} changed outside the tools`.trim() }
+  }
 }
 
 async function pane($: $, els: Els, width: number, rows: number): Promise<RenderElement> {
@@ -651,12 +778,13 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const argumentHint = '[new|context|run|verify|status|preview|save|load|templates|export|clear]'
+    const argumentHint = '[new|context|run|verify|status|preview|save|load|templates|export|policy|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
     await $.command.register({ name: 'workbench', description: 'Deprecated alias of /smartworkbench', argumentHint })
     await load($)
+    await loadPolicy($)
 
     if (e.surface === null || e.surface === 'vscode') {
       $.ui.log('SmartWorkbench: no panel on this surface; the contract and guard still apply. Use /smartworkbench status.')
@@ -683,9 +811,11 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
-    const verdict = classify(e.tool, e)
     const wb = await read($, wbAtom)
-    const policy = decide(verdict, wb.execution.profile, wb.execution.isPaused)
+    const live = await read($, liveAtom)
+    const cwd = await $.session.cwd()
+    const verdict = applyRule(classify(e.tool, e), live.policy ? matchRule(live.policy.rules, e.tool, e, cwd) : undefined)
+    const policy = decide(verdict, profileOf(wb, live), wb.execution.isPaused)
     const startedAt = await $.clock.now()
     const call: ToolCallRecord = {
       id: e.tool_use_id ?? `call-${startedAt}`,
@@ -729,7 +859,6 @@ export const register: Register = on => {
     const isOk = ran.deny === undefined && ran.isError !== true
     const outcome = ran.deny !== undefined ? 'blocked' : isOk ? 'ok' : 'error'
     const kind = e.tool === 'Bash' ? evidenceKindOf(e.command) : undefined
-    const cwd = await $.session.cwd()
     const rawPath = 'file_path' in e && typeof e.file_path === 'string' ? e.file_path : undefined
     const path = rawPath?.startsWith(`${cwd}/`) ? rawPath.slice(cwd.length + 1) : rawPath
 
@@ -743,8 +872,12 @@ export const register: Register = on => {
         updated = model.addEvidence(updated, record)
       }
 
-      return path && isOk ? model.observe(updated, e.tool, path) : updated
+      return path && isOk ? model.observe(updated, e.tool, path, endedAt) : updated
     })
+
+    if (isOk && path === POLICY_PATH && model.isEditTool(e.tool)) {
+      await loadPolicy($)
+    }
     await badge($, { ...call, outcome })
 
     return ran
@@ -768,24 +901,17 @@ export const register: Register = on => {
     }
 
     await refreshUsage($).catch(() => undefined)
-    const wb = await read($, wbAtom)
 
-    if (wb.changed.files.length > 0) {
-      const diff = await $.process.run(['git', 'diff', '--numstat', 'HEAD']).catch(() => undefined)
-      if (diff?.exitCode === 0) {
-        const totals = diff.stdout.split('\n').reduce(
-          (sum, line) => {
-            const [added, removed] = line.split('\t')
-            return { added: sum.added + (Number(added) || 0), removed: sum.removed + (Number(removed) || 0) }
-          },
-          { added: 0, removed: 0 },
-        )
-        await mutate($, current => ({ ...current, changed: { ...current.changed, ...totals } }))
-      }
+    // Changed regions against HEAD, so the Evidence tab can say which ones a check has seen.
+    const diff = await $.process.run(['git', 'diff', '-U0', '--no-color', '--no-ext-diff', 'HEAD']).catch(() => undefined)
+    if (diff?.exitCode === 0) {
+      const parsed = parseDiff(diff.stdout)
+      await mutate($, current => model.applyDiff(current, parsed))
     }
 
+    const wb = await read($, wbAtom)
     if (wb.task.goal.trim() !== '' && wb.task.doneConditions.length > 0 && !e.isAborted) {
-      const summary = turnSummary(wb.task, wb.evidence)
+      const summary = turnSummary(wb.task, wb.evidence, lastCheckedEdit(wb.changed))
       await setLive($, live => ({ ...live, lastSummary: summary }))
       $.ui.log(`${summary}\n/smartworkbench verify → Evidence tab (Verify · Waive · Ask Claude to finish)`)
     }
@@ -838,7 +964,7 @@ export const register: Register = on => {
 
     const live = await read($, liveAtom)
     const { Box, Text, Button } = $.ui.resolve(e)
-    const { isComplete } = completionOf(wb.task, wb.evidence)
+    const { isComplete } = completionOf(wb.task, wb.evidence, lastCheckedEdit(wb.changed))
 
     return (
       <Box flexDirection="column">

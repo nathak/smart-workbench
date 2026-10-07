@@ -33,6 +33,13 @@ const BASH_RULES: readonly Rule[] = [
     reason: 'recursive delete',
   },
   {
+    category: 'guard-policy',
+    risk: 'medium',
+    policy: 'ask',
+    pattern: /\.claude\/smartworkbench\.json[^;&|]*(>|\|\s*tee\b)|(\btee\b|\bsed\s+-i\b|\brm\b|\bmv\b|\bcp\b|>)[^;&|]*\.claude\/smartworkbench\.json/,
+    reason: 'changes the project guard policy',
+  },
+  {
     category: 'secret-output',
     risk: 'medium',
     policy: 'ask',
@@ -51,6 +58,7 @@ const BASH_RULES: readonly Rule[] = [
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'WebSearch', 'WebFetch', 'ToolSearch', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'])
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 const SECRET_PATH = /(^|\/)(\.env(\.[^/]*)?|\.npmrc|\.netrc|credentials(\.json)?|id_rsa[^/]*|[^/]*\.pem)$/
+const GUARD_FILE = /(^|\/)\.claude\/smartworkbench\.json$/
 const SEND_TOOL = /(^|_)(send|post|publish|deploy|create_pr|create_pull_request|share|comment|reply|message)/i
 
 const LOW: Omit<Verdict, 'category'> = { risk: 'low', policy: 'allow', reason: '' }
@@ -69,6 +77,10 @@ export function classify(tool: string, input: unknown): Verdict {
 
   if (EDIT_TOOLS.has(tool)) {
     const path = String(args.file_path ?? args.notebook_path ?? '')
+
+    if (GUARD_FILE.test(path)) {
+      return { category: 'guard-policy', risk: 'medium', policy: 'ask', reason: 'changes the project guard policy' }
+    }
 
     return SECRET_PATH.test(path)
       ? { category: 'secret-file', risk: 'medium', policy: 'ask', reason: 'edits a secrets file' }
@@ -90,6 +102,9 @@ export function classify(tool: string, input: unknown): Verdict {
   return { category: 'other', ...LOW }
 }
 
+// Asked even under the permissive profile.
+const ALWAYS_ASK = new Set(['secret-output', 'secret-file', 'guard-policy'])
+
 // Applies the profile and the pause switch on top of the default (balanced) rule set.
 export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolean): Policy {
   if (verdict.policy === 'block') {
@@ -104,7 +119,7 @@ export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolea
     return 'ask'
   }
 
-  if (profile === 'permissive' && verdict.policy === 'ask' && verdict.category !== 'secret-output') {
+  if (profile === 'permissive' && verdict.policy === 'ask' && !ALWAYS_ASK.has(verdict.category)) {
     return 'allow'
   }
 

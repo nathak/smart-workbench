@@ -44,8 +44,13 @@ export function latestOf(evidence: readonly EvidenceRecord[], kind: EvidenceKind
   return undefined
 }
 
+// A pass that ran before the latest code edit no longer proves anything: it is only observed.
+export function isStale(record: EvidenceRecord | undefined, lastEditAt: number | undefined): boolean {
+  return record?.ok === true && lastEditAt !== undefined && record.at < lastEditAt
+}
+
 // Never derived from the model's words: only recorded results or the person's own mark.
-export function statusOf(condition: DoneCondition, evidence: readonly EvidenceRecord[]): ConditionStatus {
+export function statusOf(condition: DoneCondition, evidence: readonly EvidenceRecord[], lastEditAt?: number): ConditionStatus {
   if (condition.manual) {
     return condition.manual.status
   }
@@ -57,15 +62,15 @@ export function statusOf(condition: DoneCondition, evidence: readonly EvidenceRe
   const latest = latestOf(evidence, condition.link)
 
   if (!latest) return 'pending'
-  if (latest.ok === null) return 'observed'
+  if (latest.ok === null || isStale(latest, lastEditAt)) return 'observed'
 
   return latest.ok ? 'verified' : 'failed'
 }
 
 export type Completion = { met: number; total: number; isComplete: boolean }
 
-export function completionOf(task: Task, evidence: readonly EvidenceRecord[]): Completion {
-  const statuses = task.doneConditions.map(one => statusOf(one, evidence))
+export function completionOf(task: Task, evidence: readonly EvidenceRecord[], lastEditAt?: number): Completion {
+  const statuses = task.doneConditions.map(one => statusOf(one, evidence, lastEditAt))
   const total = statuses.length
   const met = statuses.filter(one => one === 'verified' || one === 'waived').length
 
@@ -84,12 +89,13 @@ export function markOf(status: ConditionStatus): string {
   return MARK[status]
 }
 
-export function turnSummary(task: Task, evidence: readonly EvidenceRecord[]): string {
-  const { isComplete } = completionOf(task, evidence)
+export function turnSummary(task: Task, evidence: readonly EvidenceRecord[], lastEditAt?: number): string {
+  const { isComplete } = completionOf(task, evidence, lastEditAt)
   const lines = task.doneConditions.map(one => {
-    const status = statusOf(one, evidence)
+    const status = statusOf(one, evidence, lastEditAt)
     const latest = one.link ? latestOf(evidence, one.link) : undefined
-    const detail = one.manual ? ` (manual: ${one.manual.note})` : latest ? ` · ${latest.command.slice(0, 50)}` : ''
+    const stale = !one.manual && isStale(latest, lastEditAt) ? ' (code changed since; re-run)' : ''
+    const detail = one.manual ? ` (manual: ${one.manual.note})` : latest ? ` · ${latest.command.slice(0, 50)}${stale}` : ''
 
     return `${markOf(status)} ${one.text}${detail}`
   })
