@@ -3,6 +3,16 @@
 Claude에게 맡긴 작업의 **목표(Intent)·맥락(Context)·실행(Run)·검증(Evidence)** 을 Claude Code 안에서 직접 보고 통제하는 Mod입니다.
 기획서: NAS `claude-mods/smart-workbench/smartworkbench-prd.md` (v0.1). P0(최초 공개 버전) 전체와 P1 일부를 구현했습니다.
 
+## 설치
+
+Claude Code 입력창에서:
+
+```
+/plugin install smartworkbench --marketplace nathak/smart-workbench
+```
+
+마켓플레이스 추가를 물으면 `y`, 설치 범위는 user를 고릅니다. 비공개 저장소이므로 그 컴퓨터의 git이 GitHub에 로그인되어 있어야 합니다(`gh auth login` 등). 업데이트는 `claude plugin update smartworkbench`.
+
 ## 사용법
 
 | 명령 | 동작 |
