@@ -1,9 +1,141 @@
 # SmartWorkbench for Claude Code
 
+[English](#english) · [한국어](#한국어)
+
+---
+
+## English
+
+A Claude Code mod for seeing and steering the **Intent, Context, Run and Evidence** of the work you hand to Claude, without leaving Claude Code.
+Implements P0 (first public release) and P1 (product hardening) of the product spec (v0.1).
+
+### Install
+
+At the Claude Code prompt:
+
+```
+/plugin install smartworkbench --marketplace nathak/smart-workbench
+```
+
+Answer `y` to add the marketplace and choose the user scope. The repository is private, so git on that machine must be signed in to GitHub (`gh auth login` or similar). Update with `claude plugin update smartworkbench`.
+
+### Usage
+
+| Command | What it does |
+|---|---|
+| `/smartworkbench` (`/swb`) | Open the panel |
+| `/smartworkbench new` | Start a new task contract (asks first if one exists) |
+| `/smartworkbench context` · `run` · `verify` | Open that tab |
+| `/smartworkbench status` | Text summary (fallback where no UI is drawn) |
+| `/smartworkbench preview` | Show exactly what is added to each prompt |
+| `/smartworkbench save <name>` | Save the contract, pins and guard profile as a template |
+| `/smartworkbench load <name>` | Start a task from a template (no evidence, unlocked) |
+| `/smartworkbench templates` | List templates and context sets |
+| `/smartworkbench export [path]` | Write a Markdown handoff (default `.claude/smartworkbench-handoff.md`) |
+| `/smartworkbench policy [init\|reload]` | Show, create or re-read the project guard file |
+| `/smartworkbench clear` | Reset this project's state (asks first) |
+
+`/workbench` is kept for a while as a deprecated alias.
+
+- **Intent**: goal, constraints (`[H]`/`[S]`, on/off, prefix `s:` to add a soft one), done conditions and non-goals. **Lock** adds the contract to every prompt as model-only context (`<smartworkbench_contract>`); the message you typed is left as is. A locked contract cannot be edited.
+- **Context**: pin files and notes. Pin a line range with `path:10-40` (or `path#L10-L40`). Each file pin switches between `Live` (re-read at send time) and `Snap` (keeps the text and SHA-256 as pinned, up to 64 KB). Save the current pins as a named context set and add it to any project with `Add set`.
+  - Files Claude reads or edits are classified as source, test, config, docs, generated or secret. Source, test and config files that were edited or read at least twice show up under **SUGGESTED**: `Pin` accepts one, `Hide` dismisses it. Secret and generated files are never suggested. The rest are listed under OBSERVED.
+  - Token sizes are estimates marked with `~`. **Preview** is built by the same function that builds the injected text. A pin that cannot be read warns but never blocks the prompt.
+- **Run**: every tool call is recorded with a risk level. Guard profiles (Permissive / Balanced / Strict) and `Pause risky calls`.
+- **Evidence**: results of test, build, typecheck and lint commands are collected and linked to done conditions (guessed from the wording, changeable). `Verify` and `Waive` are manual marks that keep a note and a time. Each turn ends with a completion summary, and `Export handoff` writes Markdown for the next session or developer.
+  - At the end of each turn `git diff -U0 HEAD` gives the changed regions per file (`L10-24, L41 (del)`), and each file shows whether a check passed **after** its last edit (✓ passed · ✕ failed · ! no check · · docs).
+  - If code changes after a passing test, that condition drops to `observed` (re-run needed) and no longer counts as done. Edits to docs and generated files are exempt.
+- **Tool row badges**: Claude Code's own tool rows stay as they are; one line is added only when there is a risk, a policy outcome (Blocked/Declined/Asked) or a check result (`test passed · evidence for dc-1`).
+
+Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guard BALANCED [Open]`
+
+### Built-in guard rules (Balanced)
+
+| Category | Examples | Policy |
+|---|---|---|
+| Read | Read, Grep, search | Allow |
+| Workspace edit | Edit, Write | Allow (Ask under Strict) |
+| External send | `git push`, `gh pr create`, `npm publish`, `curl -X POST`, deploys | Ask |
+| Possible secrets | `printenv`, `cat .env`, `$..._TOKEN`, editing `.env` | Ask |
+| Destructive git | `push --force`, `reset --hard`, `clean -f`, `branch -D` | Block |
+| Broad delete | `rm -r`, `find -delete` | Block |
+
+- Ask uses Claude Code's own question dialog (`$.ui.ask`); an allowed call still goes through Claude Code's own permission check.
+- Block does not run the tool and tells Claude why.
+- If the guard itself fails, only high-risk calls are refused (fail closed); everything else falls back to the normal flow.
+- This is a regex-based workflow control, not a security sandbox.
+
+### Project guard file
+
+Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `/smartworkbench policy init` writes an example.
+
+```json
+{
+  "profile": "strict",
+  "rules": [
+    { "tool": "Bash", "command": "\\bterraform\\s+apply\\b", "policy": "block", "reason": "infra changes go through CI" },
+    { "tool": "Edit|Write", "path": "migrations/**", "policy": "ask", "reason": "schema migrations need review" }
+  ]
+}
+```
+
+- A `profile` there replaces the personal setting (shown as `STRICT*` in the band).
+- Rules are checked top to bottom and the first match applies. `tool` and `command` are regular expressions; `path` is a glob (`**`, `*`, `?`).
+- The file can only **tighten** the guard. A built-in Block, a secrets Ask and the Ask on editing this file cannot be loosened by an `allow` rule.
+- It is read at session start and right after a tool edits it. After editing it by hand, run `/smartworkbench policy reload`.
+- Broken rules are skipped and reported, never guessed at.
+
+### How completion is judged
+
+- Only known verification commands that finish without error count as passing evidence. Interrupted or backgrounded runs are `Observed`.
+- Claude's own words never make a condition `Verified`.
+- Evidence is kept as history and a condition follows the latest result (a failure is never overwritten by an older pass).
+- The task becomes `complete` only when every condition is Verified or Waived.
+
+### Trust and storage
+
+- No network requests, no extra model calls, no telemetry.
+- State is kept in `$.store` per project (working directory) and restored on restart; state saved by an earlier version is filled in on load. Templates and context sets are kept across projects. Live pin contents, environment variables and the conversation are not stored. History is capped at 100 tool calls and 200 evidence records.
+- The only local command is `git diff -U0 HEAD`, run with an argument list. The only file written is the handoff you ask for (and the guard file on `policy init`).
+- `claude plugin validate .` lists every hook and call the mod uses.
+
+### Development
+
+```text
+hooks/register.tsx   event hooks, commands, panel and band drawing (all code that uses $)
+hooks/model.ts       state transitions (pure)
+hooks/risk.ts        risk rules and guard profiles
+hooks/evidence.ts    verification command kinds, condition status, turn summary
+hooks/intent.ts      contract serialization (deterministic)
+hooks/context.ts     pin ranges, snapshots, serialization and injection
+hooks/report.ts      handoff Markdown, tool row badge text
+hooks/policy.ts      project guard file parsing, globs, rule application
+hooks/files.ts       file classification, suggestions
+hooks/diff.ts        git diff region parsing, per-file evidence links
+types/index.d.ts     state type contract
+tests/               claude plugin test
+```
+
+```bash
+claude plugin validate .
+claude plugin test .
+claude --plugin-dir .      # start a session with this folder loaded
+```
+
+Developed and checked on Claude Code 2.1.292. The mods API is early access and may change between releases.
+
+### Not yet
+
+- P2: team audit log, shared done-condition templates, CI/GitHub integration, MCP-based issue and deploy tools, sharing state between sessions
+
+---
+
+## 한국어
+
 Claude에게 맡긴 작업의 **목표(Intent)·맥락(Context)·실행(Run)·검증(Evidence)** 을 Claude Code 안에서 직접 보고 통제하는 Mod입니다.
 기획서: NAS `claude-mods/smart-workbench/smartworkbench-prd.md` (v0.1). P0(최초 공개 버전)와 P1(제품성 강화)을 구현했습니다.
 
-## 설치
+### 설치
 
 Claude Code 입력창에서:
 
@@ -13,7 +145,7 @@ Claude Code 입력창에서:
 
 마켓플레이스 추가를 물으면 `y`, 설치 범위는 user를 고릅니다. 비공개 저장소이므로 그 컴퓨터의 git이 GitHub에 로그인되어 있어야 합니다(`gh auth login` 등). 업데이트는 `claude plugin update smartworkbench`.
 
-## 사용법
+### 사용법
 
 | 명령 | 동작 |
 |---|---|
@@ -33,15 +165,17 @@ Claude Code 입력창에서:
 
 - **Intent**: Goal, Constraints(`[H]`/`[S]`, 켜기/끄기, `s:` 접두어로 Soft 추가), Done conditions, Non-goals. **Lock** 하면 계약이 `<smartworkbench_contract>`로 매 프롬프트에 추가 컨텍스트로 붙습니다(사용자 메시지 본문은 그대로). 잠긴 동안은 편집할 수 없습니다.
 - **Context**: 파일과 메모를 Pin. 파일은 `path:10-40`(또는 `path#L10-L40`)로 라인 범위만 Pin할 수 있고, Pin마다 `Live`(전송 시점에 다시 읽음)와 `Snap`(Pin한 시점의 내용과 SHA-256 보존, 64KB 이하)을 전환합니다. 현재 Pin 묶음을 이름 붙여 Context set으로 저장하고 다른 프로젝트에서 `Add set`으로 추가할 수 있습니다.
-  Claude가 읽거나 수정한 파일은 source/test/config/docs/generated/secret으로 자동 분류됩니다. 수정했거나 두 번 이상 읽은 source·test·config 파일은 **SUGGESTED**로 제안되며 `Pin`으로 승인하거나 `Hide`로 숨깁니다. secret·generated 파일은 제안하지 않습니다. Claude가 읽거나 수정한 파일은 OBSERVED에 표시되고 `Pin`으로 바로 고정할 수 있습니다. 토큰 수는 `~`가 붙은 추정치입니다. **Preview**는 실제로 주입되는 텍스트와 같은 함수로 만듭니다. 읽을 수 없는 Pin은 전송을 막지 않고 경고만 냅니다.
+  - Claude가 읽거나 수정한 파일은 source/test/config/docs/generated/secret으로 자동 분류됩니다. 수정했거나 두 번 이상 읽은 source·test·config 파일은 **SUGGESTED**로 제안되며 `Pin`으로 승인하거나 `Hide`로 숨깁니다. secret·generated 파일은 제안하지 않습니다. 나머지는 OBSERVED에 표시됩니다.
+  - 토큰 수는 `~`가 붙은 추정치입니다. **Preview**는 실제로 주입되는 텍스트와 같은 함수로 만듭니다. 읽을 수 없는 Pin은 전송을 막지 않고 경고만 냅니다.
 - **Run**: 모든 툴 호출을 기록하고 위험도를 매깁니다. Guard 프로필(Permissive / Balanced / Strict)과 `Pause risky calls`.
-- **Evidence**: 테스트·빌드·타입 검사·린트 명령의 결과를 자동 수집하고, Done condition에 증거 종류를 연결합니다(조건 문구로 자동 추정, 변경 가능). `Verify`/`Waive`는 수동 표시이며 메모와 시각이 남습니다. 턴이 끝나면 완료 요약을 대화에 남깁니다. `Export handoff`로 다음 세션이나 다른 개발자에게 넘길 Markdown을 씁니다.
-  턴이 끝날 때 `git diff -U0 HEAD`로 파일별 변경 구간(`L10-24, L41 (del)`)을 모으고, 파일마다 마지막 수정 **이후에** 통과한 검증이 있는지 표시합니다(✓ 통과 · ✕ 실패 · ! 검증 없음 · · 문서). 통과한 테스트 뒤에 코드가 다시 바뀌면 그 조건은 `observed`(다시 실행 필요)로 내려가고 완료로 치지 않습니다. 문서·생성 파일 수정은 예외입니다.
+- **Evidence**: 테스트·빌드·타입 검사·린트 명령의 결과를 자동 수집하고, Done condition에 증거 종류를 연결합니다(조건 문구로 자동 추정, 변경 가능). `Verify`/`Waive`는 수동 표시이며 메모와 시각이 남습니다. 턴이 끝나면 완료 요약을 대화에 남기고, `Export handoff`로 다음 세션이나 다른 개발자에게 넘길 Markdown을 씁니다.
+  - 턴이 끝날 때 `git diff -U0 HEAD`로 파일별 변경 구간(`L10-24, L41 (del)`)을 모으고, 파일마다 마지막 수정 **이후에** 통과한 검증이 있는지 표시합니다(✓ 통과 · ✕ 실패 · ! 검증 없음 · · 문서).
+  - 통과한 테스트 뒤에 코드가 다시 바뀌면 그 조건은 `observed`(다시 실행 필요)로 내려가고 완료로 치지 않습니다. 문서·생성 파일 수정은 예외입니다.
 - **툴 행 배지**: 대화의 기본 툴 행은 그대로 두고, 위험도·정책 결과(Blocked/Declined/Asked)나 검증 결과(`test passed · evidence for dc-1`)가 있을 때만 한 줄을 덧붙입니다.
 
 입력창 위 밴드: `WB ● 목표 │ Ctx +2 pins · 42% │ Done 1/2 │ Guard BALANCED [Open]`
 
-## 기본 Guard 규칙 (Balanced)
+### 기본 Guard 규칙 (Balanced)
 
 | 범주 | 예 | 정책 |
 |---|---|---|
@@ -57,7 +191,7 @@ Claude Code 입력창에서:
 - Guard 내부 오류 시 High-risk 호출만 막고(fail closed) 나머지는 기본 흐름으로 돌아갑니다.
 - 정규식 기반의 작업 흐름 통제 장치이며 보안 샌드박스가 아닙니다.
 
-## 프로젝트 Guard 파일
+### 프로젝트 Guard 파일
 
 저장소에 `.claude/smartworkbench.json`을 커밋하면 팀이 같은 규칙을 씁니다. `/smartworkbench policy init`이 예시를 만들어 줍니다.
 
@@ -77,21 +211,21 @@ Claude Code 입력창에서:
 - 세션 시작 시와 툴로 이 파일을 수정한 직후 다시 읽습니다. 직접 고쳤다면 `/smartworkbench policy reload`.
 - 잘못된 규칙은 건너뛰고 오류를 표시합니다(추측해서 적용하지 않음).
 
-## 완료 판정
+### 완료 판정
 
 - 종료 코드가 0인(오류 없는) 알려진 검증 명령만 성공 증거가 됩니다. 중단·백그라운드 실행은 `Observed`.
 - Claude의 자연어 응답으로는 절대 `Verified`가 되지 않습니다.
 - 증거는 이력으로 쌓이고, 조건 상태는 최신 결과를 따릅니다(실패가 성공으로 덮이지 않음).
 - 모든 조건이 Verified 또는 Waived일 때만 `complete`가 됩니다.
 
-## 신뢰와 저장
+### 신뢰와 저장
 
 - 네트워크 요청 없음, 모델 추가 호출 없음, 텔레메트리 없음.
 - 상태는 `$.store`에 프로젝트(작업 디렉터리)별로 저장되어 재시작 후 복원됩니다. 이전 버전에서 저장한 상태도 새 필드를 채워 그대로 읽습니다. 템플릿과 Context set은 프로젝트와 무관하게 저장됩니다. Live Pin 파일 내용, 환경 변수, 대화 기록은 저장하지 않습니다. 툴 기록 100개, 증거 200개로 제한합니다.
-- 로컬 명령은 `git diff -U0 HEAD` 하나뿐이며 인자 배열로 실행합니다. 파일 쓰기는 사용자가 요청한 handoff 내보내기뿐입니다.
+- 로컬 명령은 `git diff -U0 HEAD` 하나뿐이며 인자 배열로 실행합니다. 파일 쓰기는 사용자가 요청한 handoff 내보내기(와 `policy init`의 Guard 파일)뿐입니다.
 - 사용하는 hook과 호출 목록은 `claude plugin validate .`로 확인할 수 있습니다.
 
-## 개발
+### 개발
 
 ```text
 hooks/register.tsx   이벤트 hook, 명령, 패널·밴드 렌더링 ($를 쓰는 코드는 모두 여기)
@@ -116,6 +250,6 @@ claude --plugin-dir .      # 이 폴더를 불러와 세션 실행
 
 Claude Code 2.1.292에서 개발·검증했습니다. Mods API는 초기 단계라 버전마다 바뀔 수 있습니다.
 
-## 아직 안 된 것
+### 아직 안 된 것
 
 - P2: 팀 감사 로그, 조직 공통 Done Condition 템플릿 배포, CI/GitHub 연동, MCP 기반 이슈·배포 도구 연동, 여러 세션 간 상태 교환
