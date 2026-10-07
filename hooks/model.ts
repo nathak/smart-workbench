@@ -7,11 +7,14 @@ import type {
   GuardProfile,
   Live,
   ManualMark,
+  Snapshot,
   Task,
+  Template,
   TaskStatus,
   ToolCallRecord,
   Workbench,
 } from '../types'
+import { parsePinSpec, rangeLabel } from './context'
 import { completionOf, guessLink } from './evidence'
 
 export const MAX_CALLS = 100
@@ -161,14 +164,27 @@ export function clearAll(wb: Workbench): Workbench {
   return { ...emptyWorkbench(), execution: { ...wb.execution, recentCalls: [] } }
 }
 
-export function pinFile(wb: Workbench, path: string): Workbench {
-  const clean = path.trim()
-  if (clean === '' || wb.context.pins.some(one => one.kind === 'file' && one.path === clean)) {
+export function pinFile(wb: Workbench, spec: string): Workbench {
+  const { path, lines } = parsePinSpec(spec)
+  const same = (one: ContextPin) => one.kind === 'file' && one.path === path && rangeLabel(one.lines) === rangeLabel(lines)
+  if (path === '' || wb.context.pins.some(same)) {
     return wb
   }
-  const pin: ContextPin = { id: newId('p'), kind: 'file', path: clean, mode: 'live' }
+  const pin: ContextPin = { id: newId('p'), kind: 'file', path, mode: 'live', ...(lines ? { lines } : {}) }
 
   return { ...wb, context: { ...wb.context, pins: [...wb.context.pins, pin] } }
+}
+
+// Snapshot keeps the text and hash as pinned; Live drops them and reads at send time.
+export function setPinMode(wb: Workbench, id: string, snapshot: Snapshot | undefined): Workbench {
+  const pins = wb.context.pins.map(one => {
+    if (one.id !== id || one.kind !== 'file') return one
+    const { snapshot: _old, ...rest } = one
+
+    return snapshot ? { ...rest, mode: 'snapshot' as const, snapshot } : { ...rest, mode: 'live' as const }
+  })
+
+  return { ...wb, context: { ...wb.context, pins } }
 }
 
 export function pinNote(wb: Workbench, text: string): Workbench {
@@ -182,6 +198,50 @@ export function pinNote(wb: Workbench, text: string): Workbench {
 
 export function unpin(wb: Workbench, id: string): Workbench {
   return { ...wb, context: { ...wb.context, pins: wb.context.pins.filter(one => one.id !== id) } }
+}
+
+export function toTemplate(wb: Workbench, name: string, savedAt: number): Template {
+  const { task } = wb
+
+  return {
+    name,
+    savedAt,
+    goal: task.goal,
+    constraints: task.constraints,
+    nonGoals: task.nonGoals,
+    doneConditions: task.doneConditions.map(one => ({ text: one.text, ...(one.link ? { link: one.link } : {}) })),
+    pins: wb.context.pins,
+    profile: wb.execution.profile,
+  }
+}
+
+// A fresh, unlocked task from the template: results never carry over.
+export function applyTemplate(wb: Workbench, template: Template): Workbench {
+  const task: Task = {
+    ...emptyTask(),
+    goal: template.goal,
+    constraints: template.constraints.map(one => ({ ...one, id: newId('c') })),
+    nonGoals: template.nonGoals,
+    doneConditions: template.doneConditions.map((one, i) => ({ id: `dc-${i + 1}`, text: one.text, ...(one.link ? { link: one.link } : {}) })),
+  }
+
+  return {
+    ...wb,
+    task,
+    context: { ...wb.context, pins: template.pins.map(one => ({ ...one, id: newId('p') })) },
+    execution: { ...wb.execution, profile: template.profile },
+    evidence: [],
+    changed: { files: [], added: 0, removed: 0 },
+  }
+}
+
+// A context set adds its pins to the current ones, skipping any already pinned.
+export function applySet(wb: Workbench, pins: readonly ContextPin[]): Workbench {
+  const key = (one: ContextPin) => (one.kind === 'file' ? `f:${one.path}${rangeLabel(one.lines)}` : `n:${one.text}`)
+  const have = new Set(wb.context.pins.map(key))
+  const added = pins.filter(one => !have.has(key(one))).map(one => ({ ...one, id: newId('p') }))
+
+  return { ...wb, context: { ...wb.context, pins: [...wb.context.pins, ...added] } }
 }
 
 export function setProfile(wb: Workbench, profile: GuardProfile): Workbench {
