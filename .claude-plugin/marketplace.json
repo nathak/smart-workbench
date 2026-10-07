@@ -1,0 +1,13 @@
+{
+  "name": "smart-workbench",
+  "description": "SmartWorkbench: task contract, context pins, tool guard and completion evidence inside Claude Code",
+  "owner": {
+    "name": "nathak"
+  },
+  "plugins": [
+    {
+      "name": "smartworkbench",
+      "source": "./"
+    }
+  ]
+}
