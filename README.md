@@ -19,23 +19,71 @@ At the Claude Code prompt:
 
 Answer `y` to add the marketplace and choose the user scope. The repository is private, so git on that machine must be signed in to GitHub (`gh auth login` or similar). Update with `claude plugin update smartworkbench`.
 
-### Usage
+### Quick start
 
-| Command | What it does |
+1. **Start a task**: run `/swb new`. The panel opens on the Intent tab.
+2. **Write the contract**: type the goal in the Goal field and press Enter. Add constraints (prefix `s:` for a soft one) and done conditions such as `Related tests pass` or `Typecheck passes`; each condition is linked to the matching kind of check from its wording.
+3. **Lock it**: press `Lock` (hotkey `l`). From now on the contract rides along with every prompt as context only Claude reads.
+4. **Pin context** (optional): in the Context tab, pin files (`src/auth.ts` or `src/auth.ts:10-40`) and notes. `Preview` shows exactly what Claude will receive.
+5. **Work as usual**: ask Claude in the normal prompt. The Run tab lists each tool call; risky ones are asked or blocked by the guard.
+6. **Check the result**: when the turn ends a completion summary is posted. Open the Evidence tab (`/swb verify`) to see which conditions passed, which files have a check behind them, and use `Verify`, `Waive`, `Ask Claude to finish` or `Export handoff`.
+7. **Pick it up later**: state is restored when you reopen the project. Save a setup you reuse with `/swb save <name>`.
+
+To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Hotkeys: `1`–`4` tabs, `l` Lock/Unlock, `p` Preview, `r` Pause risky calls, `f` Ask Claude to finish, `x` Export handoff.
+
+### Commands
+
+`/swb` is the short alias of `/smartworkbench`; `/workbench` is a deprecated alias kept for now. An unknown argument prints the command list.
+
+| Command | Summary |
 |---|---|
-| `/smartworkbench` (`/swb`) | Open the panel |
-| `/smartworkbench new` | Start a new task contract (asks first if one exists) |
-| `/smartworkbench context` · `run` · `verify` | Open that tab |
-| `/smartworkbench status` | Text summary (fallback where no UI is drawn) |
-| `/smartworkbench preview` | Show exactly what is added to each prompt |
-| `/smartworkbench save <name>` | Save the contract, pins and guard profile as a template |
-| `/smartworkbench load <name>` | Start a task from a template (no evidence, unlocked) |
-| `/smartworkbench templates` | List templates and context sets |
-| `/smartworkbench export [path]` | Write a Markdown handoff (default `.claude/smartworkbench-handoff.md`) |
-| `/smartworkbench policy [init\|reload]` | Show, create or re-read the project guard file |
-| `/smartworkbench clear` | Reset this project's state (asks first) |
+| `/swb` | Open the panel |
+| `/swb new` | Start a new task contract |
+| `/swb intent` · `context` · `run` · `verify` | Open that tab |
+| `/swb status` | Text summary |
+| `/swb preview` | Show what is added to each prompt |
+| `/swb save <name>` | Save the setup as a template |
+| `/swb load <name>` | Start a task from a template |
+| `/swb templates` | List templates and context sets |
+| `/swb export [path]` | Write a Markdown handoff |
+| `/swb policy [init\|reload]` | Show, create or re-read the project guard file |
+| `/swb clear` | Reset this project's state |
 
-`/workbench` is kept for a while as a deprecated alias.
+#### `/swb`
+Opens the SmartWorkbench panel on the last tab used. Where no panel can be shown, it prints the same text as `/swb status` instead.
+
+#### `/swb new`
+Starts a fresh task contract and opens the Intent tab. If a goal is already set it asks first (`Start new` / `Keep current`). The goal, constraints, non-goals, done conditions, evidence and changed-file record are cleared and the contract is unlocked. Pins, tool call history and the guard profile are kept.
+
+#### `/swb intent` · `/swb context` · `/swb run` · `/swb verify`
+Open the panel on that tab. `/swb evidence` is the same as `/swb verify`.
+
+#### `/swb status`
+Prints a text summary: the band line, the goal with its lock and status, active constraints, pins, the project guard file if there is one, and every done condition with its result. Use it where no UI is drawn (VS Code chat, `claude -p`, remote surfaces) or to paste the state somewhere.
+
+#### `/swb preview`
+Prints exactly the context SmartWorkbench adds to each prompt: the locked contract (`<smartworkbench_contract>`) and the pinned files and notes (`<smartworkbench_pins>`), plus a warning for any pin that cannot be read. An unlocked contract is not added, so with nothing locked or pinned it says nothing is added. The Context tab's `Preview` button shows the same text.
+
+#### `/swb save <name>`
+Saves the current setup as a template: goal, constraints, non-goals, done conditions (wording and evidence link), pins and guard profile. Results (evidence, history, changed files) are not saved. Templates are shared by all your projects, and saving under an existing name replaces it.
+
+#### `/swb load <name>`
+Starts a task from a template and opens the Intent tab. If a goal is already set it asks first (`Load template` / `Keep current`). The task comes in unlocked with no evidence, and the template's pins and guard profile **replace** the current ones. With an unknown name it lists the templates you have.
+
+#### `/swb templates`
+Lists saved templates and context sets. Context sets are saved and added from the Context tab (`save pins as a context set`, `Add set`); adding a set merges its pins into the current ones and skips any already pinned.
+
+#### `/swb export [path]`
+Writes a Markdown handoff for the next session or developer, by default to `.claude/smartworkbench-handoff.md` (the Evidence tab's `Export handoff` does the same). It holds the status, goal, constraints and non-goals; each done condition with its result and the command or manual note behind it, flagged when code changed after it passed; pinned context; changed files with their regions and whether a check passed after the last edit; the last 10 verification runs; and blocked or declined calls. Exporting again overwrites the file. It lands inside the project, so add it to `.gitignore` or pass another path if it should not be committed.
+
+#### `/swb policy [init|reload]`
+- `/swb policy` (or `reload`): re-reads `.claude/smartworkbench.json` and prints its profile, rules and any errors.
+- `/swb policy init`: writes an example file when none exists, then shows it. Edit and commit it to share the rules with the team (see *Project guard file*).
+
+#### `/swb clear`
+After asking (`Clear` / `Cancel`), resets this project's workbench: contract, pins, observed files, tool call history, evidence and changed files. The guard profile and pause switch, templates, context sets and other projects are left alone.
+
+### Panel
 
 - **Intent**: goal, constraints (`[H]`/`[S]`, on/off, prefix `s:` to add a soft one), done conditions and non-goals. **Lock** adds the contract to every prompt as model-only context (`<smartworkbench_contract>`); the message you typed is left as is. A locked contract cannot be edited.
 - **Context**: pin files and notes. Pin a line range with `path:10-40` (or `path#L10-L40`). Each file pin switches between `Live` (re-read at send time) and `Snap` (keeps the text and SHA-256 as pinned, up to 64 KB). Save the current pins as a named context set and add it to any project with `Add set`.
@@ -145,23 +193,71 @@ Claude Code 입력창에서:
 
 마켓플레이스 추가를 물으면 `y`, 설치 범위는 user를 고릅니다. 비공개 저장소이므로 그 컴퓨터의 git이 GitHub에 로그인되어 있어야 합니다(`gh auth login` 등). 업데이트는 `claude plugin update smartworkbench`.
 
-### 사용법
+### 기본 사용법
 
-| 명령 | 동작 |
+1. **작업 시작**: `/swb new`를 실행하면 패널이 Intent 탭으로 열립니다.
+2. **계약 작성**: Goal 칸에 목표를 쓰고 Enter. 제약(앞에 `s:`를 붙이면 Soft)과 완료 조건(`관련 테스트 통과`, `타입 검사 통과` 등)을 추가합니다. 완료 조건은 문구를 보고 맞는 검증 종류(test/build/typecheck/lint)에 자동 연결됩니다.
+3. **잠금**: `Lock`(단축키 `l`)을 누르면 이때부터 계약이 매 프롬프트에 Claude만 읽는 컨텍스트로 붙습니다.
+4. **자료 고정**(선택): Context 탭에서 파일(`src/auth.ts` 또는 `src/auth.ts:10-40`)과 메모를 Pin합니다. `Preview`로 Claude에게 실제로 전달될 내용을 확인합니다.
+5. **평소처럼 작업**: 기본 입력창에서 Claude에게 요청합니다. Run 탭에 툴 호출이 쌓이고, 위험한 호출은 Guard가 묻거나 막습니다.
+6. **결과 확인**: 턴이 끝나면 완료 요약이 대화에 남습니다. Evidence 탭(`/swb verify`)에서 어떤 조건이 통과했는지, 어떤 파일 변경 뒤에 검증이 있었는지 보고 `Verify`, `Waive`, `Ask Claude to finish`, `Export handoff`를 씁니다.
+7. **다음에 이어 하기**: 프로젝트를 다시 열면 상태가 복원됩니다. 자주 쓰는 설정은 `/swb save <이름>`으로 저장해 둡니다.
+
+키보드로 패널을 쓰려면 `ctrl+x tab`(또는 클릭)으로 패널에 포커스를 옮깁니다. 단축키: `1`–`4` 탭 전환, `l` 잠금/해제, `p` Preview, `r` 위험 호출 일시정지, `f` Ask Claude to finish, `x` Export handoff.
+
+### 명령어
+
+`/swb`는 `/smartworkbench`의 짧은 별칭이고, `/workbench`는 한동안 유지되는 deprecated 별칭입니다. 모르는 인자를 주면 명령 목록을 보여 줍니다.
+
+| 명령 | 요약 |
 |---|---|
-| `/smartworkbench` (`/swb`) | 패널 열기 |
-| `/smartworkbench new` | 새 작업 계약 시작 (기존 계약이 있으면 확인) |
-| `/smartworkbench context` · `run` · `verify` | 해당 탭 열기 |
-| `/smartworkbench status` | 텍스트 요약 (UI가 없는 환경용 폴백) |
-| `/smartworkbench preview` | 프롬프트마다 추가되는 컨텍스트 그대로 보기 |
-| `/smartworkbench save <name>` | 계약·Pin·Guard 프로필을 템플릿으로 저장 |
-| `/smartworkbench load <name>` | 템플릿으로 새 작업 시작 (증거는 비움, 잠금 해제 상태) |
-| `/smartworkbench templates` | 템플릿과 Context set 목록 |
-| `/smartworkbench export [path]` | Markdown handoff 쓰기 (기본 `.claude/smartworkbench-handoff.md`) |
-| `/smartworkbench policy [init\|reload]` | 프로젝트 Guard 파일 보기·예시 생성·다시 읽기 |
-| `/smartworkbench clear` | 이 프로젝트의 상태 초기화 (확인 필요) |
+| `/swb` | 패널 열기 |
+| `/swb new` | 새 작업 계약 시작 |
+| `/swb intent` · `context` · `run` · `verify` | 해당 탭 열기 |
+| `/swb status` | 텍스트 요약 |
+| `/swb preview` | 프롬프트에 붙는 내용 보기 |
+| `/swb save <name>` | 현재 설정을 템플릿으로 저장 |
+| `/swb load <name>` | 템플릿으로 작업 시작 |
+| `/swb templates` | 템플릿·Context set 목록 |
+| `/swb export [path]` | Markdown handoff 쓰기 |
+| `/swb policy [init\|reload]` | 프로젝트 Guard 파일 보기·생성·다시 읽기 |
+| `/swb clear` | 이 프로젝트 상태 초기화 |
 
-`/workbench`는 한동안 유지되는 deprecated 별칭입니다.
+#### `/swb`
+SmartWorkbench 패널을 마지막에 보던 탭으로 엽니다. 패널을 띄울 수 없는 환경에서는 대신 `/swb status`와 같은 텍스트를 보여 줍니다.
+
+#### `/swb new`
+새 작업 계약을 시작하고 Intent 탭을 엽니다. 이미 목표가 있으면 먼저 묻습니다(`Start new` / `Keep current`). 목표·제약·하지 않을 일·완료 조건·증거·변경 파일 기록을 비우고 잠금을 풉니다. Pin, 툴 호출 기록, Guard 프로필은 유지됩니다.
+
+#### `/swb intent` · `/swb context` · `/swb run` · `/swb verify`
+해당 탭으로 패널을 엽니다. `/swb evidence`는 `/swb verify`와 같습니다.
+
+#### `/swb status`
+텍스트 요약을 출력합니다. 밴드 줄, 목표와 잠금·진행 상태, 켜진 제약, Pin 목록, 프로젝트 Guard 파일(있을 때), 완료 조건별 결과가 들어갑니다. UI가 없는 환경(VS Code 채팅, `claude -p`, 원격 화면)이나 상태를 어딘가에 붙여 넣을 때 씁니다.
+
+#### `/swb preview`
+SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍니다. 잠긴 계약(`<smartworkbench_contract>`)과 Pin한 파일·메모(`<smartworkbench_pins>`), 읽을 수 없는 Pin에 대한 경고가 나옵니다. 잠기지 않은 계약은 붙지 않으므로, 잠금도 Pin도 없으면 붙는 것이 없다고 알려 줍니다. Context 탭의 `Preview` 버튼과 같은 내용입니다.
+
+#### `/swb save <name>`
+현재 설정을 템플릿으로 저장합니다. 목표, 제약, 하지 않을 일, 완료 조건(문구와 증거 연결), Pin, Guard 프로필이 들어가고, 결과(증거·기록·변경 파일)는 저장하지 않습니다. 템플릿은 모든 프로젝트에서 공유되며, 같은 이름으로 저장하면 덮어씁니다.
+
+#### `/swb load <name>`
+템플릿으로 작업을 시작하고 Intent 탭을 엽니다. 이미 목표가 있으면 먼저 묻습니다(`Load template` / `Keep current`). 작업은 잠금 해제·증거 없음 상태로 들어오고, 템플릿의 Pin과 Guard 프로필이 현재 것을 **대체**합니다. 없는 이름이면 가진 템플릿 목록을 보여 줍니다.
+
+#### `/swb templates`
+저장된 템플릿과 Context set 목록을 보여 줍니다. Context set은 Context 탭에서 저장(`save pins as a context set`)하고 추가(`Add set`)합니다. Set을 추가하면 현재 Pin에 합쳐지고, 이미 Pin된 것은 건너뜁니다.
+
+#### `/swb export [path]`
+다음 세션이나 다른 개발자에게 넘길 Markdown handoff를 씁니다. 기본 위치는 `.claude/smartworkbench-handoff.md`이고, Evidence 탭의 `Export handoff` 버튼과 같습니다. 진행 상태, 목표·제약·하지 않을 일, 완료 조건별 결과와 근거(명령 또는 수동 메모, 통과 뒤 코드가 바뀌었으면 표시), Pin한 자료, 변경 파일별 구간과 마지막 수정 뒤 검증 여부, 최근 검증 실행 10건, 차단·거절된 호출이 들어갑니다. 다시 내보내면 덮어씁니다. 프로젝트 안에 저장되므로 커밋하지 않으려면 `.gitignore`에 넣거나 다른 경로를 지정하세요.
+
+#### `/swb policy [init|reload]`
+- `/swb policy`(또는 `reload`): `.claude/smartworkbench.json`을 다시 읽고 프로필, 규칙, 오류를 보여 줍니다.
+- `/swb policy init`: 파일이 없을 때 예시 파일을 만들고 내용을 보여 줍니다. 고쳐서 커밋하면 팀이 같은 규칙을 씁니다(아래 *프로젝트 Guard 파일* 참고).
+
+#### `/swb clear`
+먼저 확인(`Clear` / `Cancel`)한 뒤 이 프로젝트의 계약, Pin, 관찰 파일, 툴 호출 기록, 증거, 변경 파일을 모두 초기화합니다. Guard 프로필과 일시정지 설정, 템플릿, Context set, 다른 프로젝트는 건드리지 않습니다.
+
+### 패널
 
 - **Intent**: Goal, Constraints(`[H]`/`[S]`, 켜기/끄기, `s:` 접두어로 Soft 추가), Done conditions, Non-goals. **Lock** 하면 계약이 `<smartworkbench_contract>`로 매 프롬프트에 추가 컨텍스트로 붙습니다(사용자 메시지 본문은 그대로). 잠긴 동안은 편집할 수 없습니다.
 - **Context**: 파일과 메모를 Pin. 파일은 `path:10-40`(또는 `path#L10-L40`)로 라인 범위만 Pin할 수 있고, Pin마다 `Live`(전송 시점에 다시 읽음)와 `Snap`(Pin한 시점의 내용과 SHA-256 보존, 64KB 이하)을 전환합니다. 현재 Pin 묶음을 이름 붙여 Context set으로 저장하고 다른 프로젝트에서 `Add set`으로 추가할 수 있습니다.
