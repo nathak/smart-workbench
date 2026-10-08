@@ -5,9 +5,10 @@ import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardPr
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, parseDiff, type Coverage } from './diff'
 import { completionOf, evidenceKindOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
-import { categoryOf, suggestionsOf } from './files'
+import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
 import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy } from './policy'
+import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
 import { classify, decide, summarize } from './risk'
 
@@ -19,7 +20,7 @@ const PANE = 'smartworkbench'
 const TABS: readonly Tab[] = ['intent', 'context', 'run', 'evidence']
 const TAB_LABEL: Record<Tab, string> = { intent: 'Intent', context: 'Context', run: 'Run', evidence: 'Evidence' }
 const TAB_ARGS: Record<string, Tab> = { intent: 'intent', context: 'context', run: 'run', verify: 'evidence', evidence: 'evidence' }
-const LINKS: readonly (EvidenceKind | 'none')[] = ['none', 'test', 'build', 'typecheck', 'lint']
+const LINKS: readonly (EvidenceKind | 'none')[] = ['none', 'test', 'build', 'typecheck', 'lint', 'ci']
 const STATUS_COLOR: Record<ConditionStatus, string | undefined> = {
   pending: undefined,
   observed: 'warning',
@@ -41,6 +42,11 @@ const HELP = [
   '  /smartworkbench templates        list templates and context sets',
   '  /smartworkbench export [path]    write a Markdown handoff (default .claude/smartworkbench-handoff.md)',
   '  /smartworkbench policy [init|reload]  show, create or re-read the project guard file (.claude/smartworkbench.json)',
+  '  /smartworkbench ci               import CI results for the current commit (uses the gh CLI)',
+  '  /smartworkbench issue <#n|url|KEY title>  link the task to an issue; issue clear unlinks',
+  '  /smartworkbench share [path]     write the task to .claude/smartworkbench-task.json for another machine',
+  '  /smartworkbench pickup [path]    take over a task shared that way',
+  '  /smartworkbench audit [n]        show the last n audit entries (when the guard file turns audit on)',
   "  /smartworkbench clear      reset this project's workbench",
   'Alias: /swb (/workbench is deprecated).',
 ].join('\n')
@@ -65,11 +71,57 @@ async function load($: $): Promise<Workbench> {
   return restored
 }
 
+// Every save builds on the newest copy: when another session of this project saved
+// since this one last did, its state is taken first, so neither overwrites the other.
 async function mutate($: $, change: (wb: Workbench) => Workbench): Promise<Workbench> {
-  const next = await update($, wbAtom, wb => model.withStatus(change(wb)))
-  await $.store.set(await storeKey($), next)
+  const key = await storeKey($)
+  const saved = await $.store.get(key)
+  const { sessionId } = await read($, liveAtom)
+  const before = await read($, wbAtom)
+  const savedRev = model.isWorkbench(saved) ? (saved.rev ?? 0) : 0
+  const next = await update($, wbAtom, wb => {
+    const base = model.isNewerElsewhere(saved, wb, sessionId) ? model.fill(saved) : wb
+    const changed = model.withStatus(change(base))
+
+    return { ...changed, rev: Math.max(base.rev ?? 0, savedRev) + 1, ...(sessionId ? { savedBy: sessionId } : {}) }
+  })
+  await $.store.set(key, next)
+
+  if (before.task.status !== 'complete' && next.task.status === 'complete') {
+    await audit($, 'task.complete', { goal: next.task.goal, conditions: next.task.doneConditions.length })
+  }
 
   return next
+}
+
+// Takes another session's newer save before a prompt, so this one works from the same contract.
+async function pull($: $): Promise<void> {
+  const saved = await $.store.get(await storeKey($))
+  const { sessionId } = await read($, liveAtom)
+
+  if (model.isNewerElsewhere(saved, await read($, wbAtom), sessionId)) {
+    await update($, wbAtom, () => model.fill(saved))
+    $.ui.toast('SmartWorkbench: picked up changes made in another session')
+  }
+}
+
+// Appends to the audit log when the project guard file turns it on; never throws, so a
+// failed write can never let a guarded call through.
+async function audit($: $, event: string, detail: Record<string, unknown> = {}): Promise<void> {
+  try {
+    const live = await read($, liveAtom)
+    const config = live.policy?.audit
+    if (!config) return
+    const at = new Date(await $.clock.now()).toISOString()
+    const line = auditLine({ at, event, ...(live.user ? { user: live.user } : {}), ...(live.sessionId ? { session: live.sessionId } : {}), ...detail })
+    const { text, rotated } = appendAudit(await $.fs.read(config.path).catch(() => undefined), line)
+    if (rotated !== undefined) {
+      await $.fs.write(`${config.path}.1`, rotated)
+    }
+    await $.fs.write(config.path, text)
+  } catch (error) {
+    $.ui.log(`SmartWorkbench: audit write failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
+  }
 }
 
 async function setLive($: $, change: (live: Live) => Live): Promise<void> {
@@ -110,7 +162,78 @@ async function openPane($: $, tab?: Tab): Promise<boolean> {
 
 async function stamp($: $, id: string, status: 'verified' | 'waived' | 'auto', note: string): Promise<void> {
   const at = await $.clock.now()
-  await mutate($, wb => model.markCondition(wb, id, status, note, at))
+  const wb = await mutate($, current => model.markCondition(current, id, status, note, at))
+  const condition = wb.task.doneConditions.find(one => one.id === id)
+  await audit($, status === 'auto' ? 'condition.unmark' : `condition.${status}`, { condition: id, text: condition?.text ?? '', note })
+}
+
+async function toggleLock($: $): Promise<void> {
+  const wb = await mutate($, model.toggleLock)
+  await audit($, wb.task.locked ? 'contract.lock' : 'contract.unlock', { goal: wb.task.goal })
+}
+
+// Only on request: asks the local gh CLI for the workflow runs of HEAD.
+async function importCi($: $): Promise<string> {
+  const head = await $.process.run(['git', 'rev-parse', 'HEAD']).catch(() => undefined)
+  if (head?.exitCode !== 0) return 'Not a git repository with a commit; nothing to check.'
+  const sha = head.stdout.trim()
+  const fields = 'databaseId,workflowName,name,status,conclusion,headSha,url'
+  let runs = await $.process.run(['gh', 'run', 'list', '--commit', sha, '--json', fields, '--limit', '30']).catch(() => undefined)
+  if (runs?.exitCode !== 0) {
+    runs = await $.process.run(['gh', 'run', 'list', '--json', fields, '--limit', '50']).catch(() => undefined)
+  }
+  if (runs === undefined || runs.exitCode !== 0) {
+    return `Could not read CI runs with gh${runs?.stderr ? `: ${runs.stderr.trim().split('\n')[0]}` : ' (is it installed and signed in?)'}`
+  }
+
+  let parsed: GhRun[]
+  try {
+    parsed = JSON.parse(runs.stdout) as GhRun[]
+  } catch {
+    return 'gh returned something that is not JSON.'
+  }
+  const status = await $.process.run(['git', 'status', '--porcelain']).catch(() => undefined)
+  const hasLocalChanges = (status?.stdout ?? '').split('\n').some(line => line.trim() !== '' && affectsChecks(line.slice(3).trim()))
+  const records = ciEvidence(parsed, sha, hasLocalChanges, await $.clock.now())
+  await mutate($, wb => model.addCiEvidence(wb, records))
+
+  return ciSummary(records, hasLocalChanges)
+}
+
+async function linkIssue($: $, args: string): Promise<string> {
+  const wb = await read($, wbAtom)
+  if (wb.task.locked) return 'The contract is locked; unlock it to change the issue.'
+  if (args.trim() === 'clear') {
+    await mutate($, current => model.setIssue(current, undefined))
+    return 'Issue unlinked.'
+  }
+
+  const parsed = parseIssueArg(args)
+  if (!parsed) return 'Usage: /smartworkbench issue <#123 | GitHub URL | KEY-1 title>'
+  if (!parsed.isGitHub) {
+    await mutate($, current => model.setIssue(current, { ref: parsed.ref, ...(parsed.title ? { title: parsed.title } : {}) }))
+    return `Linked ${parsed.ref}${parsed.title ? `: ${parsed.title}` : ''}.`
+  }
+
+  const found = await $.process.run(['gh', 'issue', 'view', parsed.ref, '--json', 'number,title,url,body']).catch(() => undefined)
+  if (found?.exitCode !== 0) {
+    await mutate($, current => model.setIssue(current, { ref: parsed.ref }))
+    return `Linked ${parsed.ref} without details (gh could not read it${found?.stderr ? `: ${found.stderr.trim().split('\n')[0]}` : ''}).`
+  }
+  let issue: { number?: number; title?: string; url?: string; body?: string }
+  try {
+    issue = JSON.parse(found.stdout) as typeof issue
+  } catch {
+    return 'gh returned something that is not JSON.'
+  }
+  const ref = issueRef(issue, parsed.ref)
+  const body = (issue.body ?? '').trim()
+  await mutate($, current => {
+    const linked = model.setIssue(current, ref)
+    return body ? model.pinNote(linked, `Issue ${ref.ref}: ${body.slice(0, 2000)}${body.length > 2000 ? '…' : ''}`) : linked
+  })
+
+  return `Linked ${ref.ref}: ${ref.title ?? ''}${body ? ' (its description is pinned as a note)' : ''}.`
 }
 
 async function waive($: $, id: string, text: string): Promise<void> {
@@ -263,10 +386,17 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
         .catch(() => 'Keep current')
       if (answer !== 'Start new') return { text: 'Kept the current task.' }
     }
-    await mutate($, model.newTask)
+    const team = (await read($, liveAtom)).policy
+    const template = team?.templates.find(one => one.name === team.defaultTemplate)
+    await mutate($, current => (template ? model.applyTeamTemplate(model.newTask(current), template) : model.newTask(current)))
+    await audit($, 'task.new', template ? { template: template.name } : {})
     await openPane($, 'intent')
 
-    return { text: 'New SmartWorkbench task. Write the goal and done conditions, then Lock.' }
+    return {
+      text: template
+        ? `New SmartWorkbench task from the team template "${template.name}". Write the goal, review it, then Lock.`
+        : 'New SmartWorkbench task. Write the goal and done conditions, then Lock.',
+    }
   }
 
   if (word === 'status') {
@@ -290,6 +420,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
       .catch(() => 'Cancel')
     if (answer !== 'Clear') return { text: 'Nothing cleared.' }
     await mutate($, model.clearAll)
+    await audit($, 'task.clear')
 
     return { text: 'SmartWorkbench cleared.' }
   }
@@ -305,10 +436,15 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   if (word === 'load') {
-    const template = (await $.store.get(`tpl:${name}`)) as Template | undefined
-    if (name === '' || template === undefined) {
+    const isTeamOnly = name.startsWith('team:')
+    const bare = isTeamOnly ? name.slice(5) : name
+    const mine = isTeamOnly || bare === '' ? undefined : ((await $.store.get(`tpl:${bare}`)) as Template | undefined)
+    const team = mine ? undefined : (await read($, liveAtom)).policy?.templates.find(one => one.name === bare)
+    if (!mine && !team) {
       const names = await savedNames($, 'tpl:')
-      return { text: `No template "${name}". Templates: ${names.length > 0 ? names.join(', ') : 'none'}` }
+      const teamNames = (await read($, liveAtom)).policy?.templates.map(one => `team:${one.name}`) ?? []
+      const all = [...names, ...teamNames]
+      return { text: `No template "${name}". Templates: ${all.length > 0 ? all.join(', ') : 'none'}` }
     }
     const wb = await read($, wbAtom)
     if (wb.task.goal.trim() !== '') {
@@ -317,17 +453,73 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
         .catch(() => 'Keep current')
       if (answer !== 'Load template') return { text: 'Kept the current task.' }
     }
-    await mutate($, current => model.applyTemplate(current, template))
+    await mutate($, current => (mine ? model.applyTemplate(current, mine) : team ? model.applyTeamTemplate(current, team) : current))
+    await audit($, 'task.load', { template: mine ? bare : `team:${bare}` })
     await openPane($, 'intent')
 
-    return { text: `Loaded template "${name}". Review it, then Lock.` }
+    return { text: `Loaded ${mine ? 'template' : 'team template'} "${bare}". Review it, then Lock.` }
   }
 
   if (word === 'templates') {
     const templates = await savedNames($, 'tpl:')
     const sets = await savedNames($, 'set:')
+    const team = (await read($, liveAtom)).policy
+    const teamNames = team?.templates.map(one => `${one.name}${one.name === team.defaultTemplate ? ' (default for /swb new)' : ''}`) ?? []
 
-    return { text: `Templates: ${templates.length > 0 ? templates.join(', ') : 'none'}\nContext sets: ${sets.length > 0 ? sets.join(', ') : 'none'}` }
+    return {
+      text: [
+        `Templates: ${templates.length > 0 ? templates.join(', ') : 'none'}`,
+        `Team templates (${POLICY_PATH}): ${teamNames.length > 0 ? teamNames.join(', ') : 'none'}`,
+        `Context sets: ${sets.length > 0 ? sets.join(', ') : 'none'}`,
+      ].join('\n'),
+    }
+  }
+
+  if (word === 'ci') {
+    return { text: await importCi($) }
+  }
+
+  if (word === 'issue') {
+    return { text: await linkIssue($, name) }
+  }
+
+  if (word === 'share') {
+    const target = name || SHARE_PATH
+    const live = await read($, liveAtom)
+    await $.fs.write(target, shareText(await read($, wbAtom), await $.clock.now(), live.user))
+    await audit($, 'task.share', { path: target })
+
+    return { text: `Task written to ${target}. Commit and push it; on the other machine run /smartworkbench pickup.` }
+  }
+
+  if (word === 'pickup') {
+    const target = name || SHARE_PATH
+    const text = await $.fs.read(target).catch(() => undefined)
+    if (text === undefined) return { text: `No shared task at ${target}.` }
+    const shared = readShare(text)
+    if ('error' in shared) return { text: `${target}: ${shared.error}` }
+    const wb = await read($, wbAtom)
+    if (wb.task.goal.trim() !== '') {
+      const answer = await $.ui
+        .ask(`Replace the current task with the one shared${shared.sharedBy ? ` by ${shared.sharedBy}` : ''} at ${shared.sharedAt}?`, ['Pick up', 'Keep current'])
+        .catch(() => 'Keep current')
+      if (answer !== 'Pick up') return { text: 'Kept the current task.' }
+    }
+    await mutate($, current => model.applyShare(current, shared))
+    await audit($, 'task.pickup', { path: target, sharedBy: shared.sharedBy ?? '' })
+    await openPane($, 'intent')
+
+    return { text: `Picked up "${shared.task.goal}" (${shared.task.doneConditions.length} done conditions, ${shared.pins.length} pins). Checks run on the other machine do not carry over; run them here.` }
+  }
+
+  if (word === 'audit') {
+    const config = (await read($, liveAtom)).policy?.audit
+    if (!config) return { text: `Audit is off. Turn it on with "audit": true in ${POLICY_PATH}.` }
+    const text = await $.fs.read(config.path).catch(() => '')
+    const entries = readAudit(text)
+    const count = Math.max(1, Math.min(200, Number(name) || 20))
+
+    return { text: entries.length === 0 ? `No audit entries in ${config.path} yet.` : `${config.path} (last ${Math.min(count, entries.length)} of ${entries.length}):\n${formatAudit(entries, count)}` }
   }
 
   if (word === 'policy') {
@@ -396,9 +588,18 @@ function intentTab($: $, { els, wb, width }: View): RenderElement {
           hotkey="l"
           variant={task.locked ? undefined : 'primary'}
           label={task.locked ? 'Unlock' : 'Lock'}
-          onPress={() => void mutate($, model.toggleLock)}
+          onPress={() => void toggleLock($)}
         />
       </Box>
+      {task.issue && (
+        <Box gap={1}>
+          <Text dimColor>Issue</Text>
+          <Text wrap="truncate-end">
+            {task.issue.ref}
+            {task.issue.title ? ` ${model.cut(task.issue.title, width - task.issue.ref.length - 10)}` : ''}
+          </Text>
+        </Box>
+      )}
       <Text bold>Goal</Text>
       {ro ? (
         <Text wrap="wrap">{task.goal || '—'}</Text>
@@ -614,7 +815,9 @@ function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
               : one.policy === 'ask'
                 ? 'ASKED'
                 : one.risk === 'low'
-                  ? ''
+                  ? one.category?.startsWith('mcp-')
+                    ? one.category.slice(4)
+                    : ''
                   : one.risk.toUpperCase()
 
         return (
@@ -715,6 +918,12 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
       <Box gap={1}>
         {hasUnmet && <Button key="finish" variant="primary" hotkey="f" label="Ask Claude to finish" onPress={() => void askToFinish($, wb)} />}
         <Button
+          key="ci"
+          hotkey="c"
+          label="Check CI"
+          onPress={() => void importCi($).then(text => $.ui.toast(`SmartWorkbench: ${text.split('\n')[0]}`))}
+        />
+        <Button
           key="export"
           hotkey="x"
           label="Export handoff"
@@ -778,13 +987,22 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const argumentHint = '[new|context|run|verify|status|preview|save|load|templates|export|policy|clear]'
+    const argumentHint = '[new|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
     await $.command.register({ name: 'workbench', description: 'Deprecated alias of /smartworkbench', argumentHint })
+    const sessionId = await $.session.id().catch(() => undefined)
+    if (sessionId) await setLive($, live => ({ ...live, sessionId }))
     await load($)
     await loadPolicy($)
+
+    if ((await read($, liveAtom)).policy?.audit) {
+      const name = await $.process.run(['git', 'config', 'user.name']).catch(() => undefined)
+      const user = name?.exitCode === 0 ? name.stdout.trim() : ''
+      if (user) await setLive($, live => ({ ...live, user }))
+      await audit($, 'session.start')
+    }
 
     if (e.surface === null || e.surface === 'vscode') {
       $.ui.log('SmartWorkbench: no panel on this surface; the contract and guard still apply. Use /smartworkbench status.')
@@ -800,6 +1018,7 @@ export const register: Register = on => {
   // Adds the locked contract and the pins as context the model alone reads;
   // the prompt text is left as typed. On failure the prompt goes through unchanged.
   on('prompt.submit', async ($, e, next) => {
+    await pull($)
     const { blocks, warnings } = await injection($, await read($, wbAtom))
     await setLive($, live => ({ ...live, pinWarnings: warnings }))
 
@@ -823,6 +1042,7 @@ export const register: Register = on => {
       summary: summarize(e.tool, e),
       risk: verdict.risk,
       policy,
+      category: verdict.category,
       ...(verdict.reason ? { reason: verdict.reason } : {}),
       outcome: 'running',
       startedAt,
@@ -833,6 +1053,7 @@ export const register: Register = on => {
     if (policy === 'block') {
       await mutate($, current => model.recordCall(current, { ...call, outcome: 'blocked', durationMs: 0 }))
       await badge($, { ...call, outcome: 'blocked' })
+      await audit($, 'guard.block', { tool: e.tool, input: call.summary, reason: verdict.reason, rule: verdict.category })
 
       return {
         deny: `SmartWorkbench blocked this ${e.tool} call: ${verdict.reason}. The user's guard policy forbids it; do not retry it another way. Ask the user if it is really needed.`,
@@ -848,9 +1069,11 @@ export const register: Register = on => {
         const durationMs = (await $.clock.now()) - startedAt
         await mutate($, current => model.recordCall(current, { ...call, outcome: 'declined', durationMs }))
         await badge($, { ...call, outcome: 'declined' })
+        await audit($, 'guard.ask', { tool: e.tool, input: call.summary, reason: verdict.reason, answer: 'declined' })
 
         return { deny: `The user declined this ${e.tool} call in SmartWorkbench (${verdict.reason}).` }
       }
+      await audit($, 'guard.ask', { tool: e.tool, input: call.summary, reason: verdict.reason, answer: 'allowed' })
     }
 
     // Allow still goes through Claude Code's own permission check beneath.

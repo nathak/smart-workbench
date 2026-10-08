@@ -61,6 +61,38 @@ const SECRET_PATH = /(^|\/)(\.env(\.[^/]*)?|\.npmrc|\.netrc|credentials(\.json)?
 const GUARD_FILE = /(^|\/)\.claude\/smartworkbench\.json$/
 const SEND_TOOL = /(^|_)(send|post|publish|deploy|create_pr|create_pull_request|share|comment|reply|message)/i
 
+// MCP tools by what they touch, from the server and tool names: deploys and anything that
+// changes an issue or an alert are asked; reads are allowed.
+const MCP_DEPLOY = /deploy|release|rollout|rollback|promote|publish/i
+const MCP_ISSUE = /issue|ticket|jira|linear|task|story|bug/i
+const MCP_OBSERVE = /log|metric|trace|alert|incident|monitor|sentry|datadog|grafana|honeycomb|pagerduty|newrelic/i
+const MCP_CHANGE = /(^|_)(create|update|edit|close|delete|remove|transition|assign|comment|resolve|ack|acknowledge|mute|silence|trigger|set|add)/i
+
+export function classifyMcp(tool: string): Verdict {
+  const [, server = '', name = ''] = tool.split('__')
+  const both = `${server}__${name}`
+  const changes = MCP_CHANGE.test(name)
+
+  if (MCP_DEPLOY.test(name)) {
+    return { category: 'mcp-deploy', risk: 'high', policy: 'ask', reason: 'deploys or releases through MCP' }
+  }
+  if (MCP_ISSUE.test(both)) {
+    return changes
+      ? { category: 'mcp-issue', risk: 'medium', policy: 'ask', reason: 'changes an issue tracker' }
+      : { category: 'mcp-issue', risk: 'low', policy: 'allow', reason: '' }
+  }
+  if (MCP_OBSERVE.test(both)) {
+    return changes
+      ? { category: 'mcp-observe', risk: 'medium', policy: 'ask', reason: 'changes alerts or incidents' }
+      : { category: 'mcp-observe', risk: 'low', policy: 'allow', reason: '' }
+  }
+  if (SEND_TOOL.test(name)) {
+    return { category: 'external-send', risk: 'medium', policy: 'ask', reason: 'sends to an external system' }
+  }
+
+  return { category: 'mcp', risk: 'low', policy: 'allow', reason: '' }
+}
+
 const LOW: Omit<Verdict, 'category'> = { risk: 'low', policy: 'allow', reason: '' }
 
 export function classify(tool: string, input: unknown): Verdict {
@@ -95,15 +127,15 @@ export function classify(tool: string, input: unknown): Verdict {
       : { category: 'read', ...LOW }
   }
 
-  if (tool.startsWith('mcp__') && SEND_TOOL.test(tool.split('__').pop() ?? '')) {
-    return { category: 'external-send', risk: 'medium', policy: 'ask', reason: 'sends to an external system' }
+  if (tool.startsWith('mcp__')) {
+    return classifyMcp(tool)
   }
 
   return { category: 'other', ...LOW }
 }
 
 // Asked even under the permissive profile.
-const ALWAYS_ASK = new Set(['secret-output', 'secret-file', 'guard-policy'])
+const ALWAYS_ASK = new Set(['secret-output', 'secret-file', 'guard-policy', 'mcp-deploy'])
 
 // Applies the profile and the pause switch on top of the default (balanced) rule set.
 export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolean): Policy {
