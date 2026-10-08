@@ -106,6 +106,8 @@ export type ToolCallRecord = {
   policy: Policy
   category?: string
   reason?: string
+  // Asked once, then allowed for the rest of the session.
+  sessionAllowed?: true
   outcome: CallOutcome
   startedAt: number
   durationMs?: number
@@ -159,7 +161,11 @@ export type Live = {
   policy?: ProjectPolicy
   sessionId?: string
   user?: string
+  // What the person chose "Allow for session" for; gone when the session ends.
+  sessionAllows?: SessionAllow[]
 }
+
+export type SessionAllow = { key: string; label: string; at: number }
 
 declare module 'claude-code' {
   interface PluginState {

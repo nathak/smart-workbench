@@ -98,6 +98,7 @@ export function badgeOf(call: ToolCallRecord, evidence: EvidenceRecord | undefin
   if (call.risk !== 'low') parts.push(call.risk.toUpperCase())
   if (call.outcome === 'blocked') parts.push('Blocked')
   else if (call.outcome === 'declined') parts.push('Declined')
+  else if (call.sessionAllowed) parts.push('Allowed for session')
   else if (call.policy === 'ask') parts.push('Asked → allowed')
   if (call.reason && call.risk !== 'low') parts.push(call.reason)
 
