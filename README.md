@@ -7,7 +7,7 @@
 ## English
 
 A Claude Code mod for seeing and steering the **Intent, Context, Run and Evidence** of the work you hand to Claude, without leaving Claude Code.
-Implements P0 (first public release) and P1 (product hardening) of the product spec (v0.1).
+Implements P0 (first public release), P1 (product hardening) and P2 (team features) of the product spec (v0.1).
 
 ### Install
 
@@ -27,9 +27,9 @@ Answer `y` to add the marketplace and choose the user scope. The repository is p
 4. **Pin context** (optional): in the Context tab, pin files (`src/auth.ts` or `src/auth.ts:10-40`) and notes. `Preview` shows exactly what Claude will receive.
 5. **Work as usual**: ask Claude in the normal prompt. The Run tab lists each tool call; risky ones are asked or blocked by the guard.
 6. **Check the result**: when the turn ends a completion summary is posted. Open the Evidence tab (`/swb verify`) to see which conditions passed, which files have a check behind them, and use `Verify`, `Waive`, `Ask Claude to finish` or `Export handoff`.
-7. **Pick it up later**: state is restored when you reopen the project. Save a setup you reuse with `/swb save <name>`.
+7. **Pick it up later**: state is restored when you reopen the project, and sessions open on the same project share it. On another machine, `/swb share` here and `/swb pickup` there. Save a setup you reuse with `/swb save <name>`.
 
-To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Hotkeys: `1`–`4` tabs, `l` Lock/Unlock, `p` Preview, `r` Pause risky calls, `f` Ask Claude to finish, `x` Export handoff.
+To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Hotkeys: `1`–`4` tabs, `l` Lock/Unlock, `p` Preview, `r` Pause risky calls, `f` Ask Claude to finish, `c` Check CI, `x` Export handoff.
 
 ### Commands
 
@@ -47,13 +47,17 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb templates` | List templates and context sets |
 | `/swb export [path]` | Write a Markdown handoff |
 | `/swb policy [init\|reload]` | Show, create or re-read the project guard file |
+| `/swb ci` | Import CI results for the current commit |
+| `/swb issue <ref>` | Link the task to an issue |
+| `/swb share [path]` · `/swb pickup [path]` | Hand the task to another machine through git |
+| `/swb audit [n]` | Show the audit log |
 | `/swb clear` | Reset this project's state |
 
 #### `/swb`
 Opens the SmartWorkbench panel on the last tab used. Where no panel can be shown, it prints the same text as `/swb status` instead.
 
 #### `/swb new`
-Starts a fresh task contract and opens the Intent tab. If a goal is already set it asks first (`Start new` / `Keep current`). The goal, constraints, non-goals, done conditions, evidence and changed-file record are cleared and the contract is unlocked. Pins, tool call history and the guard profile are kept.
+Starts a fresh task contract and opens the Intent tab; when the project guard file names a `defaultTemplate`, the new task starts from that team template. If a goal is already set it asks first (`Start new` / `Keep current`). The goal, constraints, non-goals, done conditions, evidence and changed-file record are cleared and the contract is unlocked. Pins, tool call history and the guard profile are kept.
 
 #### `/swb intent` · `/swb context` · `/swb run` · `/swb verify`
 Open the panel on that tab. `/swb evidence` is the same as `/swb verify`.
@@ -68,10 +72,10 @@ Prints exactly the context SmartWorkbench adds to each prompt: the locked contra
 Saves the current setup as a template: goal, constraints, non-goals, done conditions (wording and evidence link), pins and guard profile. Results (evidence, history, changed files) are not saved. Templates are shared by all your projects, and saving under an existing name replaces it.
 
 #### `/swb load <name>`
-Starts a task from a template and opens the Intent tab. If a goal is already set it asks first (`Load template` / `Keep current`). The task comes in unlocked with no evidence, and the template's pins and guard profile **replace** the current ones. With an unknown name it lists the templates you have.
+Starts a task from a template and opens the Intent tab. If a goal is already set it asks first (`Load template` / `Keep current`). The task comes in unlocked with no evidence, and the template's pins and guard profile **replace** the current ones. Your own templates are looked up first, then the team templates in the guard file; `team:<name>` picks the team one. A team template sets the contract only and leaves pins and the guard profile alone. With an unknown name it lists the templates you have.
 
 #### `/swb templates`
-Lists saved templates and context sets. Context sets are saved and added from the Context tab (`save pins as a context set`, `Add set`); adding a set merges its pins into the current ones and skips any already pinned.
+Lists your templates, the team templates from the guard file (marking the default) and context sets. Context sets are saved and added from the Context tab (`save pins as a context set`, `Add set`); adding a set merges its pins into the current ones and skips any already pinned.
 
 #### `/swb export [path]`
 Writes a Markdown handoff for the next session or developer, by default to `.claude/smartworkbench-handoff.md` (the Evidence tab's `Export handoff` does the same). It holds the status, goal, constraints and non-goals; each done condition with its result and the command or manual note behind it, flagged when code changed after it passed; pinned context; changed files with their regions and whether a check passed after the last edit; the last 10 verification runs; and blocked or declined calls. Exporting again overwrites the file. It lands inside the project, so add it to `.gitignore` or pass another path if it should not be committed.
@@ -79,6 +83,24 @@ Writes a Markdown handoff for the next session or developer, by default to `.cla
 #### `/swb policy [init|reload]`
 - `/swb policy` (or `reload`): re-reads `.claude/smartworkbench.json` and prints its profile, rules and any errors.
 - `/swb policy init`: writes an example file when none exists, then shows it. Edit and commit it to share the rules with the team (see *Project guard file*).
+
+#### `/swb ci`
+Asks the local `gh` CLI for the GitHub Actions runs of the current commit (`git rev-parse HEAD`) and records the latest run of each workflow as `ci` evidence: success counts as passed, failure/cancelled/timed out as failed, a running workflow as observed. While code changes are uncommitted, CI did not test what is on disk, so every result counts only as observed. Running the command again updates the same run's record. Link a done condition to `ci` (conditions mentioning CI are linked automatically). The Evidence tab's `Check CI` button (hotkey `c`) does the same. This is the only feature that reaches the network, and only when you run it.
+
+#### `/swb issue <ref>`
+Links the task to an issue; it becomes part of the contract (`<issue>`) and the handoff.
+- `#42`, `42` or a GitHub issue URL: read with `gh issue view`; the title fills an empty goal and the description is pinned as a note.
+- Anything else, such as `LIN-12 Fix login timeout`: kept as typed, for Linear, Jira or any tracker.
+- `/swb issue clear` unlinks it. The issue changes only while the contract is unlocked.
+
+#### `/swb share [path]` · `/swb pickup [path]`
+State is kept per machine, so to continue on another computer:
+1. `/swb share` writes the contract (with manual marks and the issue) and the pins to `.claude/smartworkbench-task.json`. Commit and push it.
+2. On the other machine, pull and run `/swb pickup`. It asks before replacing a current task.
+Evidence does not carry over: checks run on one machine say nothing about another's working tree, so run them again there. Several sessions on the same machine and project need neither command: each save builds on the newest copy, and a change saved by another session is picked up before the next prompt.
+
+#### `/swb audit [n]`
+Shows the last `n` (default 20) entries of the audit log, when the guard file turns it on (see *Audit log*).
 
 #### `/swb clear`
 After asking (`Clear` / `Cancel`), resets this project's workbench: contract, pins, observed files, tool call history, evidence and changed files. The guard profile and pause switch, templates, context sets and other projects are left alone.
@@ -107,6 +129,9 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
 | Possible secrets | `printenv`, `cat .env`, `$..._TOKEN`, editing `.env` | Ask |
 | Destructive git | `push --force`, `reset --hard`, `clean -f`, `branch -D` | Block |
 | Broad delete | `rm -r`, `find -delete` | Block |
+| MCP deploy/release | `mcp__vercel__deploy_project` | Ask (even under Permissive) |
+| MCP issue/alert changes | `mcp__linear__create_issue`, `mcp__pagerduty__acknowledge_incident` | Ask |
+| MCP issue/observability reads | `mcp__linear__list_issues`, `mcp__sentry__search_events` | Allow |
 
 - Ask uses Claude Code's own question dialog (`$.ui.ask`); an allowed call still goes through Claude Code's own permission check.
 - Block does not run the tool and tells Claude why.
@@ -123,7 +148,15 @@ Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `
   "rules": [
     { "tool": "Bash", "command": "\\bterraform\\s+apply\\b", "policy": "block", "reason": "infra changes go through CI" },
     { "tool": "Edit|Write", "path": "migrations/**", "policy": "ask", "reason": "schema migrations need review" }
-  ]
+  ],
+  "defaultTemplate": "change",
+  "templates": {
+    "change": {
+      "constraints": ["Keep the public API compatible", "s: Keep the patch minimal"],
+      "doneConditions": ["Related tests pass", "Typecheck passes", { "text": "CI is green", "link": "ci" }]
+    }
+  },
+  "audit": true
 }
 ```
 
@@ -132,6 +165,12 @@ Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `
 - The file can only **tighten** the guard. A built-in Block, a secrets Ask and the Ask on editing this file cannot be loosened by an `allow` rule.
 - It is read at session start and right after a tool edits it. After editing it by hand, run `/smartworkbench policy reload`.
 - Broken rules are skipped and reported, never guessed at.
+- `templates` are the team's shared done conditions: each has `constraints` (prefix `s:` for soft), `doneConditions` (text, or `{ "text", "link" }`), optional `goal` and `nonGoals`. `defaultTemplate` seeds `/swb new`; `/swb load <name>` or `team:<name>` loads one.
+- `audit` turns on the audit log (below).
+
+### Audit log
+
+With `"audit": true` (or `{ "path": "logs/agent-audit.jsonl" }`, a path inside the repository) every session appends one JSON line per event to `.claude/smartworkbench-audit.jsonl`: `session.start`, `guard.block`, `guard.ask` (allowed or declined), `contract.lock` / `contract.unlock`, `condition.verified` / `condition.waived` / `condition.unmark`, `task.complete`, `task.new` / `task.load` / `task.clear`, `task.share` / `task.pickup`. Each line carries the time, the git `user.name`, the session id and the details (tool, input summary, reason, note). Past 1 MB the log moves to `.1` and a new one starts. Read it with `/swb audit [n]`; commit it if the team wants a shared record, or ignore it to keep it local. A failed write never lets a guarded call through.
 
 ### How completion is judged
 
@@ -142,9 +181,9 @@ Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `
 
 ### Trust and storage
 
-- No network requests, no extra model calls, no telemetry.
+- No network requests of its own, no extra model calls, no telemetry. `/swb ci` and `/swb issue #n` run the local `gh` CLI only when you call them.
 - State is kept in `$.store` per project (working directory) and restored on restart; state saved by an earlier version is filled in on load. Templates and context sets are kept across projects. Live pin contents, environment variables and the conversation are not stored. History is capped at 100 tool calls and 200 evidence records.
-- The only local command is `git diff -U0 HEAD`, run with an argument list. The only file written is the handoff you ask for (and the guard file on `policy init`).
+- Local commands run with argument lists: `git diff -U0 HEAD` at turn end, `git config user.name` when audit is on, and `git`/`gh` for `/swb ci` and `/swb issue`. Files are written only for the handoff, `policy init`, `share` and the audit log the guard file turns on.
 - `claude plugin validate .` lists every hook and call the mod uses.
 
 ### Development
@@ -160,6 +199,7 @@ hooks/report.ts      handoff Markdown, tool row badge text
 hooks/policy.ts      project guard file parsing, globs, rule application
 hooks/files.ts       file classification, suggestions
 hooks/diff.ts        git diff region parsing, per-file evidence links
+hooks/team.ts        audit lines, CI results, issue refs, shared task file
 types/index.d.ts     state type contract
 tests/               claude plugin test
 ```
@@ -174,14 +214,14 @@ Developed and checked on Claude Code 2.1.292. The mods API is early access and m
 
 ### Not yet
 
-- P2: team audit log, shared done-condition templates, CI/GitHub integration, MCP-based issue and deploy tools, sharing state between sessions
+- Policy distribution beyond one repository (organization-wide managed settings, signed releases), a central audit store, and CI/PR write actions; SmartWorkbench reads CI and issues but never pushes to them.
 
 ---
 
 ## 한국어
 
 Claude에게 맡긴 작업의 **목표(Intent)·맥락(Context)·실행(Run)·검증(Evidence)** 을 Claude Code 안에서 직접 보고 통제하는 Mod입니다.
-기획서: NAS `claude-mods/smart-workbench/smartworkbench-prd.md` (v0.1). P0(최초 공개 버전)와 P1(제품성 강화)을 구현했습니다.
+기획서: NAS `claude-mods/smart-workbench/smartworkbench-prd.md` (v0.1). P0(최초 공개 버전), P1(제품성 강화), P2(팀 기능)를 구현했습니다.
 
 ### 설치
 
@@ -201,9 +241,9 @@ Claude Code 입력창에서:
 4. **자료 고정**(선택): Context 탭에서 파일(`src/auth.ts` 또는 `src/auth.ts:10-40`)과 메모를 Pin합니다. `Preview`로 Claude에게 실제로 전달될 내용을 확인합니다.
 5. **평소처럼 작업**: 기본 입력창에서 Claude에게 요청합니다. Run 탭에 툴 호출이 쌓이고, 위험한 호출은 Guard가 묻거나 막습니다.
 6. **결과 확인**: 턴이 끝나면 완료 요약이 대화에 남습니다. Evidence 탭(`/swb verify`)에서 어떤 조건이 통과했는지, 어떤 파일 변경 뒤에 검증이 있었는지 보고 `Verify`, `Waive`, `Ask Claude to finish`, `Export handoff`를 씁니다.
-7. **다음에 이어 하기**: 프로젝트를 다시 열면 상태가 복원됩니다. 자주 쓰는 설정은 `/swb save <이름>`으로 저장해 둡니다.
+7. **다음에 이어 하기**: 프로젝트를 다시 열면 상태가 복원되고, 같은 프로젝트를 연 다른 세션과도 상태가 공유됩니다. 다른 컴퓨터에서는 여기서 `/swb share`, 거기서 `/swb pickup`. 자주 쓰는 설정은 `/swb save <이름>`으로 저장해 둡니다.
 
-키보드로 패널을 쓰려면 `ctrl+x tab`(또는 클릭)으로 패널에 포커스를 옮깁니다. 단축키: `1`–`4` 탭 전환, `l` 잠금/해제, `p` Preview, `r` 위험 호출 일시정지, `f` Ask Claude to finish, `x` Export handoff.
+키보드로 패널을 쓰려면 `ctrl+x tab`(또는 클릭)으로 패널에 포커스를 옮깁니다. 단축키: `1`–`4` 탭 전환, `l` 잠금/해제, `p` Preview, `r` 위험 호출 일시정지, `f` Ask Claude to finish, `c` Check CI, `x` Export handoff.
 
 ### 명령어
 
@@ -221,13 +261,17 @@ Claude Code 입력창에서:
 | `/swb templates` | 템플릿·Context set 목록 |
 | `/swb export [path]` | Markdown handoff 쓰기 |
 | `/swb policy [init\|reload]` | 프로젝트 Guard 파일 보기·생성·다시 읽기 |
+| `/swb ci` | 현재 커밋의 CI 결과 가져오기 |
+| `/swb issue <ref>` | 작업에 이슈 연결 |
+| `/swb share [path]` · `/swb pickup [path]` | git을 통해 다른 컴퓨터로 작업 넘기기 |
+| `/swb audit [n]` | 감사 로그 보기 |
 | `/swb clear` | 이 프로젝트 상태 초기화 |
 
 #### `/swb`
 SmartWorkbench 패널을 마지막에 보던 탭으로 엽니다. 패널을 띄울 수 없는 환경에서는 대신 `/swb status`와 같은 텍스트를 보여 줍니다.
 
 #### `/swb new`
-새 작업 계약을 시작하고 Intent 탭을 엽니다. 이미 목표가 있으면 먼저 묻습니다(`Start new` / `Keep current`). 목표·제약·하지 않을 일·완료 조건·증거·변경 파일 기록을 비우고 잠금을 풉니다. Pin, 툴 호출 기록, Guard 프로필은 유지됩니다.
+새 작업 계약을 시작하고 Intent 탭을 엽니다. 프로젝트 Guard 파일에 `defaultTemplate`이 있으면 그 팀 템플릿으로 시작합니다. 이미 목표가 있으면 먼저 묻습니다(`Start new` / `Keep current`). 목표·제약·하지 않을 일·완료 조건·증거·변경 파일 기록을 비우고 잠금을 풉니다. Pin, 툴 호출 기록, Guard 프로필은 유지됩니다.
 
 #### `/swb intent` · `/swb context` · `/swb run` · `/swb verify`
 해당 탭으로 패널을 엽니다. `/swb evidence`는 `/swb verify`와 같습니다.
@@ -242,10 +286,10 @@ SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍�
 현재 설정을 템플릿으로 저장합니다. 목표, 제약, 하지 않을 일, 완료 조건(문구와 증거 연결), Pin, Guard 프로필이 들어가고, 결과(증거·기록·변경 파일)는 저장하지 않습니다. 템플릿은 모든 프로젝트에서 공유되며, 같은 이름으로 저장하면 덮어씁니다.
 
 #### `/swb load <name>`
-템플릿으로 작업을 시작하고 Intent 탭을 엽니다. 이미 목표가 있으면 먼저 묻습니다(`Load template` / `Keep current`). 작업은 잠금 해제·증거 없음 상태로 들어오고, 템플릿의 Pin과 Guard 프로필이 현재 것을 **대체**합니다. 없는 이름이면 가진 템플릿 목록을 보여 줍니다.
+템플릿으로 작업을 시작하고 Intent 탭을 엽니다. 이미 목표가 있으면 먼저 묻습니다(`Load template` / `Keep current`). 작업은 잠금 해제·증거 없음 상태로 들어오고, 템플릿의 Pin과 Guard 프로필이 현재 것을 **대체**합니다. 개인 템플릿을 먼저 찾고, 없으면 Guard 파일의 팀 템플릿을 찾습니다. `team:<이름>`은 팀 템플릿을 지정합니다. 팀 템플릿은 계약만 채우고 Pin과 Guard 프로필은 그대로 둡니다. 없는 이름이면 가진 템플릿 목록을 보여 줍니다.
 
 #### `/swb templates`
-저장된 템플릿과 Context set 목록을 보여 줍니다. Context set은 Context 탭에서 저장(`save pins as a context set`)하고 추가(`Add set`)합니다. Set을 추가하면 현재 Pin에 합쳐지고, 이미 Pin된 것은 건너뜁니다.
+개인 템플릿, Guard 파일의 팀 템플릿(기본 템플릿 표시), Context set 목록을 보여 줍니다. Context set은 Context 탭에서 저장(`save pins as a context set`)하고 추가(`Add set`)합니다. Set을 추가하면 현재 Pin에 합쳐지고, 이미 Pin된 것은 건너뜁니다.
 
 #### `/swb export [path]`
 다음 세션이나 다른 개발자에게 넘길 Markdown handoff를 씁니다. 기본 위치는 `.claude/smartworkbench-handoff.md`이고, Evidence 탭의 `Export handoff` 버튼과 같습니다. 진행 상태, 목표·제약·하지 않을 일, 완료 조건별 결과와 근거(명령 또는 수동 메모, 통과 뒤 코드가 바뀌었으면 표시), Pin한 자료, 변경 파일별 구간과 마지막 수정 뒤 검증 여부, 최근 검증 실행 10건, 차단·거절된 호출이 들어갑니다. 다시 내보내면 덮어씁니다. 프로젝트 안에 저장되므로 커밋하지 않으려면 `.gitignore`에 넣거나 다른 경로를 지정하세요.
@@ -253,6 +297,24 @@ SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍�
 #### `/swb policy [init|reload]`
 - `/swb policy`(또는 `reload`): `.claude/smartworkbench.json`을 다시 읽고 프로필, 규칙, 오류를 보여 줍니다.
 - `/swb policy init`: 파일이 없을 때 예시 파일을 만들고 내용을 보여 줍니다. 고쳐서 커밋하면 팀이 같은 규칙을 씁니다(아래 *프로젝트 Guard 파일* 참고).
+
+#### `/swb ci`
+로컬 `gh` CLI로 현재 커밋(`git rev-parse HEAD`)의 GitHub Actions 실행을 조회해, 워크플로마다 가장 최근 실행을 `ci` 증거로 기록합니다. 성공은 통과, 실패·취소·시간 초과는 실패, 실행 중은 observed입니다. 커밋되지 않은 코드 변경이 있으면 CI가 지금 디스크의 코드를 검사한 것이 아니므로 모든 결과를 observed로만 칩니다. 다시 실행하면 같은 실행의 기록을 갱신합니다. 완료 조건을 `ci`에 연결하세요(CI를 언급한 조건은 자동 연결). Evidence 탭의 `Check CI` 버튼(단축키 `c`)도 같습니다. 네트워크를 쓰는 유일한 기능이며, 직접 실행할 때만 동작합니다.
+
+#### `/swb issue <ref>`
+작업에 이슈를 연결합니다. 이슈는 계약(`<issue>`)과 handoff에 들어갑니다.
+- `#42`, `42`, GitHub 이슈 URL: `gh issue view`로 읽어서, 제목은 비어 있는 목표를 채우고 본문은 메모로 Pin합니다.
+- 그 밖의 형식(예: `LIN-12 Fix login timeout`): 입력한 그대로 저장합니다. Linear, Jira 등 어떤 트래커든 쓸 수 있습니다.
+- `/swb issue clear`로 연결을 해제합니다. 계약이 잠겨 있으면 바꿀 수 없습니다.
+
+#### `/swb share [path]` · `/swb pickup [path]`
+상태는 컴퓨터마다 따로 저장되므로, 다른 컴퓨터에서 이어 하려면:
+1. `/swb share`가 계약(수동 표시·이슈 포함)과 Pin을 `.claude/smartworkbench-task.json`에 씁니다. 커밋하고 푸시합니다.
+2. 다른 컴퓨터에서 pull한 뒤 `/swb pickup`을 실행합니다. 진행 중인 작업이 있으면 바꾸기 전에 묻습니다.
+증거는 넘어가지 않습니다. 한 컴퓨터의 검사 결과는 다른 컴퓨터의 작업 트리를 보증하지 않으므로 거기서 다시 실행합니다. 같은 컴퓨터에서 같은 프로젝트를 연 여러 세션은 이 명령이 필요 없습니다. 저장할 때마다 가장 새 상태 위에 쌓고, 다른 세션이 바꾼 내용은 다음 프롬프트 전에 반영합니다.
+
+#### `/swb audit [n]`
+Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항목을 보여 줍니다(아래 *감사 로그* 참고).
 
 #### `/swb clear`
 먼저 확인(`Clear` / `Cancel`)한 뒤 이 프로젝트의 계약, Pin, 관찰 파일, 툴 호출 기록, 증거, 변경 파일을 모두 초기화합니다. Guard 프로필과 일시정지 설정, 템플릿, Context set, 다른 프로젝트는 건드리지 않습니다.
@@ -281,6 +343,9 @@ SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍�
 | 비밀 가능 출력 | `printenv`, `cat .env`, `$..._TOKEN`, `.env` 편집 | Ask |
 | 파괴적 Git | `push --force`, `reset --hard`, `clean -f`, `branch -D` | Block |
 | 광범위 삭제 | `rm -r`, `find -delete` | Block |
+| MCP 배포·릴리스 | `mcp__vercel__deploy_project` | Ask (Permissive에서도) |
+| MCP 이슈·알림 변경 | `mcp__linear__create_issue`, `mcp__pagerduty__acknowledge_incident` | Ask |
+| MCP 이슈·관측 조회 | `mcp__linear__list_issues`, `mcp__sentry__search_events` | Allow |
 
 - Ask는 Claude Code의 공식 질문 창(`$.ui.ask`)으로 묻고, Allow여도 Claude Code 기존 권한 검사를 그대로 거칩니다.
 - Block은 툴을 실행하지 않고 이유를 Claude에게 돌려줍니다.
@@ -297,7 +362,15 @@ SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍�
   "rules": [
     { "tool": "Bash", "command": "\\bterraform\\s+apply\\b", "policy": "block", "reason": "infra changes go through CI" },
     { "tool": "Edit|Write", "path": "migrations/**", "policy": "ask", "reason": "schema migrations need review" }
-  ]
+  ],
+  "defaultTemplate": "change",
+  "templates": {
+    "change": {
+      "constraints": ["Keep the public API compatible", "s: Keep the patch minimal"],
+      "doneConditions": ["Related tests pass", "Typecheck passes", { "text": "CI is green", "link": "ci" }]
+    }
+  },
+  "audit": true
 }
 ```
 
@@ -306,6 +379,12 @@ SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍�
 - 저장소 파일은 Guard를 **강화만** 할 수 있습니다. 기본 Block, 비밀값 관련 Ask, 이 파일 자체의 수정에 대한 Ask는 `allow` 규칙으로 풀리지 않습니다.
 - 세션 시작 시와 툴로 이 파일을 수정한 직후 다시 읽습니다. 직접 고쳤다면 `/smartworkbench policy reload`.
 - 잘못된 규칙은 건너뛰고 오류를 표시합니다(추측해서 적용하지 않음).
+- `templates`는 팀 공통 완료 조건입니다. 템플릿마다 `constraints`(`s:` 접두어는 Soft), `doneConditions`(문자열 또는 `{ "text", "link" }`), 선택적인 `goal`, `nonGoals`를 둡니다. `defaultTemplate`은 `/swb new`의 시작점이 되고, `/swb load <이름>` 또는 `team:<이름>`으로 불러옵니다.
+- `audit`은 감사 로그를 켭니다(아래).
+
+### 감사 로그
+
+`"audit": true`(또는 저장소 안 경로를 지정한 `{ "path": "logs/agent-audit.jsonl" }`)이면 모든 세션이 사건마다 JSON 한 줄을 `.claude/smartworkbench-audit.jsonl`에 덧붙입니다. 기록하는 사건은 `session.start`, `guard.block`, `guard.ask`(허용·거절), `contract.lock` / `contract.unlock`, `condition.verified` / `condition.waived` / `condition.unmark`, `task.complete`, `task.new` / `task.load` / `task.clear`, `task.share` / `task.pickup`입니다. 줄마다 시각, git `user.name`, 세션 ID, 세부 내용(툴, 입력 요약, 이유, 메모)이 들어갑니다. 1MB를 넘으면 기존 로그를 `.1`로 옮기고 새로 시작합니다. `/swb audit [n]`으로 봅니다. 팀이 함께 보려면 커밋하고, 로컬에만 두려면 `.gitignore`에 넣습니다. 기록에 실패해도 Guard가 막은 호출이 통과되는 일은 없습니다.
 
 ### 완료 판정
 
@@ -316,9 +395,9 @@ SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍�
 
 ### 신뢰와 저장
 
-- 네트워크 요청 없음, 모델 추가 호출 없음, 텔레메트리 없음.
+- 자체 네트워크 요청 없음, 모델 추가 호출 없음, 텔레메트리 없음. `/swb ci`와 `/swb issue #n`만 직접 실행할 때 로컬 `gh` CLI를 씁니다.
 - 상태는 `$.store`에 프로젝트(작업 디렉터리)별로 저장되어 재시작 후 복원됩니다. 이전 버전에서 저장한 상태도 새 필드를 채워 그대로 읽습니다. 템플릿과 Context set은 프로젝트와 무관하게 저장됩니다. Live Pin 파일 내용, 환경 변수, 대화 기록은 저장하지 않습니다. 툴 기록 100개, 증거 200개로 제한합니다.
-- 로컬 명령은 `git diff -U0 HEAD` 하나뿐이며 인자 배열로 실행합니다. 파일 쓰기는 사용자가 요청한 handoff 내보내기(와 `policy init`의 Guard 파일)뿐입니다.
+- 로컬 명령은 모두 인자 배열로 실행합니다. 턴 종료 시 `git diff -U0 HEAD`, 감사 로그가 켜져 있으면 `git config user.name`, `/swb ci`·`/swb issue`에서 `git`/`gh`. 파일 쓰기는 handoff, `policy init`, `share`, 그리고 Guard 파일이 켠 감사 로그뿐입니다.
 - 사용하는 hook과 호출 목록은 `claude plugin validate .`로 확인할 수 있습니다.
 
 ### 개발
@@ -334,6 +413,7 @@ hooks/report.ts      handoff Markdown, 툴 행 배지 문구
 hooks/policy.ts      프로젝트 Guard 파일 파싱, glob, 규칙 적용
 hooks/files.ts       파일 분류, Suggested 선정
 hooks/diff.ts        git diff 구간 파싱, 파일별 증거 연결
+hooks/team.ts        감사 로그, CI 결과, 이슈 참조, 공유 작업 파일
 types/index.d.ts     상태 타입 계약
 tests/               claude plugin test
 ```
@@ -348,4 +428,4 @@ Claude Code 2.1.292에서 개발·검증했습니다. Mods API는 초기 단계�
 
 ### 아직 안 된 것
 
-- P2: 팀 감사 로그, 조직 공통 Done Condition 템플릿 배포, CI/GitHub 연동, MCP 기반 이슈·배포 도구 연동, 여러 세션 간 상태 교환
+- 저장소 하나를 넘는 정책 배포(조직 관리형 설정, 서명된 배포), 중앙 감사 저장소, CI·PR 쓰기 동작. SmartWorkbench는 CI와 이슈를 읽기만 하고 쓰지 않습니다.

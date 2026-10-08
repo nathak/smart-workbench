@@ -27,6 +27,7 @@ export function evidenceKindOf(command: string): EvidenceKind | undefined {
 export function guessLink(text: string): EvidenceKind | undefined {
   const lower = text.toLowerCase()
 
+  if (/\bci\b|pipeline|github actions|workflow|파이프라인|워크플로/.test(lower)) return 'ci'
   if (/type\s*-?check|typecheck|타입/.test(lower)) return 'typecheck'
   if (/lint|린트/.test(lower)) return 'lint'
   if (/build|빌드|compile|컴파일/.test(lower)) return 'build'

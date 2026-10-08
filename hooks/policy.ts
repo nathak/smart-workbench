@@ -1,7 +1,10 @@
-import type { GuardProfile, Policy, ProjectPolicy, ProjectRule } from '../types'
+import type { AuditConfig, EvidenceKind, GuardProfile, Policy, ProjectPolicy, ProjectRule, TeamTemplate } from '../types'
 import type { Verdict } from './risk'
 
 export const POLICY_PATH = '.claude/smartworkbench.json'
+export const AUDIT_PATH = '.claude/smartworkbench-audit.jsonl'
+
+const KINDS: readonly EvidenceKind[] = ['test', 'build', 'typecheck', 'lint', 'ci']
 
 const PROFILES: readonly GuardProfile[] = ['permissive', 'balanced', 'strict']
 const POLICIES: readonly Policy[] = ['allow', 'ask', 'block']
@@ -15,6 +18,14 @@ export const POLICY_TEMPLATE = `${JSON.stringify(
       { tool: 'Edit|Write', path: 'migrations/**', policy: 'ask', reason: 'schema migrations need review' },
       { tool: 'Bash', command: '\\\\bnpm\\\\s+run\\\\s+deploy\\\\b', policy: 'block', reason: 'deploys run from CI only' },
     ],
+    defaultTemplate: 'change',
+    templates: {
+      change: {
+        constraints: ['Keep the public API compatible', 's: Keep the patch minimal'],
+        doneConditions: [{ text: 'Related tests pass', link: 'test' }, { text: 'Typecheck passes', link: 'typecheck' }, { text: 'CI is green', link: 'ci' }],
+      },
+    },
+    audit: true,
   },
   null,
   2,
@@ -55,11 +66,11 @@ export function parsePolicy(text: string, source: string = POLICY_PATH): Project
   try {
     raw = JSON.parse(text)
   } catch (error) {
-    return { source, rules: [], errors: [`not valid JSON: ${error instanceof Error ? error.message : String(error)}`] }
+    return { source, rules: [], templates: [], errors: [`not valid JSON: ${error instanceof Error ? error.message : String(error)}`] }
   }
 
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return { source, rules: [], errors: ['expected an object with "profile" and "rules"'] }
+    return { source, rules: [], templates: [], errors: ['expected an object with "profile" and "rules"'] }
   }
 
   const value = raw as { profile?: unknown; rules?: unknown }
@@ -102,7 +113,72 @@ export function parsePolicy(text: string, source: string = POLICY_PATH): Project
     })
   })
 
-  return { source, ...(profile ? { profile } : {}), rules, errors }
+  const templates = parseTemplates((value as { templates?: unknown }).templates, errors)
+  const defaultTemplate = (value as { defaultTemplate?: unknown }).defaultTemplate
+  if (defaultTemplate !== undefined && !templates.some(one => one.name === defaultTemplate)) {
+    errors.push(`defaultTemplate "${String(defaultTemplate)}" is not one of the templates`)
+  }
+  const audit = parseAudit((value as { audit?: unknown }).audit, errors)
+
+  return {
+    source,
+    ...(profile ? { profile } : {}),
+    rules,
+    templates,
+    ...(typeof defaultTemplate === 'string' && templates.some(one => one.name === defaultTemplate) ? { defaultTemplate } : {}),
+    ...(audit ? { audit } : {}),
+    errors,
+  }
+}
+
+// "templates": { "bugfix": { "goal"?, "constraints": ["...", "s: ..."], "nonGoals": [], "doneConditions": ["...", { "text", "link" }] } }
+function parseTemplates(raw: unknown, errors: string[]): TeamTemplate[] {
+  if (raw === undefined) return []
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    errors.push('templates must be an object of named templates')
+    return []
+  }
+
+  const out: TeamTemplate[] = []
+  for (const [name, body] of Object.entries(raw)) {
+    const value = (body ?? {}) as Record<string, unknown>
+    const list = (key: string): unknown[] => (Array.isArray(value[key]) ? (value[key] as unknown[]) : [])
+    const constraints = list('constraints').flatMap(one => {
+      if (typeof one !== 'string' || one.trim() === '') return []
+      const soft = /^\s*s\s*:/i.test(one)
+      return [{ text: one.replace(/^\s*[hs]\s*:\s*/i, '').trim(), priority: soft ? ('soft' as const) : ('hard' as const) }]
+    })
+    const doneConditions = list('doneConditions').flatMap(one => {
+      if (typeof one === 'string' && one.trim() !== '') return [{ text: one.trim() }]
+      const item = (one ?? {}) as { text?: unknown; link?: unknown }
+      if (typeof item.text !== 'string' || item.text.trim() === '') return []
+      const link = KINDS.find(kind => kind === item.link)
+      return [{ text: item.text.trim(), ...(link ? { link } : {}) }]
+    })
+    const nonGoals = list('nonGoals').filter((one): one is string => typeof one === 'string' && one.trim() !== '')
+
+    if (doneConditions.length === 0 && constraints.length === 0) {
+      errors.push(`template "${name}": needs constraints or doneConditions`)
+      continue
+    }
+    out.push({ name, ...(typeof value.goal === 'string' ? { goal: value.goal } : {}), constraints, nonGoals, doneConditions })
+  }
+
+  return out
+}
+
+// "audit": true for the default file, or { "path": "logs/agent-audit.jsonl" } inside the repository.
+function parseAudit(raw: unknown, errors: string[]): AuditConfig | undefined {
+  if (raw === undefined || raw === false) return undefined
+  if (raw === true) return { path: AUDIT_PATH }
+
+  const path = (raw as { path?: unknown } | null)?.path
+  if (typeof path !== 'string' || path.trim() === '' || path.startsWith('/') || path.split('/').includes('..')) {
+    errors.push('audit must be true or { "path": "<relative path inside the repository>" }')
+    return undefined
+  }
+
+  return { path: path.trim() }
 }
 
 function relative(path: string, cwd: string): string {

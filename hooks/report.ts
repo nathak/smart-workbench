@@ -18,6 +18,7 @@ export function handoffMarkdown(wb: Workbench, now: number): string {
     `- Exported: ${when(now)} UTC`,
     `- Status: ${task.status}${task.locked ? ' (contract locked)' : ''} · Done ${met}/${total}${total > 0 ? ` · ${isComplete ? 'COMPLETE' : 'INCOMPLETE'}` : ''}`,
     `- Guard: ${wb.execution.profile}${wb.execution.isPaused ? ' (risky calls paused)' : ''}`,
+    ...(task.issue ? [`- Issue: ${task.issue.ref}${task.issue.title ? ` ${task.issue.title}` : ''}${task.issue.url ? ` (${task.issue.url})` : ''}`] : []),
     '',
     '## Goal',
     '',

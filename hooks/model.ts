@@ -5,12 +5,14 @@ import type {
   EvidenceKind,
   EvidenceRecord,
   GuardProfile,
+  IssueRef,
   Live,
   ManualMark,
   Snapshot,
   Task,
-  Template,
   TaskStatus,
+  TeamTemplate,
+  Template,
   ToolCallRecord,
   Workbench,
 } from '../types'
@@ -53,13 +55,23 @@ export function isWorkbench(value: unknown): value is Workbench {
   return typeof value === 'object' && value !== null && (value as Workbench).schemaVersion === 1
 }
 
-// What a saved workbench becomes on load: a call still running when the session ended never finished.
-export function restore(saved: unknown): Workbench {
+// Fields added in later versions are filled in for state saved by an earlier one.
+export function fill(saved: unknown): Workbench {
   const empty = emptyWorkbench()
-  // Fields added in later versions are filled in for state saved by an earlier one.
-  const wb = isWorkbench(saved)
+
+  return isWorkbench(saved)
     ? { ...empty, ...saved, context: { ...empty.context, ...saved.context }, changed: { ...empty.changed, ...saved.changed } }
     : empty
+}
+
+// Another session saved after this one last did: its copy is the one to build on.
+export function isNewerElsewhere(saved: unknown, mine: Workbench, sessionId: string | undefined): saved is Workbench {
+  return isWorkbench(saved) && (saved.rev ?? 0) > (mine.rev ?? 0) && saved.savedBy !== sessionId
+}
+
+// What a saved workbench becomes on load: a call still running when the session ended never finished.
+export function restore(saved: unknown): Workbench {
+  const wb = fill(saved)
   const recentCalls = wb.execution.recentCalls.map(one => (one.outcome === 'running' ? { ...one, outcome: 'error' as const } : one))
 
   return withStatus({ ...wb, execution: { ...wb.execution, recentCalls } })
@@ -251,6 +263,57 @@ export function applySet(wb: Workbench, pins: readonly ContextPin[]): Workbench 
   const added = pins.filter(one => !have.has(key(one))).map(one => ({ ...one, id: newId('p') }))
 
   return { ...wb, context: { ...wb.context, pins: [...wb.context.pins, ...added] } }
+}
+
+// A team template starts a fresh, unlocked task; pins and the guard profile stay as they are.
+export function applyTeamTemplate(wb: Workbench, template: TeamTemplate): Workbench {
+  const task: Task = {
+    ...emptyTask(),
+    goal: template.goal ?? '',
+    constraints: template.constraints.map(one => ({ id: newId('c'), text: one.text, priority: one.priority, isActive: true })),
+    nonGoals: template.nonGoals,
+    doneConditions: template.doneConditions.map((one, i) => {
+      const link = one.link ?? guessLink(one.text)
+      return { id: `dc-${i + 1}`, text: one.text, ...(link ? { link } : {}) }
+    }),
+  }
+
+  return { ...wb, task, evidence: [], changed: emptyChanged() }
+}
+
+// The issue is part of the contract, so it changes only while unlocked.
+export function setIssue(wb: Workbench, issue: IssueRef | undefined): Workbench {
+  return editTask(wb, ({ issue: _old, ...task }) => ({
+    ...task,
+    ...(issue ? { issue } : {}),
+    goal: task.goal.trim() === '' && issue?.title ? issue.title : task.goal,
+  }))
+}
+
+// A task shared from another machine: contract, manual marks and pins come over; checks are re-run here.
+export function applyShare(wb: Workbench, shared: { task: Task; pins: readonly ContextPin[] }): Workbench {
+  const task: Task = {
+    ...emptyTask(),
+    ...shared.task,
+    constraints: Array.isArray(shared.task.constraints) ? shared.task.constraints : [],
+    nonGoals: Array.isArray(shared.task.nonGoals) ? shared.task.nonGoals : [],
+  }
+
+  return {
+    ...wb,
+    task,
+    context: { ...wb.context, pins: shared.pins.map(one => ({ ...one, id: newId('p') })) },
+    evidence: [],
+    changed: emptyChanged(),
+  }
+}
+
+// A CI run seen again (queued, then finished) updates its own record; other history stays.
+export function addCiEvidence(wb: Workbench, records: readonly EvidenceRecord[]): Workbench {
+  const ids = new Set(records.map(one => one.id))
+  const kept = wb.evidence.filter(one => !ids.has(one.id))
+
+  return { ...wb, evidence: [...kept, ...records].slice(-MAX_EVIDENCE) }
 }
 
 export function setProfile(wb: Workbench, profile: GuardProfile): Workbench {

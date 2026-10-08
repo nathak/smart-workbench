@@ -7,7 +7,7 @@ export type Constraint = {
   isActive: boolean
 }
 
-export type EvidenceKind = 'test' | 'build' | 'typecheck' | 'lint'
+export type EvidenceKind = 'test' | 'build' | 'typecheck' | 'lint' | 'ci'
 
 export type ConditionStatus = 'pending' | 'observed' | 'verified' | 'failed' | 'waived'
 
@@ -69,9 +69,23 @@ export type ProjectRule = {
   reason?: string
 }
 
+// A team template from the checked-in file: the contract without its results.
+export type TeamTemplate = {
+  name: string
+  goal?: string
+  constraints: { text: string; priority: 'hard' | 'soft' }[]
+  nonGoals: string[]
+  doneConditions: { text: string; link?: EvidenceKind }[]
+}
+
+export type AuditConfig = { path: string }
+
 export type ProjectPolicy = {
   source: string
   profile?: GuardProfile
+  templates: TeamTemplate[]
+  defaultTemplate?: string
+  audit?: AuditConfig
   rules: ProjectRule[]
   errors: string[]
 }
@@ -90,6 +104,7 @@ export type ToolCallRecord = {
   summary: string
   risk: Risk
   policy: Policy
+  category?: string
   reason?: string
   outcome: CallOutcome
   startedAt: number
@@ -113,10 +128,17 @@ export type Task = {
   constraints: Constraint[]
   nonGoals: string[]
   doneConditions: DoneCondition[]
+  issue?: IssueRef
 }
+
+// The tracker item a task is for: a GitHub issue or any tracker's key and title.
+export type IssueRef = { ref: string; title?: string; url?: string }
 
 export type Workbench = {
   schemaVersion: 1
+  // Bumped on every save, with the session that saved, so sessions can see each other's changes.
+  rev?: number
+  savedBy?: string
   task: Task
   context: { pins: ContextPin[]; observed: Observed[]; excluded?: string[] }
   execution: { profile: GuardProfile; isPaused: boolean; recentCalls: ToolCallRecord[] }
@@ -135,6 +157,8 @@ export type Live = {
   pinWarnings: string[]
   lastSummary?: string
   policy?: ProjectPolicy
+  sessionId?: string
+  user?: string
 }
 
 declare module 'claude-code' {

@@ -14,6 +14,11 @@ export function serializeContract(task: Task): string | undefined {
   const constraints = task.constraints.filter(one => one.isActive)
   const lines = ['<smartworkbench_contract version="1">', `  <goal>${escapeXml(task.goal.trim())}</goal>`]
 
+  if (task.issue) {
+    const url = task.issue.url ? ` url="${escapeXml(task.issue.url)}"` : ''
+    lines.push(`  <issue ref="${escapeXml(task.issue.ref)}"${url}>${escapeXml(task.issue.title ?? '')}</issue>`)
+  }
+
   if (constraints.length > 0) {
     lines.push('  <constraints>')
     for (const one of constraints) {
