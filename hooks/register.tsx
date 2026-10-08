@@ -10,7 +10,7 @@ import * as model from './model'
 import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
-import { classify, decide, summarize } from './risk'
+import { classify, decide, sessionScope, summarize } from './risk'
 
 type $ = EngineInterface
 type Els = Elements['terminal'] | Elements['desktop'] | Elements['vscode']
@@ -165,6 +165,21 @@ async function stamp($: $, id: string, status: 'verified' | 'waived' | 'auto', n
   const wb = await mutate($, current => model.markCondition(current, id, status, note, at))
   const condition = wb.task.doneConditions.find(one => one.id === id)
   await audit($, status === 'auto' ? 'condition.unmark' : `condition.${status}`, { condition: id, text: condition?.text ?? '', note })
+}
+
+async function allowForSession($: $, key: string, label: string): Promise<void> {
+  const at = await $.clock.now()
+  await setLive($, live => ({
+    ...live,
+    sessionAllows: [...(live.sessionAllows ?? []).filter(one => one.key !== key), { key, label, at }],
+  }))
+}
+
+async function revokeSessionAllow($: $, key: string): Promise<void> {
+  const live = await read($, liveAtom)
+  const gone = (live.sessionAllows ?? []).find(one => one.key === key)
+  await setLive($, current => ({ ...current, sessionAllows: (current.sessionAllows ?? []).filter(one => one.key !== key) }))
+  if (gone) await audit($, 'guard.session-revoke', { scope: gone.label })
 }
 
 async function toggleLock($: $): Promise<void> {
@@ -364,6 +379,7 @@ function statusText(wb: Workbench, live: Live): string {
     `Goal: ${wb.task.goal || '—'} (${wb.task.locked ? 'locked' : 'unlocked'}, ${wb.task.status})`,
     ...(constraints.length > 0 ? ['Constraints:', ...constraints] : []),
     ...(pins.length > 0 ? ['Pins:', ...pins] : []),
+    ...((live.sessionAllows ?? []).length > 0 ? [`Allowed for this session: ${(live.sessionAllows ?? []).map(one => one.label).join(', ')}`] : []),
     ...(live.policy ? [`Guard file: ${live.policy.source} (${live.policy.rules.length} rules${live.policy.profile ? `, profile ${live.policy.profile}` : ''})`] : []),
     ...(wb.task.doneConditions.length > 0 ? [turnSummary(wb.task, wb.evidence, lastCheckedEdit(wb.changed))] : []),
   ].join('\n')
@@ -796,6 +812,20 @@ function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
       ) : (
         <Text dimColor>No project guard file · /swb policy init</Text>
       )}
+      {(live.sessionAllows ?? []).length > 0 && (
+        <Box flexDirection="column">
+          <Text bold>
+            ALLOWED FOR THIS SESSION{wb.execution.isPaused ? <Text dimColor> (paused: asking again)</Text> : ''}
+          </Text>
+          {(live.sessionAllows ?? []).map(one => (
+            <Box key={`allow-${one.key}`} gap={1}>
+              <Text color="warning">✓</Text>
+              <Text wrap="truncate-end">{model.cut(one.label, width - 8)}</Text>
+              <Button key={`revoke-${one.key}`} plain dimColor label="×" onPress={() => void revokeSessionAllow($, one.key)} />
+            </Box>
+          ))}
+        </Box>
+      )}
       <Text bold>RUNNING</Text>
       {running.length === 0 && <Text dimColor>idle</Text>}
       {running.map(one => (
@@ -812,7 +842,9 @@ function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
             ? 'BLOCKED'
             : one.outcome === 'declined'
               ? 'DECLINED'
-              : one.policy === 'ask'
+              : one.sessionAllowed
+                ? 'SESSION'
+                : one.policy === 'ask'
                 ? 'ASKED'
                 : one.risk === 'low'
                   ? one.category?.startsWith('mcp-')
@@ -1036,7 +1068,7 @@ export const register: Register = on => {
     const verdict = applyRule(classify(e.tool, e), live.policy ? matchRule(live.policy.rules, e.tool, e, cwd) : undefined)
     const policy = decide(verdict, profileOf(wb, live), wb.execution.isPaused)
     const startedAt = await $.clock.now()
-    const call: ToolCallRecord = {
+    let call: ToolCallRecord = {
       id: e.tool_use_id ?? `call-${startedAt}`,
       tool: e.tool,
       summary: summarize(e.tool, e),
@@ -1060,12 +1092,22 @@ export const register: Register = on => {
       }
     }
 
-    if (policy === 'ask') {
+    // "Allow for session" answers stand until the session ends, except while risky calls are paused.
+    const scope = policy === 'ask' ? sessionScope(e.tool, e, verdict) : undefined
+    const isSessionAllowed = scope !== undefined && !wb.execution.isPaused && (live.sessionAllows ?? []).some(one => one.key === scope.key)
+
+    if (isSessionAllowed) {
+      call = { ...call, policy: 'allow', sessionAllowed: true, reason: `${verdict.reason}; allowed for this session` }
+      const allowed = call
+      await mutate($, current => model.recordCall(current, allowed))
+    } else if (policy === 'ask') {
+      const options = scope ? ['Allow', 'Allow for session', 'Block'] : ['Allow', 'Block']
+      const hint = scope ? ` ("Allow for session" stops asking for \`${model.cut(scope.label, 60)}\` until this session ends.)` : ''
       const answer = await $.ui
-        .ask(`SmartWorkbench: ${verdict.reason}. Allow ${e.tool}: ${call.summary.slice(0, 80)}?`, { header: 'Guard', options: ['Allow', 'Block'] })
+        .ask(`SmartWorkbench: ${verdict.reason}. Allow ${e.tool}: ${call.summary.slice(0, 80)}?${hint}`, { header: 'Guard', options })
         .catch(() => 'Block')
 
-      if (answer !== 'Allow') {
+      if (answer !== 'Allow' && answer !== 'Allow for session') {
         const durationMs = (await $.clock.now()) - startedAt
         await mutate($, current => model.recordCall(current, { ...call, outcome: 'declined', durationMs }))
         await badge($, { ...call, outcome: 'declined' })
@@ -1073,7 +1115,17 @@ export const register: Register = on => {
 
         return { deny: `The user declined this ${e.tool} call in SmartWorkbench (${verdict.reason}).` }
       }
-      await audit($, 'guard.ask', { tool: e.tool, input: call.summary, reason: verdict.reason, answer: 'allowed' })
+
+      if (answer === 'Allow for session' && scope) {
+        await allowForSession($, scope.key, scope.label)
+      }
+      await audit($, 'guard.ask', {
+        tool: e.tool,
+        input: call.summary,
+        reason: verdict.reason,
+        answer: answer === 'Allow' ? 'allowed' : 'allowed-session',
+        ...(answer === 'Allow' || !scope ? {} : { scope: scope.label }),
+      })
     }
 
     // Allow still goes through Claude Code's own permission check beneath.

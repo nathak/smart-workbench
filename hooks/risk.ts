@@ -165,3 +165,58 @@ export function summarize(tool: string, input: unknown): string {
 
   return String(text).replace(/\s+/g, ' ').trim().slice(0, 120)
 }
+
+// ---- "Allow for session"
+
+// Commands whose meaning sits in two subcommand words (gh pr create, kubectl rollout restart).
+const TWO_WORDS = new Set(['gh', 'kubectl', 'docker', 'aws', 'gcloud', 'az', 'helm', 'fly', 'vercel', 'firebase'])
+const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'exec'])
+
+// "FOO=1 sudo git push origin main" → "git push"; flags and later arguments are dropped.
+export function commandPrefix(segment: string): string | undefined {
+  const words = segment.trim().split(/\s+/).filter(Boolean)
+  while (words.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? '') || WRAPPERS.has(words[0] ?? ''))) {
+    words.shift()
+  }
+  const [command, ...rest] = words
+  if (!command) return undefined
+
+  const subcommands = rest.filter(word => !word.startsWith('-')).slice(0, TWO_WORDS.has(command) ? 2 : 1)
+
+  return [command, ...subcommands].join(' ')
+}
+
+export function splitCommand(command: string): string[] {
+  return command
+    .split(/&&|\|\||[;|\n]/)
+    .map(one => one.trim())
+    .filter(Boolean)
+}
+
+export type SessionScope = { key: string; label: string }
+
+// What one "Allow for session" answer covers. A chain is covered only as the same set of
+// commands, so `git push && curl ...` is asked again after allowing `git push`.
+// The guard file's own protection is never allowed for a session.
+export function sessionScope(tool: string, input: unknown, verdict: Verdict): SessionScope | undefined {
+  if (verdict.category === 'guard-policy' || verdict.policy === 'block') {
+    return undefined
+  }
+  const args = (input ?? {}) as Record<string, unknown>
+
+  if (tool === 'Bash') {
+    const prefixes = splitCommand(String(args.command ?? '')).map(commandPrefix)
+    if (prefixes.length === 0 || prefixes.some(one => one === undefined)) return undefined
+    const unique = [...new Set(prefixes as string[])].sort()
+
+    return { key: `bash:${unique.join(' && ')}`, label: unique.join(' && ') }
+  }
+
+  const path = args.file_path ?? args.notebook_path
+  if (typeof path === 'string' && path !== '') {
+    const kind = EDIT_TOOLS.has(tool) ? 'edit' : tool.toLowerCase()
+    return { key: `${kind}:${path}`, label: `${EDIT_TOOLS.has(tool) ? 'edits of' : tool} ${path}` }
+  }
+
+  return { key: `tool:${tool}`, label: tool }
+}

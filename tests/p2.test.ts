@@ -4,6 +4,7 @@ import type { Workbench } from '../types'
 import { serializeContract } from '../hooks/intent'
 import * as model from '../hooks/model'
 import { AUDIT_PATH, parsePolicy } from '../hooks/policy'
+import * as risk from '../hooks/risk'
 import { classifyMcp, decide } from '../hooks/risk'
 import { AUDIT_MAX_CHARS, appendAudit, auditLine, ciEvidence, formatAudit, parseIssueArg, readAudit, readShare, shareText } from '../hooks/team'
 
@@ -142,5 +143,30 @@ describe('sharing between sessions and machines', () => {
     expect(model.isNewerElsewhere({ ...mine, rev: 4, savedBy: 'b' }, mine, 'a')).toBe(true)
     expect(model.isNewerElsewhere({ ...mine, rev: 4, savedBy: 'a' }, mine, 'a')).toBe(false)
     expect(model.isNewerElsewhere({ ...mine, rev: 3, savedBy: 'b' }, mine, 'a')).toBe(false)
+  })
+})
+
+describe('allow for session', () => {
+  test('commands are remembered by their command and subcommand', async () => {
+    const { commandPrefix, splitCommand } = risk
+    expect(commandPrefix('git push origin main')).toBe('git push')
+    expect(commandPrefix('FOO=1 sudo git push --force-with-lease')).toBe('git push')
+    expect(commandPrefix('gh pr create --fill')).toBe('gh pr create')
+    expect(commandPrefix('cat .env')).toBe('cat .env')
+    expect(commandPrefix('printenv')).toBe('printenv')
+    expect(splitCommand('npm test && git push; echo done | tee log')).toEqual(['npm test', 'git push', 'echo done', 'tee log'])
+  })
+
+  test('a chain is covered only as the same set of commands; the guard file never', async () => {
+    const scope = (command: string) => risk.sessionScope('Bash', { command }, risk.classify('Bash', { command }))
+    expect(scope('git push origin main')).toEqual({ key: 'bash:git push', label: 'git push' })
+    expect(scope('git push origin feature')?.key).toBe('bash:git push')
+    expect(scope('git push && curl -X POST https://x')?.key).toBe('bash:curl POST && git push')
+    expect(scope('echo {} > .claude/smartworkbench.json')).toBe(undefined)
+    expect(risk.sessionScope('Edit', { file_path: '/w/.env' }, risk.classify('Edit', { file_path: '/w/.env' }))).toEqual({
+      key: 'edit:/w/.env',
+      label: 'edits of /w/.env',
+    })
+    expect(risk.sessionScope('mcp__linear__create_issue', {}, risk.classifyMcp('mcp__linear__create_issue'))?.key).toBe('tool:mcp__linear__create_issue')
   })
 })

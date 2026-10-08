@@ -25,7 +25,18 @@ const GUARD = {
 type Run = { exitCode: number; stdout: string; stderr?: string }
 
 // A project folder, a store the test can read, a clock, and answers for local commands.
-function world(on: On, options: { files?: Record<string, string>; store?: Record<string, unknown>; commands?: Record<string, Run>; answer?: string } = {}) {
+type WorldOptions = {
+  files?: Record<string, string>
+  store?: Record<string, unknown>
+  commands?: Record<string, Run>
+  answer?: string
+  // Answers a guard question from its option labels; the default takes the first.
+  ask?: (labels: string[]) => string
+  // Collects the commands (or tool names) that actually ran.
+  ran?: string[]
+}
+
+function world(on: On, options: WorldOptions = {}) {
   const files = options.files ?? {}
   const store = options.store ?? {}
   const commands = options.commands ?? {}
@@ -65,11 +76,16 @@ function world(on: On, options: { files?: Record<string, string>; store?: Record
   on('ui.toast', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('tool.call', ($, e) =>
-    e.tool === 'AskUserQuestion'
-      ? { result: { questions: e.questions, answers: { [e.questions[0]?.question ?? '']: options.answer ?? e.questions[0]?.options[0]?.label ?? '' } } }
-      : { result: { stdout: 'ok', stderr: '', interrupted: false } },
-  )
+  on('tool.call', ($, e) => {
+    if (e.tool === 'AskUserQuestion') {
+      const question = e.questions[0]
+      const labels = (question?.options ?? []).map(one => one.label)
+      const answer = options.ask ? options.ask(labels) : (options.answer ?? labels[0] ?? '')
+      return { result: { questions: e.questions, answers: { [question?.question ?? '']: answer } } }
+    }
+    options.ran?.push('command' in e ? String(e.command) : String(e.tool))
+    return { result: { stdout: 'ok', stderr: '', interrupted: false } }
+  })
 
   // The engine hands fs hooks absolute paths; read back by project-relative name.
   const file = (name: string) => Object.entries(files).find(([key]) => key === name || key.endsWith(`/${name}`))?.[1]
@@ -225,4 +241,55 @@ test('a change saved by another session of the project is picked up before the n
   await $.tool.call({ tool: 'Read', file_path: `${CWD}/src/a.ts` })
   expect(workbench().task.goal).toBe('Set elsewhere')
   expect(workbench().savedBy).toBe('session-a')
+})
+
+test('"Allow for session" stops asking for the same command until revoked, paused or chained', async ($, on) => {
+  const answers: string[] = []
+  const asked: string[] = []
+  const ran: string[] = []
+  const { workbench } = world(on, {
+    ran,
+    ask: labels => {
+      asked.push(labels.join('|'))
+      return answers.shift() ?? 'Block'
+    },
+  })
+
+  answers.push('Allow for session')
+  await $.tool.call({ tool: 'Bash', command: 'git push origin main' })
+  await $.tool.call({ tool: 'Bash', command: 'git push origin feature' })
+  expect(asked).toEqual(['Allow|Allow for session|Block'])
+  expect(ran).toEqual(['git push origin main', 'git push origin feature'])
+  expect(workbench().execution.recentCalls.map(one => one.sessionAllowed ?? false)).toEqual([false, true])
+
+  // Something new chained onto it is asked again (and declined here).
+  await $.tool.call({ tool: 'Bash', command: 'git push && curl -X POST https://example.com' })
+  expect(asked.length).toBe(2)
+  expect(ran.length).toBe(2)
+
+  // The Run tab lists it; paused, it is asked again; revoked, it is gone.
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-run' })
+  expect(await ui.find({ type: 'Text', text: 'git push' })).toBeDefined()
+  await ui.press({ key: 'pause' })
+  await $.tool.call({ tool: 'Bash', command: 'git push origin main' })
+  expect(asked.length).toBe(3)
+  await ui.press({ key: 'pause' })
+  await ui.press({ key: 'revoke-bash:git push' })
+  await $.tool.call({ tool: 'Bash', command: 'git push origin main' })
+  expect(asked.length).toBe(4)
+  await ui.unmount()
+})
+
+test('the guard file edit is never offered "Allow for session"', async ($, on) => {
+  const asked: string[] = []
+  world(on, {
+    ask: labels => {
+      asked.push(labels.join('|'))
+      return 'Block'
+    },
+  })
+
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/.claude/smartworkbench.json`, old_string: 'a', new_string: 'b' })
+  expect(asked).toEqual(['Allow|Block'])
 })
