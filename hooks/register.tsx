@@ -39,7 +39,7 @@ const HELP = [
   '  /smartworkbench run        open the Run tab',
   '  /smartworkbench verify     open the Evidence tab',
   '  /smartworkbench lock | unlock   lock the contract (added to every prompt) or unlock it to edit',
-  '  /smartworkbench team [on|off]   team mode: Sonnet builds, Haiku explores, Opus reviews',
+  '  /smartworkbench team [on|off]   team mode: Opus designs and reviews, Sonnet builds, Haiku explores',
   '  /smartworkbench advise [topic]  ask the Opus advisor now',
   '  /smartworkbench loop <count|inf> <item>[; <item>...]   repeat a task; works with team mode (loop stop | loop status)',
   '  /smartworkbench status     text summary (works without UI)',
@@ -1558,7 +1558,8 @@ export const register: Register = on => {
         $.ui.toast('SmartWorkbench: loop ended because you sent a prompt.')
       }
     }
-    await updateTrack($, track => ({ ...track, turnStartedAt: startedAt }))
+    const carriesDesign = (e.origin.kind === 'plugin' && (await read($, liveAtom)).loop !== undefined) || crew.planWasApproved((await read($, liveAtom)).track ?? crew.EMPTY_TRACK)
+    await updateTrack($, track => crew.turnStart(track, startedAt, carriesDesign))
     const { turnResult: _done, ...rest } = await read($, liveAtom)
     await setLive($, () => ({ ...rest, pinWarnings: warnings }))
 
@@ -1588,6 +1589,20 @@ export const register: Register = on => {
     if (isTeam && e.tool === 'ExitPlanMode' && crew.needsPlanReview((await read($, liveAtom)).track ?? crew.EMPTY_TRACK)) {
       await audit($, 'team.plan-review-required')
       return { deny: crew.PLAN_REVIEW }
+    }
+    // Design first: a big edit needs a design from the advisor; asked once per turn so it can never deadlock.
+    if (isTeam && e.agentId === undefined && model.isEditTool(e.tool)) {
+      const cwd = await $.session.cwd()
+      const file = 'file_path' in e && typeof e.file_path === 'string' ? e.file_path : undefined
+      const inside = file?.startsWith(`${cwd}/`) ? file.slice(cwd.length + 1) : undefined
+      const track = (await read($, liveAtom)).track ?? crew.EMPTY_TRACK
+
+      if (inside !== undefined && crew.needsDesign(track, crew.isSmallEdit(track, inside, crew.editSize(e.tool, e as unknown as Record<string, unknown>)))) {
+        await updateTrack($, current => ({ ...current, designDeniedAt: hookStart }))
+        await audit($, 'team.design-required', { tool: e.tool })
+
+        return { deny: crew.DESIGN_FIRST }
+      }
     }
     const wb = await read($, wbAtom)
     const live = await read($, liveAtom)
@@ -1679,6 +1694,14 @@ export const register: Register = on => {
 
       return path && isOk ? model.observe(updated, e.tool, path, endedAt) : updated
     })
+
+    if (isTeam && isOk && path !== undefined && rawPath?.startsWith(`${cwd}/`) && model.isEditTool(e.tool)) {
+      const lines = crew.editSize(e.tool, e as unknown as Record<string, unknown>).lines
+      await updateTrack($, track => crew.noteEdit(track, path, lines))
+    }
+    if (isTeam && isOk && e.tool === 'ExitPlanMode') {
+      await updateTrack($, track => ({ ...track, planApprovedAt: endedAt }))
+    }
 
     if (isOk && path === POLICY_PATH && model.isEditTool(e.tool)) {
       await loadPolicy($)

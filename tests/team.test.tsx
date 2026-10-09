@@ -497,7 +497,7 @@ test('a plan is sent back for an Opus review before it reaches the user', async 
   await $.prompt.submit({ text: 'plan the fix', ...COMPOSER })
 
   const first = await $.tool.call({ tool: 'ExitPlanMode' })
-  expect(JSON.stringify(first)).toContain(`have ${ADVISOR} review it`)
+  expect(JSON.stringify(first)).toContain(`plans come from ${ADVISOR}`)
   expect(ran).toEqual([])
 
   await $.tool.call(advisorCall)
@@ -546,6 +546,34 @@ test('a turn that changed code is held for a final Opus check, once', async ($, 
   await $.command.run({ command: 'swb', args: 'team off', ...COMMAND })
   await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: '31' })
   expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+})
+
+const BIG = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n')
+
+test('a big edit is sent back once for a design; a design, a small edit or another folder passes', async ($, on) => {
+  world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'build it', ...COMPOSER })
+
+  const small = await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '30' })
+  expect(JSON.stringify(small)).not.toContain('not small')
+  const outside = await $.tool.call({ tool: 'Write', file_path: '/elsewhere/plan.md', content: BIG })
+  expect(JSON.stringify(outside)).not.toContain('not small')
+
+  const held = await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: BIG })
+  expect(JSON.stringify(held)).toContain('no design from')
+  const retry = await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: BIG })
+  expect(JSON.stringify(retry)).not.toContain('no design from')
+
+  await $.prompt.submit({ text: 'next', ...COMPOSER })
+  await $.tool.call(advisorCall)
+  const designed = await $.tool.call({ tool: 'Write', file_path: `${CWD}/src/new.js`, content: BIG })
+  expect(JSON.stringify(designed)).not.toContain('no design from')
+
+  await $.command.run({ command: 'swb', args: 'team off', ...COMMAND })
+  await $.prompt.submit({ text: 'again', ...COMPOSER })
+  expect(JSON.stringify(await $.tool.call({ tool: 'Write', file_path: `${CWD}/src/off.js`, content: BIG }))).not.toContain('no design from')
 })
 
 test('a counted loop holds each stop for the next pass and ends after the last, with or without team mode', async ($, on) => {
