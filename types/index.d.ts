@@ -228,6 +228,12 @@ export type Track = {
   lastAdvisorAt?: number
   turnStartedAt?: number
   advisorRuns: number
+  // Design first: the advisor run that counts as this work's design must be at or after designFrom.
+  designFrom?: number
+  designDeniedAt?: number
+  planApprovedAt?: number
+  // Edits made in this turn without a design, to keep many small edits from adding up to a big one.
+  turnEdits?: { files: string[]; lines: number }
 }
 
 declare module 'claude-code' {

@@ -57,11 +57,18 @@ export const EXPLORER_SPEC = {
 export const ADVISOR_SPEC = {
   name: 'advisor',
   description:
-    'Senior reviewer (Opus). Use only to review a plan before building it, to break an error that keeps repeating, or for a final check that nothing is missing before you finish. Give it a focused brief (goal, plan or error, what you tried, relevant paths), not the whole conversation.',
+    'Senior designer and reviewer (Opus). Ask it for a DESIGN before non-trivial edits, to break an error that keeps repeating, or for a final check before you finish. Give it a focused brief (goal, constraints, known paths, or the error and what you tried), not the whole conversation.',
   prompt: [
-    'You are a senior engineer advising a lead who writes the code. You are called only for decisions that matter: a plan review, an error that keeps repeating, or a final check before finishing.',
-    'Work from the brief you are given. Read only the files you need to confirm or refute a point; do not explore broadly and never edit.',
-    'Answer in this shape:',
+    'You are a senior engineer who designs the work; a lead implements exactly what you design.',
+    'Read only the files you need to ground the answer in real code (cite path:line); never edit.',
+    'If asked to design (or to re-design after the code did not match), answer in this shape:',
+    'DESIGN:',
+    'APPROACH: the chosen approach and why; one or two alternatives rejected.',
+    'FILES: each path to change and what changes there.',
+    'STEPS: ordered, each small enough to verify on its own.',
+    'RISKS: what could break, most likely first.',
+    'DONE: the checks that prove it works (commands, tests).',
+    'If asked to diagnose an error or to check finished work, answer in this shape:',
     'VERDICT: go / go with changes / stop',
     'BLOCKERS: what must change first, each with the reason and where (path:line). "none" if none.',
     'RISKS: what could still go wrong, most likely first.',
@@ -70,14 +77,14 @@ export const ADVISOR_SPEC = {
   ].join('\n'),
   tools: ['Read', 'Grep', 'Glob', 'LS'],
   model: 'opus',
-  maxTurns: 15,
+  maxTurns: 25,
 } as const
 
 // Added to every prompt while team mode is on; fixed text, so the prompt cache keeps it.
 export const TEAM_CONTEXT = [
   '<smartworkbench_team>',
   `  You lead this session and write the code. Delegate exploration (finding files, reading code, searching docs) to ${EXPLORER}, several in parallel when the questions are independent.`,
-  `  Consult ${ADVISOR} (Opus) only to review a plan before building it, when an error keeps repeating, or for a final check before finishing. Give it a focused brief, not the conversation.`,
+  `  ${ADVISOR} (Opus) designs; you implement. Before any non-trivial edit (more than a few lines or more than one file), ask it for a DESIGN with a focused brief (goal, constraints, known paths) and follow it. If reality contradicts the design, go back to it instead of improvising. Also consult it when an error keeps repeating and for a final check before finishing.`,
   '</smartworkbench_team>',
 ].join('\n')
 
@@ -124,7 +131,7 @@ export function needsPlanReview(track: Track): boolean {
 }
 
 export const PLAN_REVIEW =
-  `SmartWorkbench team mode: before presenting this plan, have ${ADVISOR} review it. Send it the goal, the plan and the files it touches; address its blockers, then call ExitPlanMode again with the revised plan.`
+  `SmartWorkbench team mode: plans come from ${ADVISOR}, not from you. If it has not designed this work yet, send it the goal, constraints and known paths and ask for a DESIGN. Present that design as the plan, with only the changes it agreed to, then call ExitPlanMode again.`
 
 // The turn may end once code edited in it has been through a final advisor check.
 export function needsFinalCheck(track: Track, lastEditAt: number | undefined, isRepeatStop: boolean): boolean {
@@ -146,3 +153,71 @@ export function advisePrompt(topic: string): string {
 
   return `Consult ${ADVISOR} (Opus) about: ${about}\nGive it a focused brief (goal, relevant decisions or errors, what you tried, file paths), then tell me its verdict and what you will do about it.`
 }
+
+
+// ---- design first: the lead implements, the advisor designs
+
+// An edit this small needs no design; the limits also cap many small edits adding up to a big one.
+export const SMALL_EDIT_LINES = 6
+export const SMALL_EDIT_CHARS = 400
+export const SMALL_TURN_LINES = 15
+
+export type EditSize = { lines: number; chars: number; isBulk: boolean }
+
+const lineCount = (text: unknown): number => (typeof text === 'string' && text !== '' ? text.split('\n').length : 0)
+const charCount = (text: unknown): number => (typeof text === 'string' ? text.length : 0)
+
+export function editSize(tool: string, input: Record<string, unknown>): EditSize {
+  const bigger = (a: unknown, b: unknown) => ({ lines: Math.max(lineCount(a), lineCount(b)), chars: Math.max(charCount(a), charCount(b)) })
+
+  if (tool === 'Write') return { lines: lineCount(input.content), chars: charCount(input.content), isBulk: false }
+  if (tool === 'NotebookEdit') return { lines: lineCount(input.new_source), chars: charCount(input.new_source), isBulk: false }
+
+  if (tool === 'MultiEdit') {
+    const edits = Array.isArray(input.edits) ? (input.edits as Record<string, unknown>[]) : []
+    const parts = edits.map(one => bigger(one.old_string, one.new_string))
+
+    return { lines: parts.reduce((sum, one) => sum + one.lines, 0), chars: parts.reduce((sum, one) => sum + one.chars, 0), isBulk: edits.some(one => one.replace_all === true) }
+  }
+
+  return { ...bigger(input.old_string, input.new_string), isBulk: input.replace_all === true }
+}
+
+// One small edit to one file, and the edits made in this turn without a design stay small together.
+export function isSmallEdit(track: Track, path: string, size: EditSize): boolean {
+  if (size.isBulk || size.lines > SMALL_EDIT_LINES || size.chars > SMALL_EDIT_CHARS) return false
+
+  const edits = track.turnEdits ?? { files: [], lines: 0 }
+  const files = edits.files.includes(path) ? edits.files : [...edits.files, path]
+
+  return files.length <= 1 && edits.lines + size.lines <= SMALL_TURN_LINES
+}
+
+// A design from this turn (or the one a plan approval or a loop carries forward) covers the edit;
+// otherwise the first big edit of a turn is sent back once.
+export function needsDesign(track: Track, isSmall: boolean): boolean {
+  if (isSmall) return false
+  if ((track.designDeniedAt ?? -1) >= (track.turnStartedAt ?? 0)) return false
+
+  return (track.lastAdvisorAt ?? -1) < (track.designFrom ?? track.turnStartedAt ?? 0)
+}
+
+export function noteEdit(track: Track, path: string, lines: number): Track {
+  const edits = track.turnEdits ?? { files: [], lines: 0 }
+
+  return { ...track, turnEdits: { files: edits.files.includes(path) ? edits.files : [...edits.files, path], lines: edits.lines + lines } }
+}
+
+// keepDesign: this turn continues work that already has a design (a loop pass, the turn after a plan was approved).
+export function turnStart(track: Track, at: number, keepDesign: boolean): Track {
+  const { turnEdits: _cleared, ...rest } = track
+
+  return { ...rest, turnStartedAt: at, designFrom: keepDesign ? (track.designFrom ?? at) : at }
+}
+
+export function planWasApproved(track: Track): boolean {
+  return track.planApprovedAt !== undefined && track.planApprovedAt >= (track.turnStartedAt ?? 0)
+}
+
+export const DESIGN_FIRST =
+  `SmartWorkbench team mode: this edit is not small (more than a few lines or a second file), and no design from ${ADVISOR} exists for this work. Ask it for a DESIGN: send the goal, constraints and the paths you know. Then implement that design step by step. If the code does not match it, stop and go back to the advisor with what differed. (Asked once per turn.)`

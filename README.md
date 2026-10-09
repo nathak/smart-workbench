@@ -50,7 +50,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb` | Open the panel |
 | `/swb new` | Start a new task contract |
 | `/swb lock` · `/swb unlock` | Lock or unlock the contract |
-| `/swb team [on\|off]` | Team mode: Sonnet builds, Haiku explores, Opus reviews; opens the Team tab |
+| `/swb team [on\|off]` | Team mode: Opus designs and reviews, Sonnet builds, Haiku explores; opens the Team tab |
 | `/swb team <role> <model> [effort]` | Set a role's model and effort (`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Ask the Opus advisor now |
 | `/swb intent` · `context` · `run` · `verify` | Open that tab |
@@ -144,13 +144,14 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
 
 ### Team mode
 
-**Sonnet builds. Haiku explores. Opus reviews.** Opus's context is spent only on the decisions that need it.
+**Opus designs. Sonnet builds. Haiku explores. Opus reviews.** Opus's context is spent only on the decisions that need it.
 
 - At session start SmartWorkbench registers two read-only agents:
   - `smartworkbench:explorer` (Haiku): finds files, reads code and searches docs; Claude can launch several at once.
   - `smartworkbench:advisor` (Opus): reviews from a focused brief Claude writes (goal, plan or error, what was tried, paths) and answers `VERDICT / BLOCKERS / RISKS / MISSING`. It never sees the whole conversation and never edits.
 - `/swb team on` switches the session model to Sonnet (the same setting `/model` changes; `/swb team off` puts the previous model back) and adds a short role brief to every prompt. Opus then steps in by itself:
-  - **Plan review**: `ExitPlanMode` is sent back until the advisor has reviewed the plan in this turn.
+  - **Design first**: before a big edit (more than 6 lines or 400 characters, a second file, a bulk replace, or more than 15 lines of small edits in a turn) the edit is sent back once until the advisor has produced a `DESIGN` (`APPROACH / FILES / STEPS / RISKS / DONE`) in this turn. Small edits and files outside the project pass. A loop pass and the turn after an approved plan keep the design they already have; every other turn asks again. It is asked once per turn, so a lead that ignores it is not stuck, and the audit log records `team.design-required`.
+  - **Plan from the design**: `ExitPlanMode` is sent back until the advisor has worked on the plan in this turn; the plan presented is its design.
   - **Repeated error**: when the same command fails twice in a row, its result tells Claude to consult the advisor with the error output and what it tried (once per command until it does).
   - **Final check**: a turn that changed code is held once at the end until the advisor has looked at it; if Claude finishes anyway, the next stop goes through.
 - `/swb advise [topic]` asks the advisor any time. The Run tab shows team mode and the number of Opus reviews; the band shows `Team`; the audit log records `team.*` events.
