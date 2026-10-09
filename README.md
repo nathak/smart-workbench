@@ -18,7 +18,16 @@ At the Claude Code prompt:
 /plugin install smartworkbench --marketplace nathak/smart-workbench
 ```
 
-Answer `y` to add the marketplace and choose the user scope. The repository is private, so git on that machine must be signed in to GitHub (`gh auth login` or similar). Update with `claude plugin update smartworkbench`.
+Answer `y` to add the marketplace and choose the user scope.
+
+Update an installed copy:
+
+```bash
+claude plugin marketplace update smart-workbench
+claude plugin update smartworkbench
+```
+
+then restart Claude Code or run `/reload-plugins`.
 
 ### Quick start
 
@@ -250,7 +259,16 @@ Claude Code 입력창에서:
 /plugin install smartworkbench --marketplace nathak/smart-workbench
 ```
 
-마켓플레이스 추가를 물으면 `y`, 설치 범위는 user를 고릅니다. 비공개 저장소이므로 그 컴퓨터의 git이 GitHub에 로그인되어 있어야 합니다(`gh auth login` 등). 업데이트는 `claude plugin update smartworkbench`.
+마켓플레이스 추가를 물으면 `y`, 설치 범위는 user를 고릅니다.
+
+설치한 플러그인 업데이트:
+
+```bash
+claude plugin marketplace update smart-workbench
+claude plugin update smartworkbench
+```
+
+그다음 Claude Code를 다시 시작하거나 `/reload-plugins`를 실행합니다.
 
 ### 기본 사용법
 
