@@ -125,9 +125,12 @@ export function repeatNudge(count: number): string {
   return `SmartWorkbench team mode: this has now failed ${count} times in a row. Before trying again, consult ${ADVISOR} with the exact error output, what you already tried and the relevant file paths, and follow its diagnosis.`
 }
 
-// A plan goes to the user only after the advisor looked at it in this turn.
+// A plan goes to the user only after the advisor worked on it (this turn, or the design a plan approval
+// or a loop carries forward). Asked once per turn, so a missing or failing advisor cannot trap the session in plan mode.
 export function needsPlanReview(track: Track): boolean {
-  return (track.lastAdvisorAt ?? -1) < (track.turnStartedAt ?? 0)
+  if ((track.planReviewDeniedAt ?? -1) >= (track.turnStartedAt ?? 0)) return false
+
+  return (track.lastAdvisorAt ?? -1) < (track.designFrom ?? track.turnStartedAt ?? 0)
 }
 
 export const PLAN_REVIEW =
