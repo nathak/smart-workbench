@@ -235,6 +235,7 @@ docs/                permissions
 claude plugin validate .
 claude plugin test .
 claude --plugin-dir .      # start a session with this folder loaded
+npx tsc -p .               # type-check; needs .claude-plugin/types/, which Claude Code writes when it loads the mod
 ```
 
 Developed on Claude Code 2.1.292 and checked in a live terminal session on 2.1.295 (wide and narrow terminals); the Desktop app has not been checked yet. The mods API is early access and may change between releases.
@@ -476,6 +477,7 @@ docs/                권한 문서
 claude plugin validate .
 claude plugin test .
 claude --plugin-dir .      # 이 폴더를 불러와 세션 실행
+npx tsc -p .               # 타입 검사. Claude Code가 Mod를 불러올 때 만드는 .claude-plugin/types/가 필요
 ```
 
 Claude Code 2.1.292에서 개발했고, 2.1.295 실제 터미널 세션(넓은 화면·좁은 화면)에서 확인했습니다. Desktop 앱에서는 아직 확인하지 않았습니다. Mods API는 초기 단계라 버전마다 바뀔 수 있습니다.
