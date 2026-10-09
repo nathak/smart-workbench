@@ -430,7 +430,9 @@ export function bandText(wb: Workbench, live: Live): string {
   const ctx = live.contextPercent === undefined ? '' : ` · ${live.contextPercent}%`
   const warn = live.pinWarnings.length > 0 ? ` ⚠${live.pinWarnings.length}` : ''
 
-  return `WB ${dot} ${cut(title, 28)} │ Ctx +${wb.context.pins.length} pins${ctx}${warn} │ Done ${met}/${total} │ Guard ${guardLabel(wb, live)}`
+  const team = wb.team?.enabled ? ' │ Team' : ''
+
+  return `WB ${dot} ${cut(title, 28)} │ Ctx +${wb.context.pins.length} pins${ctx}${warn} │ Done ${met}/${total} │ Guard ${guardLabel(wb, live)}${team}`
 }
 
 const TRUNK = new Set(['main', 'master', 'HEAD', 'develop', 'dev', 'trunk'])

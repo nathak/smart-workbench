@@ -95,12 +95,14 @@ export function handoffMarkdown(wb: Workbench, now: number): string {
 export function badgeOf(call: ToolCallRecord, evidence: EvidenceRecord | undefined, wb: Workbench): string | undefined {
   const parts: string[] = []
 
-  if (call.risk !== 'low') parts.push(call.risk.toUpperCase())
+  // A plainly allowed call gets no badge for its risk level alone (every edit is medium).
+  const wasDecided = call.policy !== 'allow' || call.sessionAllowed === true || call.outcome === 'blocked' || call.outcome === 'declined'
+  if (call.risk !== 'low' && wasDecided) parts.push(call.risk.toUpperCase())
   if (call.outcome === 'blocked') parts.push('Blocked')
   else if (call.outcome === 'declined') parts.push('Declined')
   else if (call.sessionAllowed) parts.push('Allowed for session')
   else if (call.policy === 'ask') parts.push('Asked → allowed')
-  if (call.reason && call.risk !== 'low') parts.push(call.reason)
+  if (call.reason && call.risk !== 'low' && wasDecided) parts.push(call.reason)
 
   if (evidence) {
     const linked = wb.task.doneConditions.filter(one => one.link === evidence.kind).map(one => one.id)
