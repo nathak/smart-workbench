@@ -170,3 +170,27 @@ describe('allow for session', () => {
     expect(risk.sessionScope('mcp__linear__create_issue', {}, risk.classifyMcp('mcp__linear__create_issue'))?.key).toBe('tool:mcp__linear__create_issue')
   })
 })
+
+describe('contract proposals and goal drafts', () => {
+  test('an approved proposal applies even to a locked contract; a rejected one changes nothing', async () => {
+    let wb = model.toggleLock(model.addCondition(model.setGoal(model.emptyWorkbench(), 'Fix login'), 'Tests pass'))
+    wb = model.addProposal(wb, { id: 'a', change: 'add_done_condition', text: 'Typecheck passes', reason: 'types changed', at: 1, status: 'open' })
+    wb = model.addProposal(wb, { id: 'b', change: 'remove_done_condition', target: 'dc-1', reason: 'not needed', at: 2, status: 'open' })
+
+    const approved = model.decideProposal(wb, 'a', true)
+    expect(approved.task.locked).toBe(true)
+    expect(approved.task.doneConditions.map(one => one.text)).toEqual(['Tests pass', 'Typecheck passes'])
+    expect(approved.proposals?.map(one => one.status)).toEqual(['approved', 'open'])
+
+    const rejected = model.decideProposal(approved, 'b', false)
+    expect(rejected.task.doneConditions.length).toBe(2)
+    expect(model.decideProposal(rejected, 'b', true)).toBe(rejected)
+  })
+
+  test('a goal is drafted from the last prompt, else a feature branch', async () => {
+    expect(model.goalDraft('Make login sessions last 30 minutes\nmore detail', 'main')).toBe('Make login sessions last 30 minutes')
+    expect(model.goalDraft('/swb new', 'fix/PROJ-12-login-expiry')).toBe('Login expiry')
+    expect(model.goalDraft(undefined, 'feature/add_dark_mode')).toBe('Add dark mode')
+    expect(model.goalDraft(undefined, 'main')).toBe(undefined)
+  })
+})

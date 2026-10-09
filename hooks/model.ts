@@ -8,6 +8,7 @@ import type {
   IssueRef,
   Live,
   ManualMark,
+  Proposal,
   Snapshot,
   Task,
   TaskStatus,
@@ -310,6 +311,45 @@ export function applyShare(wb: Workbench, shared: { task: Task; pins: readonly C
 
 // A CI run seen again (queued, then finished) updates its own record; other history stays.
 export function addCiEvidence(wb: Workbench, records: readonly EvidenceRecord[]): Workbench {
+  return upsertEvidence(wb, records)
+}
+
+export const MAX_PROPOSALS = 20
+
+// Claude's proposals are kept as made; the person applies or rejects each one.
+export function addProposal(wb: Workbench, proposal: Proposal): Workbench {
+  return { ...wb, proposals: [...(wb.proposals ?? []), proposal].slice(-MAX_PROPOSALS) }
+}
+
+// Approval is the person's explicit decision, so it applies even to a locked contract.
+export function decideProposal(wb: Workbench, id: string, approve: boolean): Workbench {
+  const proposal = (wb.proposals ?? []).find(one => one.id === id && one.status === 'open')
+  if (!proposal) return wb
+
+  const proposals = (wb.proposals ?? []).map(one => (one.id === id ? { ...one, status: approve ? ('approved' as const) : ('rejected' as const) } : one))
+  if (!approve) return { ...wb, proposals }
+
+  const unlocked = { ...wb, task: { ...wb.task, locked: false } }
+  const text = proposal.text ?? ''
+  const target = proposal.target ?? ''
+  const changed =
+    proposal.change === 'set_goal'
+      ? setGoal(unlocked, text)
+      : proposal.change === 'add_constraint'
+        ? addConstraint(unlocked, text)
+        : proposal.change === 'remove_constraint'
+          ? removeConstraint(unlocked, target)
+          : proposal.change === 'add_done_condition'
+            ? addCondition(unlocked, text)
+            : proposal.change === 'remove_done_condition'
+              ? removeCondition(unlocked, target)
+              : addNonGoal(unlocked, text)
+
+  return { ...changed, task: { ...changed.task, locked: wb.task.locked }, proposals }
+}
+
+// Replaces a record with the same id (a CI run seen again, a row counted by hand) and keeps the rest.
+export function upsertEvidence(wb: Workbench, records: readonly EvidenceRecord[]): Workbench {
   const ids = new Set(records.map(one => one.id))
   const kept = wb.evidence.filter(one => !ids.has(one.id))
 
@@ -391,4 +431,27 @@ export function bandText(wb: Workbench, live: Live): string {
   const warn = live.pinWarnings.length > 0 ? ` ⚠${live.pinWarnings.length}` : ''
 
   return `WB ${dot} ${cut(title, 28)} │ Ctx +${wb.context.pins.length} pins${ctx}${warn} │ Done ${met}/${total} │ Guard ${guardLabel(wb, live)}`
+}
+
+const TRUNK = new Set(['main', 'master', 'HEAD', 'develop', 'dev', 'trunk'])
+
+// A first goal for /swb new: the last prompt's first line, else a feature branch's name
+// ("fix/PROJ-12-login-expiry" → "Login expiry"). The person edits it before locking.
+export function goalDraft(lastPrompt: string | undefined, branch: string | undefined): string | undefined {
+  const line = lastPrompt
+    ?.split('\n')
+    .map(one => one.trim())
+    .find(Boolean)
+  if (line && !line.startsWith('/') && !line.startsWith('<')) {
+    return line.slice(0, 200)
+  }
+
+  const name = branch?.trim()
+  if (!name || TRUNK.has(name)) return undefined
+  const words = (name.split('/').pop() ?? '')
+    .replace(/^[A-Za-z]+-\d+[-_]?/, '')
+    .replace(/[-_]+/g, ' ')
+    .trim()
+
+  return words ? `${words[0]?.toUpperCase() ?? ''}${words.slice(1)}` : undefined
 }

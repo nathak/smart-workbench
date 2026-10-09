@@ -72,6 +72,7 @@ function world(on: On, options: WorldOptions = {}) {
     return { value: { exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__smartworkbench__${e.name}` } }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
@@ -292,4 +293,157 @@ test('the guard file edit is never offered "Allow for session"', async ($, on) =
 
   await $.tool.call({ tool: 'Edit', file_path: `${CWD}/.claude/smartworkbench.json`, old_string: 'a', new_string: 'b' })
   expect(asked).toEqual(['Allow|Block'])
+})
+
+const PROPOSE = 'mcp__smartworkbench__propose_contract_change'
+
+test('Claude proposes a contract change; the person approves it in the panel', async ($, on) => {
+  const { workbench } = world(on)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  await ui.input({ key: 'goal', text: 'Fix login' })
+  await ui.input({ key: 'add-condition', text: 'Tests pass' })
+  await ui.press({ key: 'lock' })
+
+  const bad = await $.tool.call({ tool: PROPOSE, change: 'add_done_condition', reason: '' })
+  expect(JSON.stringify(bad)).toContain('rejected')
+
+  const made = await $.tool.call({ tool: PROPOSE, change: 'add_done_condition', text: 'Typecheck passes', reason: 'The fix changes exported types.' })
+  expect(JSON.stringify(made)).toContain('recorded')
+  expect(await ui.find({ type: 'Text', text: /Claude proposes: add done condition "Typecheck passes"/ })).toBeDefined()
+
+  const id = workbench().proposals?.[0]?.id ?? ''
+  await ui.press({ key: `approve-${id}` })
+  expect(workbench().task.doneConditions.map(one => one.text)).toEqual(['Tests pass', 'Typecheck passes'])
+  expect(workbench().task.locked).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /Claude proposes/ })).toBe(undefined)
+  await ui.unmount()
+})
+
+test('a failed tool row offers Explain, Retry and Add evidence', async ($, on) => {
+  const prompts: string[] = []
+  const { workbench } = world(on, { ask: () => 'test' })
+  on('prompt.submit', ($, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  on('ui.render', { component: 'ToolUse' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{`${e.props.tool}(row)`}</Text>
+  })
+
+  const row = await $.ui.mount({
+    plugin: PLUGIN,
+    surface: 'terminal',
+    component: 'ToolUse',
+    requestId: 'tu-9',
+    props: { tool_use_id: 'tu-9', tool: 'Bash', input: { command: './scripts/check.sh' }, isRunning: false, isErrored: true, isInterrupted: false },
+  })
+  await row.press({ key: 'retry-tu-9' })
+  expect(prompts[0]).toContain('Retry this Bash call')
+  expect(prompts[0]).toContain('./scripts/check.sh')
+  await row.press({ key: 'explain-tu-9' })
+  expect(prompts[1]).toContain('Explain why this Bash call failed')
+
+  await row.press({ key: 'count-tu-9' })
+  expect(workbench().evidence).toEqual([expect.objectContaining({ id: 'tu-9', kind: 'test', ok: false, command: './scripts/check.sh' })])
+  expect(await row.find({ key: 'count-tu-9' })).toBe(undefined)
+  await row.unmount()
+
+  const fine = await $.ui.mount({
+    plugin: PLUGIN,
+    surface: 'terminal',
+    component: 'ToolUse',
+    requestId: 'tu-10',
+    props: { tool_use_id: 'tu-10', tool: 'Bash', input: { command: 'ls' }, isRunning: false, isErrored: false, isInterrupted: false },
+  })
+  expect(await fine.find({ key: 'retry-tu-10' })).toBe(undefined)
+  await fine.unmount()
+})
+
+test('an incomplete turn leaves Fix failures / Waive / Open evidence in the band until dismissed', async ($, on) => {
+  const prompts: string[] = []
+  world(on)
+  on('prompt.submit', ($, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  await ui.input({ key: 'goal', text: 'Fix login' })
+  await ui.input({ key: 'add-condition', text: 'Tests pass' })
+  await ui.unmount()
+
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  const band = await $.ui.mount({
+    plugin: PLUGIN,
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  })
+  expect(await band.find({ type: 'Text', text: /Turn ended INCOMPLETE · 0\/1 done/ })).toBeDefined()
+  await band.press({ key: 'wb-fix' })
+  expect(prompts[0]).toContain('Finish the SmartWorkbench task')
+  expect(await band.find({ key: 'wb-fix' })).toBe(undefined)
+  await band.unmount()
+})
+
+test('/swb new drafts the goal from the branch name', async ($, on) => {
+  const { workbench } = world(on, { commands: { 'git rev-parse --abbrev-ref HEAD': { exitCode: 0, stdout: 'fix/PROJ-12-login-expiry\n' } } })
+  on('session.messages', () => ({ value: [] }))
+
+  const made = await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+  expect(made.text).toContain('Goal drafted as "Login expiry"')
+  expect(workbench().task.goal).toBe('Login expiry')
+  expect(workbench().task.locked).toBe(false)
+})
+
+test('requireContract holds prompts back until a locked contract with done conditions exists', async ($, on) => {
+  world(on, { files: { '.claude/smartworkbench.json': JSON.stringify({ requireContract: true }) } })
+  const seen: string[] = []
+  on('prompt.submit', ($, e) => {
+    seen.push(e.text)
+    return { text: e.text }
+  })
+  await $.session.start(start)
+
+  const held = await $.prompt.submit({ text: 'start coding', ...COMPOSER })
+  expect(held.drop).toContain('requires a locked SmartWorkbench contract')
+  expect(seen).toEqual([])
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  await ui.input({ key: 'goal', text: 'Fix login' })
+  await ui.input({ key: 'add-condition', text: 'Tests pass' })
+  await ui.press({ key: 'lock' })
+  await ui.unmount()
+
+  const passed = await $.prompt.submit({ text: 'start coding', ...COMPOSER })
+  expect(passed.drop).toBe(undefined)
+  expect(seen).toEqual(['start coding'])
+})
+
+test('/swb lock and unlock work without the panel', async ($, on) => {
+  const { workbench } = world(on, { commands: { 'git rev-parse --abbrev-ref HEAD': { exitCode: 0, stdout: 'main\n' } } })
+  on('session.messages', () => ({ value: [] }))
+
+  expect((await $.command.run({ command: 'swb', args: 'lock', ...COMMAND })).text).toBe('Write a goal first (/swb new).')
+  await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+  await $.tool.call({ tool: PROPOSE, change: 'set_goal', text: 'Fix login', reason: 'empty goal' })
+  const id = workbench().proposals?.[0]?.id ?? ''
+  expect(id).not.toBe('')
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: `approve-${id}` })
+  await ui.unmount()
+
+  expect((await $.command.run({ command: 'swb', args: 'lock', ...COMMAND })).text).toContain('Contract locked')
+  expect(workbench().task.locked).toBe(true)
+  expect((await $.command.run({ command: 'swb', args: 'lock', ...COMMAND })).text).toBe('The contract is already locked.')
+  expect((await $.command.run({ command: 'swb', args: 'unlock', ...COMMAND })).text).toContain('Contract unlocked')
 })
