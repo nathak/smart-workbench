@@ -163,10 +163,22 @@ export type Workbench = {
   changed: Changed
   proposals?: Proposal[]
   // Team mode: Sonnet builds, Haiku explores, Opus reviews.
-  team?: { enabled: boolean }
+  team?: TeamConfig
 }
 
-export type Tab = 'intent' | 'context' | 'run' | 'evidence'
+export type TeamRoleName = 'lead' | 'explorer' | 'advisor'
+
+// A model alias or id (sonnet, opus[1m], claude-haiku-4-5-20251001) and an effort level.
+export type TeamRole = { model: string; effort: string }
+
+export type TeamConfig = {
+  enabled: boolean
+  lead?: TeamRole
+  explorer?: TeamRole
+  advisor?: TeamRole
+}
+
+export type Tab = 'intent' | 'context' | 'run' | 'evidence' | 'team'
 
 export type Live = {
   activeTab: Tab

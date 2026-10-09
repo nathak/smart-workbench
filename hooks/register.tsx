@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, Template, ToolCallRecord, Track, Workbench } from '../types'
+import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, TeamRoleName, Template, ToolCallRecord, Track, Workbench } from '../types'
 import * as crew from './crew'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
@@ -19,8 +19,8 @@ type Els = Elements['terminal'] | Elements['desktop'] | Elements['vscode']
 type View = { els: Els; wb: Workbench; live: Live; width: number; room: number }
 
 const PANE = 'smartworkbench'
-const TABS: readonly Tab[] = ['intent', 'context', 'run', 'evidence']
-const TAB_LABEL: Record<Tab, string> = { intent: 'Intent', context: 'Context', run: 'Run', evidence: 'Evidence' }
+const TABS: readonly Tab[] = ['intent', 'context', 'run', 'evidence', 'team']
+const TAB_LABEL: Record<Tab, string> = { intent: 'Intent', context: 'Context', run: 'Run', evidence: 'Evidence', team: 'Team' }
 const TAB_ARGS: Record<string, Tab> = { intent: 'intent', context: 'context', run: 'run', verify: 'evidence', evidence: 'evidence' }
 const LINKS: readonly (EvidenceKind | 'none')[] = ['none', 'test', 'build', 'typecheck', 'lint', 'ci']
 const STATUS_COLOR: Record<ConditionStatus, string | undefined> = {
@@ -299,39 +299,99 @@ async function updateTrack($: $, change: (track: Track) => Track): Promise<Track
   return next
 }
 
-// Team mode on: the agents are already registered; this switches the automatic reviews
-// on and tries to make Sonnet the session's model.
-async function setTeam($: $, enabled: boolean): Promise<string> {
-  await mutate($, wb => ({ ...wb, team: { enabled } }))
-  await audit($, enabled ? 'team.on' : 'team.off')
+// An agent role's definition carries its model and effort; registering again replaces it.
+// A model that refuses the effort setting is registered without it.
+async function registerRole($: $, role: 'explorer' | 'advisor'): Promise<string | undefined> {
+  const spec = crew.agentSpec(role, (await read($, wbAtom)).team)
+  try {
+    await $.agent.register(spec)
+    return undefined
+  } catch (error) {
+    const { effort: _effort, ...withoutEffort } = spec
+    const retried = await $.agent.register(withoutEffort).then(() => true, () => false)
+    $.ui.log(`SmartWorkbench: ${spec.name} with effort ${spec.effort}: ${String(error)}`, { to: 'debug' })
+    return retried ? `${spec.model} does not take an effort setting here; ${role} runs at its default effort.` : `could not register ${spec.name}: ${String(error)}`
+  }
+}
 
+// The session's own effort can only be set by /effort, and a command cannot run another
+// command, so from a command it is queued to run right after.
+async function applyLeadEffort($: $, effort: string, isDeferred: boolean): Promise<void> {
+  if (effort === 'default') return
+  const run = async () => {
+    await $.command.run({ command: 'effort', args: effort }).catch(error => $.ui.log(`SmartWorkbench: /effort ${effort}: ${String(error)}`, { to: 'debug' }))
+  }
+  if (isDeferred) {
+    $.clock.after(0, run)
+  } else {
+    await run()
+  }
+}
+
+async function applyLeadModel($: $, value: string): Promise<boolean> {
+  const set = await $.config.set({ key: 'model', value }).catch((error: unknown) => ({ deny: String(error) }))
+  return !('deny' in set && set.deny)
+}
+
+async function modelRow($: $): Promise<{ value: string; options: string[] } | undefined> {
   const rows = await $.config.list().catch(() => [])
-  const row = rows.find(one => one.key === 'model')
+  const row = rows.find(one => one.key === 'model') as { value?: unknown; options?: unknown } | undefined
+  if (!row) return undefined
 
-  // The model row is the same setting /model changes, so team off puts the previous one back.
+  return { value: String(row.value ?? ''), options: Array.isArray(row.options) ? row.options.map(String) : [] }
+}
+
+// Team on: the automatic reviews start, the lead's model and effort become the session's,
+// and the previous model is kept to put back when team mode goes off.
+async function setTeam($: $, enabled: boolean, isFromCommand = false): Promise<string> {
+  const wb = await mutate($, current => ({ ...current, team: { ...current.team, enabled } }))
+  await audit($, enabled ? 'team.on' : 'team.off')
+  const row = await modelRow($)
+
   if (!enabled) {
     const previous = await $.store.get('team:previousModel')
     if (row && previous !== undefined && previous !== null) {
-      await $.config.set({ key: 'model', value: previous as string }).catch(() => undefined)
+      await applyLeadModel($, String(previous))
       await $.store.delete('team:previousModel')
       return `Team mode off: no automatic Opus reviews; the model is back to ${String(previous) || 'the default'}.`
     }
     return 'Team mode off: no automatic Opus reviews; the explorer and advisor agents stay available.'
   }
 
+  const lead = crew.roleOf(wb.team, 'lead')
   if (row && (await $.store.get('team:previousModel')) === undefined) {
-    await $.store.set('team:previousModel', row.value ?? '')
+    await $.store.set('team:previousModel', row.value)
   }
-  const set = row ? await $.config.set({ key: 'model', value: 'sonnet' }).catch((error: unknown) => ({ deny: String(error) })) : undefined
-  const model = set && !('deny' in set && set.deny)
-    ? 'The session model is now Sonnet (team off puts the previous model back).'
-    : 'Switch the session to Sonnet with /model sonnet (or start with claude --model sonnet).'
+  const isSet = row ? await applyLeadModel($, lead.model) : false
+  await applyLeadEffort($, lead.effort, isFromCommand)
+  const explorer = crew.roleOf(wb.team, 'explorer')
+  const advisor = crew.roleOf(wb.team, 'advisor')
 
   return [
-    'Team mode on: Sonnet builds, Haiku explores, Opus reviews.',
-    model,
-    `Opus (${crew.ADVISOR}) steps in before a plan is presented, after the same command fails ${crew.REPEAT_LIMIT} times in a row, and before finishing a turn that changed code. /swb advise asks it any time.`,
+    `Team mode on: lead ${lead.model} (${lead.effort}) builds, explorer ${explorer.model} (${explorer.effort}) explores, advisor ${advisor.model} (${advisor.effort}) reviews.`,
+    isSet ? 'The session model is set (team off puts the previous model back).' : `Switch the session model with /model ${lead.model}.`,
+    `The advisor steps in before a plan is presented, after the same command fails ${crew.REPEAT_LIMIT} times in a row, and before finishing a turn that changed code. Change models and effort in the Team tab (/swb team).`,
   ].join('\n')
+}
+
+// From the Team tab or /swb team <role> ...: saved, then applied where it takes effect now.
+async function changeRole($: $, role: TeamRoleName, change: { model?: string; effort?: string }, isFromCommand = false): Promise<string> {
+  const wb = await mutate($, current => ({ ...current, team: crew.setRole(current.team, role, change) }))
+  const now = crew.roleOf(wb.team, role)
+  await audit($, 'team.role', { role, model: now.model, effort: now.effort })
+
+  if (role !== 'lead') {
+    const note = await registerRole($, role)
+    return `${role}: ${now.model} (${now.effort}) from the next delegation${note ? `; ${note}` : '.'}`
+  }
+  if (!wb.team?.enabled) {
+    return `lead: ${now.model} (${now.effort}), applied when team mode is turned on.`
+  }
+  const isSet = change.model ? await applyLeadModel($, now.model) : true
+  if (change.effort) await applyLeadEffort($, now.effort, isFromCommand)
+  const saved = change.effort && now.effort !== 'default' ? ` /effort ${now.effort} is kept as your default for this model.` : ''
+
+  return `lead: ${now.model} (${now.effort})${isSet ? '' : `; the model setting refused it, use /model ${now.model}`}.${saved}`
 }
 
 async function toggleLock($: $): Promise<void> {
@@ -581,15 +641,25 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   if (word === 'team') {
-    const sub = args.trim().split(/\s+/)[1]?.toLowerCase()
-    if (sub === 'on' || sub === 'off') return { text: await setTeam($, sub === 'on') }
+    const [, sub = '', first, second] = args.trim().split(/\s+/)
+    const verb = sub.toLowerCase()
+    if (verb === 'on' || verb === 'off') return { text: await setTeam($, verb === 'on', true) }
+
+    // /swb team <lead|explorer|advisor> <model> [effort], or an effort alone
+    const role = crew.ROLES.find(one => one === verb)
+    if (role && first) {
+      const isEffort = (value: string) => ((role === 'lead' ? crew.LEAD_EFFORTS : crew.EFFORTS) as readonly string[]).includes(value)
+      const change = isEffort(first) ? { effort: first } : { model: first, ...(second && isEffort(second) ? { effort: second } : {}) }
+      return { text: await changeRole($, role, change, true) }
+    }
+
+    await openPane($, 'team')
     const wb = await read($, wbAtom)
     const track = (await read($, liveAtom)).track ?? crew.EMPTY_TRACK
+    const roles = crew.ROLES.map(one => `${one} ${crew.roleOf(wb.team, one).model} (${crew.roleOf(wb.team, one).effort})`).join(' · ')
 
     return {
-      text: wb.team?.enabled
-        ? `Team mode is on: Sonnet builds, Haiku explores (${crew.EXPLORER}), Opus reviews (${crew.ADVISOR}). Opus reviews this session: ${track.advisorRuns}. /swb team off to stop the automatic reviews.`
-        : 'Team mode is off. /swb team on: Sonnet builds, Haiku explores, Opus reviews plans, repeated errors and the final check.',
+      text: `Team mode ${wb.team?.enabled ? 'on' : 'off'}: ${roles}. Opus reviews this session: ${track.advisorRuns}.\n/swb team on|off · /swb team <lead|explorer|advisor> <model> [effort]`,
     }
   }
 
@@ -1079,12 +1149,9 @@ function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
           onSelect={value => void mutate($, wb => model.setProfile(wb, value as GuardProfile))}
         />
       )}
-      <Box gap={1}>
-        <Text dimColor={!wb.team?.enabled}>
-          Team: {wb.team?.enabled ? `on · Sonnet builds, Haiku explores, Opus reviews · ${live.track?.advisorRuns ?? 0} Opus reviews` : 'off'}
-        </Text>
-        <Button key="team" plain dimColor label={wb.team?.enabled ? 'Turn off' : 'Turn on'} onPress={() => void setTeam($, !wb.team?.enabled).then(text => $.ui.toast(`SmartWorkbench: ${text.split('\n')[0]}`))} />
-      </Box>
+      <Text dimColor={!wb.team?.enabled}>
+        Team mode: {wb.team?.enabled ? `on · ${live.track?.advisorRuns ?? 0} advisor reviews` : 'off'} · tab 5
+      </Text>
       {live.policy ? (
         <Text dimColor={live.policy.errors.length === 0} color={live.policy.errors.length > 0 ? 'warning' : undefined} wrap="truncate-end">
           {POLICY_PATH}: {live.policy.rules.length} rules{live.policy.errors.length > 0 ? ` · ⚠ ${live.policy.errors[0]}` : ''}
@@ -1269,6 +1336,80 @@ function coverageMark(one: Coverage): { mark: string; color?: string; note: stri
   }
 }
 
+const ROLE_LABEL: Record<TeamRoleName, string> = { lead: 'Lead', explorer: 'Explorer', advisor: 'Advisor' }
+const ROLE_NOTE: Record<TeamRoleName, string> = {
+  lead: 'this session: builds and writes the code',
+  explorer: `${crew.EXPLORER}: read-only search`,
+  advisor: `${crew.ADVISOR}: plan, repeated errors, final check`,
+}
+
+async function teamTab($: $, { els, wb, live, width }: View): Promise<RenderElement> {
+  const { Box, Text, Button, Select } = els
+  const row = await modelRow($)
+  const isOn = wb.team?.enabled === true
+  const track = live.track ?? crew.EMPTY_TRACK
+  const leadModels = row && row.options.length > 0 ? row.options : ['sonnet', 'opus', 'haiku', 'fable']
+  const optionsFor = (role: TeamRoleName, current: string) => {
+    const list: readonly string[] = role === 'lead' ? leadModels : crew.AGENT_MODELS
+    return (list.includes(current) ? list : [current, ...list]).map(value => ({ value }))
+  }
+  const toast = (text: string) => $.ui.toast(`SmartWorkbench: ${text}`)
+
+  return (
+    <Box flexDirection="column">
+      <Box gap={1}>
+        <Text bold>TEAM MODE</Text>
+        <Text color={isOn ? 'success' : undefined}>{isOn ? '● on' : '○ off'}</Text>
+        <Button key="team-toggle" variant={isOn ? undefined : 'primary'} label={isOn ? 'Turn off' : 'Turn on'} onPress={() => void setTeam($, !isOn).then(text => toast(text.split('\n')[0] ?? ''))} />
+      </Box>
+      <Text dimColor wrap="wrap">
+        {isOn ? 'The advisor steps in before a plan, after a repeated error and before finishing.' : 'Turn on for automatic advisor reviews; the agents are available either way.'}
+      </Text>
+      {crew.ROLES.map(role => {
+        const now = crew.roleOf(wb.team, role)
+
+        return (
+          <Box key={`role-${role}`} flexDirection="column" marginTop={1}>
+            <Box gap={1}>
+              <Text bold>{ROLE_LABEL[role]}</Text>
+              <Text dimColor wrap="truncate-end">
+                {model.cut(ROLE_NOTE[role], width - 12)}
+              </Text>
+            </Box>
+            <Box gap={2} marginLeft={2}>
+              <Select
+                key={`model-${role}`}
+                label="Model"
+                value={now.model}
+                options={optionsFor(role, now.model)}
+                onSelect={value => void changeRole($, role, { model: value }).then(toast)}
+              />
+              <Select
+                key={`effort-${role}`}
+                label="Effort"
+                value={now.effort}
+                options={(role === 'lead' ? crew.LEAD_EFFORTS : crew.EFFORTS).map(value => ({ value }))}
+                onSelect={value => void changeRole($, role, { effort: value }).then(toast)}
+              />
+            </Box>
+          </Box>
+        )
+      })}
+      <Box marginTop={1} flexDirection="column">
+        <Text dimColor>Session model setting now: {row?.value || 'unknown'}</Text>
+        <Text dimColor>
+          Advisor reviews this session: {track.advisorRuns}
+          {track.lastAdvisorAt !== undefined ? ` · last ${seconds(Math.max(0, (await $.clock.now()) - track.lastAdvisorAt))} ago` : ''}
+        </Text>
+        <Text dimColor wrap="wrap">
+          Lead changes apply while team mode is on; agent changes from the next delegation. A lead effort other than default runs /effort, which
+          Claude Code keeps as your default for that model.
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
 async function pane($: $, els: Els, width: number, rows: number): Promise<RenderElement> {
   const wb = await read($, wbAtom)
   const live = await read($, liveAtom)
@@ -1276,7 +1417,15 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
   const view: View = { els, wb, live, width, room: Math.max(8, rows - 6) }
   const tab = live.activeTab
   const body =
-    tab === 'intent' ? intentTab($, view) : tab === 'context' ? await contextTab($, view) : tab === 'run' ? runTab($, view) : evidenceTab($, view)
+    tab === 'intent'
+      ? intentTab($, view)
+      : tab === 'context'
+        ? await contextTab($, view)
+        : tab === 'run'
+          ? runTab($, view)
+          : tab === 'team'
+            ? await teamTab($, view)
+            : evidenceTab($, view)
 
   return (
     <Box flexDirection="column">
@@ -1324,14 +1473,14 @@ export const register: Register = on => {
         required: ['change', 'reason'],
       },
     }).catch(error => $.ui.log(`SmartWorkbench: could not register propose_contract_change: ${String(error)}`, { to: 'debug' }))
-    // Team mode's agents: available to Claude at all times, the automatic reviews only when it is on.
-    for (const spec of [crew.EXPLORER_SPEC, crew.ADVISOR_SPEC]) {
-      await $.agent.register(spec).catch(error => $.ui.log(`SmartWorkbench: could not register ${spec.name}: ${String(error)}`, { to: 'debug' }))
-    }
     const sessionId = await $.session.id().catch(() => undefined)
     if (sessionId) await setLive($, live => ({ ...live, sessionId }))
     await load($)
     await loadPolicy($)
+    // Team mode's agents, with this project's chosen models: available to Claude at all times,
+    // the automatic reviews only while team mode is on.
+    await registerRole($, 'explorer')
+    await registerRole($, 'advisor')
 
     if ((await read($, liveAtom)).policy?.audit) {
       const name = await $.process.run(['git', 'config', 'user.name']).catch(() => undefined)
