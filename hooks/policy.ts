@@ -119,6 +119,10 @@ export function parsePolicy(text: string, source: string = POLICY_PATH): Project
     errors.push(`defaultTemplate "${String(defaultTemplate)}" is not one of the templates`)
   }
   const audit = parseAudit((value as { audit?: unknown }).audit, errors)
+  const requireContract = (value as { requireContract?: unknown }).requireContract
+  if (requireContract !== undefined && typeof requireContract !== 'boolean') {
+    errors.push('requireContract must be true or false')
+  }
 
   return {
     source,
@@ -127,6 +131,7 @@ export function parsePolicy(text: string, source: string = POLICY_PATH): Project
     templates,
     ...(typeof defaultTemplate === 'string' && templates.some(one => one.name === defaultTemplate) ? { defaultTemplate } : {}),
     ...(audit ? { audit } : {}),
+    ...(requireContract === true ? { requireContract: true } : {}),
     errors,
   }
 }

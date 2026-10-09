@@ -139,6 +139,7 @@ test('state survives a restart through the store', async ($, on) => {
   }
   const workbench = world(on, { [`ws:${CWD}`]: saved })
   on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__smartworkbench__${e.name}` } }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   let seen: readonly string[] | undefined
   on('prompt.submit', ($, e) => {
@@ -327,6 +328,7 @@ test('a checked-in guard file sets the profile and adds rules at session start',
   }
   const workbench = world(on, {}, files)
   on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__smartworkbench__${e.name}` } }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   const ran: string[] = []
   let answer = 'Allow'

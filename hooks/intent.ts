@@ -1,5 +1,8 @@
 import type { Task } from '../types'
 
+// The tool Claude calls to ask for a contract change (registered by register.tsx).
+export const PROPOSE_TOOL = 'mcp__smartworkbench__propose_contract_change'
+
 export function escapeXml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
@@ -46,7 +49,7 @@ export function serializeContract(task: Task): string | undefined {
   }
 
   lines.push(
-    '  <note>Set by the user in SmartWorkbench and locked. Follow it; propose changes instead of working around it. Completion is judged from test/build results, not from your summary.</note>',
+    `  <note>Set by the user in SmartWorkbench and locked. Follow it. If it should change, call ${PROPOSE_TOOL} and let the user decide; do not work around it. Completion is judged from test/build results, not from your summary.</note>`,
   )
   lines.push('</smartworkbench_contract>')
 

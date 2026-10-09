@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Tab, Template, ToolCallRecord, Workbench } from '../types'
+import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, Template, ToolCallRecord, Workbench } from '../types'
+import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, parseDiff, type Coverage } from './diff'
 import { checkOutcome, completionOf, evidenceKindOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
@@ -35,6 +36,7 @@ const HELP = [
   '  /smartworkbench context    open the Context tab',
   '  /smartworkbench run        open the Run tab',
   '  /smartworkbench verify     open the Evidence tab',
+  '  /smartworkbench lock | unlock   lock the contract (added to every prompt) or unlock it to edit',
   '  /smartworkbench status     text summary (works without UI)',
   '  /smartworkbench preview    show the context added to each prompt',
   '  /smartworkbench save <name>      save the contract, pins and guard as a template',
@@ -195,6 +197,93 @@ async function revokeSessionAllow($: $, key: string): Promise<void> {
   const gone = (live.sessionAllows ?? []).find(one => one.key === key)
   await setLive($, current => ({ ...current, sessionAllows: (current.sessionAllows ?? []).filter(one => one.key !== key) }))
   if (gone) await audit($, 'guard.session-revoke', { scope: gone.label })
+}
+
+const CHANGES: readonly ProposalChange[] = ['set_goal', 'add_constraint', 'remove_constraint', 'add_done_condition', 'remove_done_condition', 'add_non_goal']
+const CHECK_KINDS: readonly EvidenceKind[] = ['test', 'build', 'typecheck', 'lint']
+
+// Claude's side of a contract change: recorded as an open proposal for the person.
+// The tool's result is a string: the engine checks plugin tool results against a text output.
+async function propose($: $, input: Record<string, unknown>): Promise<{ result: string }> {
+  const change = CHANGES.find(one => one === input.change)
+  const text = typeof input.text === 'string' ? input.text.trim() : ''
+  const target = typeof input.target_id === 'string' ? input.target_id.trim() : ''
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : ''
+  const needsTarget = change === 'remove_constraint' || change === 'remove_done_condition'
+
+  if (!change || reason === '' || (needsTarget ? target === '' : text === '')) {
+    return { result: `rejected: give change (${CHANGES.join(', ')}), reason, and text (or target_id for a removal).` }
+  }
+
+  const proposal: Proposal = {
+    id: model.newId('pr'),
+    change,
+    ...(text ? { text } : {}),
+    ...(target ? { target } : {}),
+    reason,
+    at: await $.clock.now(),
+    status: 'open',
+  }
+  await mutate($, wb => model.addProposal(wb, proposal))
+  await audit($, 'contract.propose', { change, text, target, reason })
+  $.ui.toast(`SmartWorkbench: Claude proposes a contract change (${change.replace(/_/g, ' ')}) · /swb to review`)
+
+  return { result: `recorded as ${proposal.id}: the user will approve or reject it. Keep working within the current contract until they decide.` }
+}
+
+async function settleProposal($: $, id: string, approve: boolean): Promise<void> {
+  const before = (await read($, wbAtom)).proposals?.find(one => one.id === id)
+  await mutate($, wb => model.decideProposal(wb, id, approve))
+  if (before) {
+    await audit($, approve ? 'contract.proposal-approved' : 'contract.proposal-rejected', { change: before.change, text: before.text ?? before.target ?? '' })
+  }
+}
+
+// Quick actions on a failed tool row: hand it back to Claude, or count it as a check by hand.
+async function explainCall($: $, tool: string, summary: string): Promise<void> {
+  await $.prompt.submit({ text: `Explain why this ${tool} call failed and what to do about it:\n${summary}` })
+}
+
+async function retryCall($: $, tool: string, summary: string): Promise<void> {
+  await $.prompt.submit({ text: `Retry this ${tool} call as it was, then report the result:\n${summary}` })
+}
+
+async function countAsCheck($: $, id: string, command: string, isOk: boolean): Promise<void> {
+  const kind = await $.ui
+    .ask(`Count "${model.cut(command, 60)}" as which check?`, { header: 'Evidence', options: [...CHECK_KINDS] })
+    .catch(() => undefined)
+  const chosen = CHECK_KINDS.find(one => one === kind)
+  if (!chosen) return
+  const record: EvidenceRecord = { id, kind: chosen, command: command.slice(0, 200), ok: isOk, at: await $.clock.now() }
+  await mutate($, wb => model.upsertEvidence(wb, [record]))
+  await audit($, 'evidence.manual', { kind: chosen, command: record.command, ok: isOk })
+}
+
+async function clearTurnResult($: $): Promise<void> {
+  await setLive($, ({ turnResult: _done, ...rest }) => rest)
+}
+
+async function waiveFromBand($: $): Promise<void> {
+  const wb = await read($, wbAtom)
+  const lastEdit = lastCheckedEdit(wb.changed)
+  const unmet = wb.task.doneConditions.filter(one => {
+    const status = statusOf(one, wb.evidence, lastEdit)
+    return status !== 'verified' && status !== 'waived'
+  })
+  const [only] = unmet
+  if (unmet.length === 1 && only) {
+    await waive($, only.id, only.text)
+    return
+  }
+  if (unmet.length === 0 || unmet.length > 4) {
+    await openPane($, 'evidence')
+    return
+  }
+  const picked = await $.ui
+    .ask('Waive which condition?', { header: 'Waive', options: unmet.map(one => model.cut(one.text, 60)) })
+    .catch(() => undefined)
+  const condition = unmet.find(one => model.cut(one.text, 60) === picked)
+  if (condition) await waive($, condition.id, condition.text)
 }
 
 async function toggleLock($: $): Promise<void> {
@@ -383,6 +472,15 @@ function policyText(live: Live): string {
   ].join('\n')
 }
 
+// The last thing the person asked in this session, else the branch name, as a goal to edit.
+async function goalDraftFor($: $): Promise<string | undefined> {
+  const messages = await $.session.messages().catch(() => [])
+  const lastPrompt = [...messages].reverse().find(one => one.role === 'user' && one.text.trim() !== '' && one.toolUses.length === 0)?.text
+  const branch = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).catch(() => undefined)
+
+  return model.goalDraft(lastPrompt, branch?.exitCode === 0 ? branch.stdout : undefined)
+}
+
 // ---- commands
 
 function statusText(wb: Workbench, live: Live): string {
@@ -419,15 +517,27 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     }
     const team = (await read($, liveAtom)).policy
     const template = team?.templates.find(one => one.name === team.defaultTemplate)
-    await mutate($, current => (template ? model.applyTeamTemplate(model.newTask(current), template) : model.newTask(current)))
+    const draft = template?.goal ? undefined : await goalDraftFor($)
+    await mutate($, current => {
+      const fresh = template ? model.applyTeamTemplate(model.newTask(current), template) : model.newTask(current)
+      return draft ? model.setGoal(fresh, draft) : fresh
+    })
     await audit($, 'task.new', template ? { template: template.name } : {})
     await openPane($, 'intent')
 
-    return {
-      text: template
-        ? `New SmartWorkbench task from the team template "${template.name}". Write the goal, review it, then Lock.`
-        : 'New SmartWorkbench task. Write the goal and done conditions, then Lock.',
-    }
+    const from = template ? ` from the team template "${template.name}"` : ''
+    const goal = draft ? ` Goal drafted as "${model.cut(draft, 60)}"; edit it if needed.` : ''
+
+    return { text: `New SmartWorkbench task${from}.${goal} Add done conditions, then Lock.` }
+  }
+
+  if (word === 'lock' || word === 'unlock') {
+    const wb = await read($, wbAtom)
+    if (word === 'lock' && wb.task.goal.trim() === '') return { text: 'Write a goal first (/swb new).' }
+    if (wb.task.locked === (word === 'lock')) return { text: `The contract is already ${word}ed.` }
+    await toggleLock($)
+
+    return { text: word === 'lock' ? 'Contract locked: it is added to every prompt from now on.' : 'Contract unlocked: edit it in the Intent tab, then lock it again.' }
   }
 
   if (word === 'status') {
@@ -622,6 +732,23 @@ function intentTab($: $, { els, wb, live, width }: View): RenderElement {
           onPress={() => void toggleLock($)}
         />
       </Box>
+      {(wb.proposals ?? [])
+        .filter(one => one.status === 'open')
+        .map(one => (
+          <Box key={`pr-${one.id}`} flexDirection="column" marginTop={1}>
+            <Text color="suggestion" wrap="wrap">
+              Claude proposes: {one.change.replace(/_/g, ' ')} {one.text ? `"${one.text}"` : one.target ?? ''}
+            </Text>
+            <Text dimColor wrap="wrap">
+              {'  '}
+              {one.reason}
+            </Text>
+            <Box gap={1} marginLeft={2}>
+              <Button key={`approve-${one.id}`} plain label="Approve" onPress={() => void settleProposal($, one.id, true)} />
+              <Button key={`reject-${one.id}`} plain dimColor label="Reject" onPress={() => void settleProposal($, one.id, false)} />
+            </Box>
+          </Box>
+        ))}
       {task.issue && (
         <Box gap={1}>
           <Text dimColor>Issue</Text>
@@ -1103,11 +1230,27 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const argumentHint = '[new|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
     await $.command.register({ name: 'workbench', description: 'Deprecated alias of /smartworkbench', argumentHint })
+    // Without the tool the rest still works; Claude then has no way to propose changes.
+    await $.tool.register({
+      name: 'propose_contract_change',
+      description:
+        "Propose a change to the user's SmartWorkbench task contract (goal, constraints, done conditions, non-goals) when the work shows it should change. You cannot change the contract yourself; the user approves or rejects the proposal in the SmartWorkbench panel. Keep working within the current contract meanwhile.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          change: { type: 'string', enum: [...CHANGES] },
+          text: { type: 'string', description: 'The new goal, constraint, done condition or non-goal (prefix a constraint with "s:" for a soft one)' },
+          target_id: { type: 'string', description: 'For a removal: the id of the constraint or done condition (e.g. dc-2)' },
+          reason: { type: 'string', description: 'Why the contract should change, in one or two sentences' },
+        },
+        required: ['change', 'reason'],
+      },
+    }).catch(error => $.ui.log(`SmartWorkbench: could not register propose_contract_change: ${String(error)}`, { to: 'debug' }))
     const sessionId = await $.session.id().catch(() => undefined)
     if (sessionId) await setLive($, live => ({ ...live, sessionId }))
     await load($)
@@ -1135,8 +1278,17 @@ export const register: Register = on => {
   // the prompt text is left as typed. On failure the prompt goes through unchanged.
   on('prompt.submit', async ($, e, next) => {
     await pull($)
-    const { blocks, warnings } = await injection($, await read($, wbAtom))
-    await setLive($, live => ({ ...live, pinWarnings: warnings }))
+    const wb = await read($, wbAtom)
+    const { policy } = await read($, liveAtom)
+
+    // Opt-in team rule: no work without a locked contract that says when it is done.
+    if (policy?.requireContract && e.origin.kind !== 'plugin' && !(wb.task.locked && wb.task.goal.trim() !== '' && wb.task.doneConditions.length > 0)) {
+      return { drop: `This project requires a locked SmartWorkbench contract with at least one done condition (${POLICY_PATH}: requireContract). Run /swb new, fill it in and Lock.` }
+    }
+
+    const { blocks, warnings } = await injection($, wb)
+    const { turnResult: _done, ...rest } = await read($, liveAtom)
+    await setLive($, () => ({ ...rest, pinWarnings: warnings }))
 
     if (warnings.length > 0) {
       $.ui.toast(`SmartWorkbench: ${warnings.join(', ')}`)
@@ -1149,6 +1301,9 @@ export const register: Register = on => {
     // This mod's own calls (its guard and confirmation questions) are not Claude's work.
     if (next.origin.plugin === $.plugin.name) {
       return next(e)
+    }
+    if (e.tool === PROPOSE_TOOL) {
+      return propose($, e as unknown as Record<string, unknown>)
     }
     const wb = await read($, wbAtom)
     const live = await read($, liveAtom)
@@ -1275,8 +1430,11 @@ export const register: Register = on => {
 
     const wb = await read($, wbAtom)
     if (wb.task.goal.trim() !== '' && wb.task.doneConditions.length > 0 && !e.isAborted) {
-      const summary = turnSummary(wb.task, wb.evidence, lastCheckedEdit(wb.changed))
-      await setLive($, live => ({ ...live, lastSummary: summary }))
+      const lastEdit = lastCheckedEdit(wb.changed)
+      const summary = turnSummary(wb.task, wb.evidence, lastEdit)
+      const { met, total } = completionOf(wb.task, wb.evidence, lastEdit)
+      const failing = wb.task.doneConditions.filter(one => statusOf(one, wb.evidence, lastEdit) === 'failed').length
+      await setLive($, live => ({ ...live, lastSummary: summary, turnResult: { met, total, failing } }))
       // A log row is one line; each line of the summary gets its own.
       for (const line of summary.split('\n')) {
         $.ui.log(line)
@@ -1300,22 +1458,39 @@ export const register: Register = on => {
   // Keeps the engine's own tool row and adds one line of risk, policy and evidence under it.
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     const row = await next(e)
-    const text = (await read($, badgesAtom))[e.props.tool_use_id]
+    const id = e.props.tool_use_id
+    const text = (await read($, badgesAtom))[id]
+    const isFailed = e.props.isErrored && !e.props.isRunning && !e.props.isInterrupted && e.props.tool !== PROPOSE_TOOL
 
-    if (text === undefined) {
+    if (text === undefined && !isFailed) {
       return row
     }
 
-    const { Box, Text } = $.ui.resolve(e)
-    const color = /Blocked|Declined|failed/.test(text) ? 'error' : /passed/.test(text) ? 'success' : 'warning'
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const color = text && /Blocked|Declined|failed/.test(text) ? 'error' : text && /passed/.test(text) ? 'success' : 'warning'
+    const input = (e.props.input ?? {}) as Record<string, unknown>
+    const summary = summarize(e.props.tool, input)
+    const command = typeof input.command === 'string' ? input.command : undefined
+    const isCounted = (await read($, wbAtom)).evidence.some(one => one.id === id)
 
     return (
       <Box flexDirection="column">
         {row}
-        <Text color={color} dimColor wrap="truncate-end">
-          {'  '}
-          {text}
-        </Text>
+        {text !== undefined && (
+          <Text color={color} dimColor wrap="truncate-end">
+            {'  '}
+            {text}
+          </Text>
+        )}
+        {isFailed && (
+          <Box gap={1} marginLeft={2}>
+            <Button key={`explain-${id}`} plain dimColor label="Explain" onPress={() => void explainCall($, e.props.tool, summary)} />
+            <Button key={`retry-${id}`} plain dimColor label="Retry" onPress={() => void retryCall($, e.props.tool, summary)} />
+            {command !== undefined && !isCounted && (
+              <Button key={`count-${id}`} plain dimColor label="Add evidence" onPress={() => void countAsCheck($, id, command, false)} />
+            )}
+          </Box>
+        )}
       </Box>
     )
   }).catch(($, e, next) => next(e))
@@ -1342,6 +1517,23 @@ export const register: Register = on => {
           </Text>
           <Button key="wb-open" plain label="Open" onPress={() => void openPane($)} />
         </Box>
+        {live.turnResult && live.turnResult.total > 0 && live.turnResult.met < live.turnResult.total && (
+          <Box gap={1}>
+            <Text color="warning">
+              Turn ended INCOMPLETE · {live.turnResult.met}/{live.turnResult.total} done
+              {live.turnResult.failing > 0 ? ` · ${live.turnResult.failing} failing` : ''}
+            </Text>
+            <Button
+              key="wb-fix"
+              plain
+              label={live.turnResult.failing > 0 ? 'Fix failures' : 'Ask Claude to finish'}
+              onPress={() => void clearTurnResult($).then(() => askToFinish($, wb))}
+            />
+            <Button key="wb-waive" plain dimColor label="Waive" onPress={() => void waiveFromBand($)} />
+            <Button key="wb-evidence" plain dimColor label="Open evidence" onPress={() => void openPane($, 'evidence')} />
+            <Button key="wb-dismiss" plain dimColor label="×" onPress={() => void clearTurnResult($)} />
+          </Box>
+        )}
       </Box>
     )
   })

@@ -86,6 +86,8 @@ export type ProjectPolicy = {
   templates: TeamTemplate[]
   defaultTemplate?: string
   audit?: AuditConfig
+  // Prompts are held back until a locked contract with done conditions exists.
+  requireContract?: boolean
   rules: ProjectRule[]
   errors: string[]
 }
@@ -133,6 +135,19 @@ export type Task = {
   issue?: IssueRef
 }
 
+// A change Claude asked for through propose_contract_change; only the person applies it.
+export type ProposalChange = 'set_goal' | 'add_constraint' | 'remove_constraint' | 'add_done_condition' | 'remove_done_condition' | 'add_non_goal'
+
+export type Proposal = {
+  id: string
+  change: ProposalChange
+  text?: string
+  target?: string
+  reason: string
+  at: number
+  status: 'open' | 'approved' | 'rejected'
+}
+
 // The tracker item a task is for: a GitHub issue or any tracker's key and title.
 export type IssueRef = { ref: string; title?: string; url?: string }
 
@@ -146,6 +161,7 @@ export type Workbench = {
   execution: { profile: GuardProfile; isPaused: boolean; recentCalls: ToolCallRecord[] }
   evidence: EvidenceRecord[]
   changed: Changed
+  proposals?: Proposal[]
 }
 
 export type Tab = 'intent' | 'context' | 'run' | 'evidence'
@@ -165,6 +181,8 @@ export type Live = {
   sessionAllows?: SessionAllow[]
   // Text typed into the panel's fields and not yet submitted, by field key.
   drafts?: Record<string, string>
+  // The last turn's completion, shown in the band until dismissed or the next prompt.
+  turnResult?: { met: number; total: number; failing: number }
 }
 
 export type SessionAllow = { key: string; label: string; at: number }
