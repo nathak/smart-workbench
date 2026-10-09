@@ -167,6 +167,21 @@ async function stamp($: $, id: string, status: 'verified' | 'waived' | 'auto', n
   await audit($, status === 'auto' ? 'condition.unmark' : `condition.${status}`, { condition: id, text: condition?.text ?? '', note })
 }
 
+// Panel fields are controlled: what is typed lives in session state, so a submit always
+// clears the field and the keyboard stays on it for the next entry.
+async function setDraft($: $, key: string, value: string | undefined): Promise<void> {
+  await setLive($, live => {
+    const { [key]: _old, ...rest } = live.drafts ?? {}
+    return { ...live, drafts: value === undefined ? rest : { ...rest, [key]: value } }
+  })
+}
+
+async function submitDraft($: $, key: string, action: () => Promise<unknown>): Promise<void> {
+  await action()
+  await setDraft($, key, undefined)
+  await $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
+}
+
 async function allowForSession($: $, key: string, label: string): Promise<void> {
   const at = await $.clock.now()
   await setLive($, live => ({
@@ -585,7 +600,7 @@ function outcomeMark(call: ToolCallRecord): { mark: string; color?: string } {
   }
 }
 
-function intentTab($: $, { els, wb, width }: View): RenderElement {
+function intentTab($: $, { els, wb, live, width }: View): RenderElement {
   const { Box, Text, Button, Input } = els
   const { task } = wb
   const ro = task.locked
@@ -616,13 +631,24 @@ function intentTab($: $, { els, wb, width }: View): RenderElement {
           </Text>
         </Box>
       )}
-      <Text bold>Goal</Text>
+      <Box marginTop={1}>
+        <Text bold>Goal</Text>
+      </Box>
       {ro ? (
         <Text wrap="wrap">{task.goal || '—'}</Text>
       ) : (
-        <Input key="goal" placeholder="One core goal for this task" value={task.goal} submitLabel="save" onSubmit={value => void mutate($, wb => model.setGoal(wb, value))} />
+        // The goal field shows the saved goal; the add fields below are drafts that clear on submit.
+        <Input
+          key="goal"
+          placeholder="One core goal for this task"
+          value={task.goal}
+          submitLabel="save"
+          onSubmit={value => void mutate($, wb => model.setGoal(wb, value))}
+        />
       )}
-      <Text bold>Constraints</Text>
+      <Box marginTop={1}>
+        <Text bold>Constraints</Text>
+      </Box>
       {task.constraints.length === 0 && <Text dimColor>none</Text>}
       {task.constraints.map(one => (
         <Box key={`c-${one.id}`} gap={1}>
@@ -635,9 +661,18 @@ function intentTab($: $, { els, wb, width }: View): RenderElement {
         </Box>
       ))}
       {!ro && (
-        <Input key="add-constraint" placeholder="+ constraint (s: prefix = soft)" value="" submitLabel="add" onSubmit={value => void mutate($, wb => model.addConstraint(wb, value))} />
+        <Input
+          key="add-constraint"
+          placeholder="+ constraint (s: prefix = soft)"
+          value={live.drafts?.['add-constraint'] ?? ''}
+          submitLabel="add"
+          onInput={value => void setDraft($, 'add-constraint', value)}
+          onSubmit={value => void submitDraft($, 'add-constraint', () => mutate($, wb => model.addConstraint(wb, value)))}
+        />
       )}
-      <Text bold>Done conditions</Text>
+      <Box marginTop={1}>
+        <Text bold>Done conditions</Text>
+      </Box>
       {task.doneConditions.length === 0 && <Text dimColor>none</Text>}
       {task.doneConditions.map(one => {
         const status = statusOf(one, wb.evidence, lastCheckedEdit(wb.changed))
@@ -650,8 +685,17 @@ function intentTab($: $, { els, wb, width }: View): RenderElement {
           </Box>
         )
       })}
-      {!ro && <Input key="add-condition" placeholder="+ done condition" value="" submitLabel="add" onSubmit={value => void mutate($, wb => model.addCondition(wb, value))} />}
-      <Text bold>Non-goals</Text>
+      {!ro && <Input
+          key="add-condition"
+          placeholder="+ done condition"
+          value={live.drafts?.['add-condition'] ?? ''}
+          submitLabel="add"
+          onInput={value => void setDraft($, 'add-condition', value)}
+          onSubmit={value => void submitDraft($, 'add-condition', () => mutate($, wb => model.addCondition(wb, value)))}
+        />}
+      <Box marginTop={1}>
+        <Text bold>Non-goals</Text>
+      </Box>
       {task.nonGoals.length === 0 && <Text dimColor>none</Text>}
       {task.nonGoals.map((one, i) => (
         <Box key={`n-${i}`} gap={1}>
@@ -660,7 +704,14 @@ function intentTab($: $, { els, wb, width }: View): RenderElement {
           {!ro && <Button key={`nx-${i}`} plain dimColor label="×" onPress={() => void mutate($, wb => model.removeNonGoal(wb, i))} />}
         </Box>
       ))}
-      {!ro && <Input key="add-nongoal" placeholder="+ non-goal" value="" submitLabel="add" onSubmit={value => void mutate($, wb => model.addNonGoal(wb, value))} />}
+      {!ro && <Input
+          key="add-nongoal"
+          placeholder="+ non-goal"
+          value={live.drafts?.['add-nongoal'] ?? ''}
+          submitLabel="add"
+          onInput={value => void setDraft($, 'add-nongoal', value)}
+          onSubmit={value => void submitDraft($, 'add-nongoal', () => mutate($, wb => model.addNonGoal(wb, value)))}
+        />}
       {ro && <Text dimColor>Locked: added to every prompt. Unlock to edit.</Text>}
     </Box>
   )
@@ -694,7 +745,9 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
       <Text>
         {usage} · SmartWorkbench adds {estimateTokens(added.chars)}
       </Text>
-      <Text bold>PINNED</Text>
+      <Box marginTop={1}>
+        <Text bold>PINNED</Text>
+      </Box>
       {wb.context.pins.length === 0 && <Text dimColor>nothing pinned</Text>}
       {wb.context.pins.map(pin => {
         const size = sizes.get(pin.id) ?? 0
@@ -717,9 +770,27 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
           </Box>
         )
       })}
-      <Input key="pin-file" placeholder="+ file to pin (path or path:10-40)" value="" submitLabel="pin" onSubmit={value => void mutate($, wb => model.pinFile(wb, value))} />
-      <Input key="pin-note" placeholder="+ note to pin" value="" submitLabel="pin" onSubmit={value => void mutate($, wb => model.pinNote(wb, value))} />
-      {suggested.length > 0 && <Text bold>SUGGESTED</Text>}
+      <Input
+          key="pin-file"
+          placeholder="+ file to pin (path or path:10-40)"
+          value={live.drafts?.['pin-file'] ?? ''}
+          submitLabel="pin"
+          onInput={value => void setDraft($, 'pin-file', value)}
+          onSubmit={value => void submitDraft($, 'pin-file', () => mutate($, wb => model.pinFile(wb, value)))}
+        />
+      <Input
+          key="pin-note"
+          placeholder="+ note to pin"
+          value={live.drafts?.['pin-note'] ?? ''}
+          submitLabel="pin"
+          onInput={value => void setDraft($, 'pin-note', value)}
+          onSubmit={value => void submitDraft($, 'pin-note', () => mutate($, wb => model.pinNote(wb, value)))}
+        />
+      {suggested.length > 0 && (
+        <Box marginTop={1}>
+          <Text bold>SUGGESTED</Text>
+        </Box>
+      )}
       {suggested.map(one => (
         <Box key={`sug-${one.path}`} gap={1}>
           <Text color="suggestion">◇</Text>
@@ -731,7 +802,9 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
           <Button key={`hide-${one.path}`} plain dimColor label="Hide" onPress={() => void mutate($, wb => model.toggleExcluded(wb, one.path))} />
         </Box>
       ))}
-      <Text bold>OBSERVED</Text>
+      <Box marginTop={1}>
+        <Text bold>OBSERVED</Text>
+      </Box>
       {observed.length === 0 && <Text dimColor>nothing yet</Text>}
       {observed.map(one => {
         const category = categoryOf(one.path)
@@ -753,7 +826,14 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
           </Box>
         )
       })}
-      <Input key="save-set" placeholder="save pins as a context set: name" value="" submitLabel="save" onSubmit={value => void saveSet($, value)} />
+      <Input
+          key="save-set"
+          placeholder="save pins as a context set: name"
+          value={live.drafts?.['save-set'] ?? ''}
+          submitLabel="save"
+          onInput={value => void setDraft($, 'save-set', value)}
+          onSubmit={value => void submitDraft($, 'save-set', () => saveSet($, value))}
+        />
       {sets.length > 0 && (
         <Select key="load-set" label="Add set" value="" options={[{ value: '', label: '—' }, ...sets.map(value => ({ value }))]} onSelect={value => void (value !== '' && loadSet($, value))} />
       )}
@@ -826,14 +906,18 @@ function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
           ))}
         </Box>
       )}
-      <Text bold>RUNNING</Text>
+      <Box marginTop={1}>
+        <Text bold>RUNNING</Text>
+      </Box>
       {running.length === 0 && <Text dimColor>idle</Text>}
       {running.map(one => (
         <Text key={`run-${one.id}`} color="suggestion" wrap="truncate-end">
           ◉ {one.tool} · {model.cut(one.summary, width - one.tool.length - 6)}
         </Text>
       ))}
-      <Text bold>RECENT</Text>
+      <Box marginTop={1}>
+        <Text bold>RECENT</Text>
+      </Box>
       {recent.length === 0 && <Text dimColor>no calls yet</Text>}
       {recent.map(one => {
         const { mark, color } = outcomeMark(one)
@@ -1193,7 +1277,10 @@ export const register: Register = on => {
     if (wb.task.goal.trim() !== '' && wb.task.doneConditions.length > 0 && !e.isAborted) {
       const summary = turnSummary(wb.task, wb.evidence, lastCheckedEdit(wb.changed))
       await setLive($, live => ({ ...live, lastSummary: summary }))
-      $.ui.log(`${summary}\n/smartworkbench verify → Evidence tab (Verify · Waive · Ask Claude to finish)`)
+      // A log row is one line; each line of the summary gets its own.
+      for (const line of summary.split('\n')) {
+        $.ui.log(line)
+      }
     }
 
     return ran
