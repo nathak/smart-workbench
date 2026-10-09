@@ -1,0 +1,16 @@
+{
+  "profile": "balanced",
+  "rules": [
+    { "tool": "Bash", "command": "\\bnpm\\s+publish\\b", "policy": "block", "reason": "releases go through CI" },
+    { "tool": "Edit|Write", "path": "package.json", "policy": "ask", "reason": "dependency and script changes need a look" }
+  ],
+  "defaultTemplate": "bugfix",
+  "templates": {
+    "bugfix": {
+      "constraints": ["Do not change the public API of src/auth.js", "s: Keep the patch minimal"],
+      "doneConditions": ["Related tests pass"],
+      "nonGoals": ["Refactoring unrelated code"]
+    }
+  },
+  "audit": true
+}

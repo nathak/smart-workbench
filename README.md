@@ -7,7 +7,8 @@
 ## English
 
 A Claude Code mod for seeing and steering the **Intent, Context, Run and Evidence** of the work you hand to Claude, without leaving Claude Code.
-Implements P0 (first public release), P1 (product hardening) and P2 (team features) of the product spec (v0.1).
+Implements P0 (first public release), P1 (product hardening) and P2 (team features) of the product spec (v0.1), checked in a live terminal session.
+Try it on the [sample project](examples/sample-project/README.md); review what it may do in [PERMISSIONS](docs/PERMISSIONS.md).
 
 ### Install
 
@@ -23,7 +24,7 @@ Answer `y` to add the marketplace and choose the user scope. The repository is p
 
 1. **Start a task**: run `/swb new`. The panel opens on the Intent tab.
 2. **Write the contract**: type the goal in the Goal field and press Enter. Add constraints (prefix `s:` for a soft one) and done conditions such as `Related tests pass` or `Typecheck passes`; each condition is linked to the matching kind of check from its wording.
-3. **Lock it**: press `Lock` (hotkey `l`). From now on the contract rides along with every prompt as context only Claude reads.
+3. **Lock it**: press `Lock` (hotkey `l`) or run `/swb lock`. From now on the contract rides along with every prompt as context only Claude reads.
 4. **Pin context** (optional): in the Context tab, pin files (`src/auth.ts` or `src/auth.ts:10-40`) and notes. `Preview` shows exactly what Claude will receive.
 5. **Work as usual**: ask Claude in the normal prompt. The Run tab lists each tool call; risky ones are asked or blocked by the guard.
 6. **Check the result**: when the turn ends a completion summary is posted. Open the Evidence tab (`/swb verify`) to see which conditions passed, which files have a check behind them, and use `Verify`, `Waive`, `Ask Claude to finish` or `Export handoff`.
@@ -39,6 +40,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 |---|---|
 | `/swb` | Open the panel |
 | `/swb new` | Start a new task contract |
+| `/swb lock` · `/swb unlock` | Lock or unlock the contract |
 | `/swb intent` · `context` · `run` · `verify` | Open that tab |
 | `/swb status` | Text summary |
 | `/swb preview` | Show what is added to each prompt |
@@ -57,7 +59,10 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 Opens the SmartWorkbench panel on the last tab used. Where no panel can be shown, it prints the same text as `/swb status` instead.
 
 #### `/swb new`
-Starts a fresh task contract and opens the Intent tab; when the project guard file names a `defaultTemplate`, the new task starts from that team template. If a goal is already set it asks first (`Start new` / `Keep current`). The goal, constraints, non-goals, done conditions, evidence and changed-file record are cleared and the contract is unlocked. Pins, tool call history and the guard profile are kept.
+Starts a fresh task contract and opens the Intent tab; when the project guard file names a `defaultTemplate`, the new task starts from that team template. If a goal is already set it asks first (`Start new` / `Keep current`). Without a template goal, the goal is drafted from your last prompt in the session or, failing that, the branch name (`fix/PROJ-12-login-expiry` → `Login expiry`); edit it before locking. The previous goal, constraints, non-goals, done conditions, evidence and changed-file record are cleared and the contract is unlocked. Pins, tool call history and the guard profile are kept.
+
+#### `/swb lock` · `/swb unlock`
+Lock the contract (it is added to every prompt from then on) or unlock it to edit; the same as the Intent tab's `Lock` button, handy from the keyboard or a remote surface. Locking needs a goal.
 
 #### `/swb intent` · `/swb context` · `/swb run` · `/swb verify`
 Open the panel on that tab. `/swb evidence` is the same as `/swb verify`.
@@ -108,6 +113,7 @@ After asking (`Clear` / `Cancel`), resets this project's workbench: contract, pi
 ### Panel
 
 - **Intent**: goal, constraints (`[H]`/`[S]`, on/off, prefix `s:` to add a soft one), done conditions and non-goals. **Lock** adds the contract to every prompt as model-only context (`<smartworkbench_contract>`); the message you typed is left as is. A locked contract cannot be edited.
+  - **Proposals**: Claude cannot change the contract, but it can call the `propose_contract_change` tool (the contract tells it so). Each proposal appears at the top of the Intent tab with its reason and `Approve` / `Reject`; approving applies it even to a locked contract.
 - **Context**: pin files and notes. Pin a line range with `path:10-40` (or `path#L10-L40`). Each file pin switches between `Live` (re-read at send time) and `Snap` (keeps the text and SHA-256 as pinned, up to 64 KB). Save the current pins as a named context set and add it to any project with `Add set`.
   - Files Claude reads or edits are classified as source, test, config, docs, generated or secret. Source, test and config files that were edited or read at least twice show up under **SUGGESTED**: `Pin` accepts one, `Hide` dismisses it. Secret and generated files are never suggested. The rest are listed under OBSERVED.
   - Token sizes are estimates marked with `~`. **Preview** is built by the same function that builds the injected text. A pin that cannot be read warns but never blocks the prompt.
@@ -116,6 +122,8 @@ After asking (`Clear` / `Cancel`), resets this project's workbench: contract, pi
   - At the end of each turn `git diff -U0 HEAD` gives the changed regions per file (`L10-24, L41 (del)`), and each file shows whether a check passed **after** its last edit (✓ passed · ✕ failed · ! no check · · docs).
   - If code changes after a passing test, that condition drops to `observed` (re-run needed) and no longer counts as done. Edits to docs and generated files are exempt.
 - **Tool row badges**: Claude Code's own tool rows stay as they are; one line is added only when there is a risk, a policy outcome (Blocked/Declined/Asked) or a check result (`test passed · evidence for dc-1`).
+- **Failed tool rows** get `Explain` and `Retry` (each sends Claude a prompt) and, for shell commands, `Add evidence` to count a run SmartWorkbench did not recognize (`./scripts/check.sh`) as a test, build, typecheck or lint result.
+- **Turn result**: when a turn ends with conditions unmet, the band shows `Turn ended INCOMPLETE · 0/1 done · 1 failing` with `Fix failures` (or `Ask Claude to finish`), `Waive`, `Open evidence` and `×`; it clears on the next prompt.
 
 Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guard BALANCED [Open]`
 
@@ -168,6 +176,7 @@ Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `
 - Broken rules are skipped and reported, never guessed at.
 - `templates` are the team's shared done conditions: each has `constraints` (prefix `s:` for soft), `doneConditions` (text, or `{ "text", "link" }`), optional `goal` and `nonGoals`. `defaultTemplate` seeds `/swb new`; `/swb load <name>` or `team:<name>` loads one.
 - `audit` turns on the audit log (below).
+- `"requireContract": true` holds prompts back until a locked contract with at least one done condition exists (prompts the mod sends itself are exempt).
 
 ### Audit log
 
@@ -180,11 +189,17 @@ With `"audit": true` (or `{ "path": "logs/agent-audit.jsonl" }`, a path inside t
 - Evidence is kept as history and a condition follows the latest result (a failure is never overwritten by an older pass).
 - The task becomes `complete` only when every condition is Verified or Waived.
 
+### Performance
+
+Measured in a live session (Claude Code 2.1.295), the mod's own work per event: **2 ms** per prompt (target 20 ms) and **4 ms** per tool call, including the state save (target 10 ms). Run Claude Code with `--debug` to see `SmartWorkbench timing:` lines for your project.
+
 ### Trust and storage
+
+See [docs/PERMISSIONS.md](docs/PERMISSIONS.md) for the full list of hooks, calls, files and commands.
 
 - No network requests of its own, no extra model calls, no telemetry. `/swb ci` and `/swb issue #n` run the local `gh` CLI only when you call them.
 - State is kept in `$.store` per project (working directory) and restored on restart; state saved by an earlier version is filled in on load. Templates and context sets are kept across projects. Live pin contents, environment variables and the conversation are not stored. History is capped at 100 tool calls and 200 evidence records.
-- Local commands run with argument lists: `git diff -U0 HEAD` at turn end, `git config user.name` when audit is on, and `git`/`gh` for `/swb ci` and `/swb issue`. Files are written only for the handoff, `policy init`, `share` and the audit log the guard file turns on.
+- Local commands run with argument lists: `git diff -U0 HEAD` at turn end, `git rev-parse --abbrev-ref HEAD` for `/swb new`, `git config user.name` when audit is on, and `git`/`gh` for `/swb ci` and `/swb issue`. Files are written only for the handoff, `policy init`, `share` and the audit log the guard file turns on.
 - `claude plugin validate .` lists every hook and call the mod uses.
 
 ### Development
@@ -203,6 +218,8 @@ hooks/diff.ts        git diff region parsing, per-file evidence links
 hooks/team.ts        audit lines, CI results, issue refs, shared task file
 types/index.d.ts     state type contract
 tests/               claude plugin test
+examples/            sample project with a guard file
+docs/                permissions
 ```
 
 ```bash
@@ -211,7 +228,7 @@ claude plugin test .
 claude --plugin-dir .      # start a session with this folder loaded
 ```
 
-Developed and checked on Claude Code 2.1.292. The mods API is early access and may change between releases.
+Developed on Claude Code 2.1.292 and checked in a live terminal session on 2.1.295 (wide and narrow terminals); the Desktop app has not been checked yet. The mods API is early access and may change between releases.
 
 ### Not yet
 
@@ -222,7 +239,8 @@ Developed and checked on Claude Code 2.1.292. The mods API is early access and m
 ## 한국어
 
 Claude에게 맡긴 작업의 **목표(Intent)·맥락(Context)·실행(Run)·검증(Evidence)** 을 Claude Code 안에서 직접 보고 통제하는 Mod입니다.
-기획서: NAS `claude-mods/smart-workbench/smartworkbench-prd.md` (v0.1). P0(최초 공개 버전), P1(제품성 강화), P2(팀 기능)를 구현했습니다.
+기획서: NAS `claude-mods/smart-workbench/smartworkbench-prd.md` (v0.1). P0(최초 공개 버전), P1(제품성 강화), P2(팀 기능)를 구현했고 실제 터미널 세션에서 확인했습니다.
+[샘플 프로젝트](examples/sample-project/README.md)로 바로 써 볼 수 있고, 설치 전 [권한 문서](docs/PERMISSIONS.md)에서 Mod가 하는 일을 확인할 수 있습니다.
 
 ### 설치
 
@@ -238,7 +256,7 @@ Claude Code 입력창에서:
 
 1. **작업 시작**: `/swb new`를 실행하면 패널이 Intent 탭으로 열립니다.
 2. **계약 작성**: Goal 칸에 목표를 쓰고 Enter. 제약(앞에 `s:`를 붙이면 Soft)과 완료 조건(`관련 테스트 통과`, `타입 검사 통과` 등)을 추가합니다. 완료 조건은 문구를 보고 맞는 검증 종류(test/build/typecheck/lint)에 자동 연결됩니다.
-3. **잠금**: `Lock`(단축키 `l`)을 누르면 이때부터 계약이 매 프롬프트에 Claude만 읽는 컨텍스트로 붙습니다.
+3. **잠금**: `Lock`(단축키 `l`)을 누르거나 `/swb lock`을 실행하면 이때부터 계약이 매 프롬프트에 Claude만 읽는 컨텍스트로 붙습니다.
 4. **자료 고정**(선택): Context 탭에서 파일(`src/auth.ts` 또는 `src/auth.ts:10-40`)과 메모를 Pin합니다. `Preview`로 Claude에게 실제로 전달될 내용을 확인합니다.
 5. **평소처럼 작업**: 기본 입력창에서 Claude에게 요청합니다. Run 탭에 툴 호출이 쌓이고, 위험한 호출은 Guard가 묻거나 막습니다.
 6. **결과 확인**: 턴이 끝나면 완료 요약이 대화에 남습니다. Evidence 탭(`/swb verify`)에서 어떤 조건이 통과했는지, 어떤 파일 변경 뒤에 검증이 있었는지 보고 `Verify`, `Waive`, `Ask Claude to finish`, `Export handoff`를 씁니다.
@@ -254,6 +272,7 @@ Claude Code 입력창에서:
 |---|---|
 | `/swb` | 패널 열기 |
 | `/swb new` | 새 작업 계약 시작 |
+| `/swb lock` · `/swb unlock` | 계약 잠금·해제 |
 | `/swb intent` · `context` · `run` · `verify` | 해당 탭 열기 |
 | `/swb status` | 텍스트 요약 |
 | `/swb preview` | 프롬프트에 붙는 내용 보기 |
@@ -272,7 +291,10 @@ Claude Code 입력창에서:
 SmartWorkbench 패널을 마지막에 보던 탭으로 엽니다. 패널을 띄울 수 없는 환경에서는 대신 `/swb status`와 같은 텍스트를 보여 줍니다.
 
 #### `/swb new`
-새 작업 계약을 시작하고 Intent 탭을 엽니다. 프로젝트 Guard 파일에 `defaultTemplate`이 있으면 그 팀 템플릿으로 시작합니다. 이미 목표가 있으면 먼저 묻습니다(`Start new` / `Keep current`). 목표·제약·하지 않을 일·완료 조건·증거·변경 파일 기록을 비우고 잠금을 풉니다. Pin, 툴 호출 기록, Guard 프로필은 유지됩니다.
+새 작업 계약을 시작하고 Intent 탭을 엽니다. 프로젝트 Guard 파일에 `defaultTemplate`이 있으면 그 팀 템플릿으로 시작합니다. 이미 목표가 있으면 먼저 묻습니다(`Start new` / `Keep current`). 템플릿에 목표가 없으면 이 세션의 마지막 프롬프트, 없으면 브랜치 이름(`fix/PROJ-12-login-expiry` → `Login expiry`)으로 목표 초안을 채웁니다. 잠그기 전에 고치면 됩니다. 이전 목표·제약·하지 않을 일·완료 조건·증거·변경 파일 기록을 비우고 잠금을 풉니다. Pin, 툴 호출 기록, Guard 프로필은 유지됩니다.
+
+#### `/swb lock` · `/swb unlock`
+계약을 잠그거나(이때부터 매 프롬프트에 붙음) 편집하려고 잠금을 풉니다. Intent 탭의 `Lock` 버튼과 같고, 키보드나 원격 화면에서 쓰기 편합니다. 잠그려면 목표가 있어야 합니다.
 
 #### `/swb intent` · `/swb context` · `/swb run` · `/swb verify`
 해당 탭으로 패널을 엽니다. `/swb evidence`는 `/swb verify`와 같습니다.
@@ -323,6 +345,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 ### 패널
 
 - **Intent**: Goal, Constraints(`[H]`/`[S]`, 켜기/끄기, `s:` 접두어로 Soft 추가), Done conditions, Non-goals. **Lock** 하면 계약이 `<smartworkbench_contract>`로 매 프롬프트에 추가 컨텍스트로 붙습니다(사용자 메시지 본문은 그대로). 잠긴 동안은 편집할 수 없습니다.
+  - **변경 제안**: Claude는 계약을 직접 바꿀 수 없고, `propose_contract_change` 툴로 제안만 할 수 있습니다(계약 안내문에 적혀 있음). 제안은 이유와 함께 Intent 탭 맨 위에 `Approve` / `Reject`로 나오며, 승인하면 잠긴 계약에도 반영됩니다.
 - **Context**: 파일과 메모를 Pin. 파일은 `path:10-40`(또는 `path#L10-L40`)로 라인 범위만 Pin할 수 있고, Pin마다 `Live`(전송 시점에 다시 읽음)와 `Snap`(Pin한 시점의 내용과 SHA-256 보존, 64KB 이하)을 전환합니다. 현재 Pin 묶음을 이름 붙여 Context set으로 저장하고 다른 프로젝트에서 `Add set`으로 추가할 수 있습니다.
   - Claude가 읽거나 수정한 파일은 source/test/config/docs/generated/secret으로 자동 분류됩니다. 수정했거나 두 번 이상 읽은 source·test·config 파일은 **SUGGESTED**로 제안되며 `Pin`으로 승인하거나 `Hide`로 숨깁니다. secret·generated 파일은 제안하지 않습니다. 나머지는 OBSERVED에 표시됩니다.
   - 토큰 수는 `~`가 붙은 추정치입니다. **Preview**는 실제로 주입되는 텍스트와 같은 함수로 만듭니다. 읽을 수 없는 Pin은 전송을 막지 않고 경고만 냅니다.
@@ -331,6 +354,8 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
   - 턴이 끝날 때 `git diff -U0 HEAD`로 파일별 변경 구간(`L10-24, L41 (del)`)을 모으고, 파일마다 마지막 수정 **이후에** 통과한 검증이 있는지 표시합니다(✓ 통과 · ✕ 실패 · ! 검증 없음 · · 문서).
   - 통과한 테스트 뒤에 코드가 다시 바뀌면 그 조건은 `observed`(다시 실행 필요)로 내려가고 완료로 치지 않습니다. 문서·생성 파일 수정은 예외입니다.
 - **툴 행 배지**: 대화의 기본 툴 행은 그대로 두고, 위험도·정책 결과(Blocked/Declined/Asked)나 검증 결과(`test passed · evidence for dc-1`)가 있을 때만 한 줄을 덧붙입니다.
+- **실패한 툴 행**에는 `Explain`, `Retry`(각각 Claude에게 프롬프트를 보냄)와, 셸 명령이면 `Add evidence`가 붙습니다. `Add evidence`는 SmartWorkbench가 알아보지 못한 실행(`./scripts/check.sh` 등)을 테스트·빌드·타입 검사·린트 결과로 직접 기록합니다.
+- **턴 결과**: 조건이 남은 채 턴이 끝나면 밴드에 `Turn ended INCOMPLETE · 0/1 done · 1 failing`과 `Fix failures`(실패가 없으면 `Ask Claude to finish`), `Waive`, `Open evidence`, `×`가 나옵니다. 다음 프롬프트에서 사라집니다.
 
 입력창 위 밴드: `WB ● 목표 │ Ctx +2 pins · 42% │ Done 1/2 │ Guard BALANCED [Open]`
 
@@ -383,6 +408,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - 잘못된 규칙은 건너뛰고 오류를 표시합니다(추측해서 적용하지 않음).
 - `templates`는 팀 공통 완료 조건입니다. 템플릿마다 `constraints`(`s:` 접두어는 Soft), `doneConditions`(문자열 또는 `{ "text", "link" }`), 선택적인 `goal`, `nonGoals`를 둡니다. `defaultTemplate`은 `/swb new`의 시작점이 되고, `/swb load <이름>` 또는 `team:<이름>`으로 불러옵니다.
 - `audit`은 감사 로그를 켭니다(아래).
+- `"requireContract": true`이면 완료 조건이 하나 이상 있는 잠긴 계약이 생길 때까지 프롬프트를 보류합니다(Mod가 직접 보내는 프롬프트는 제외).
 
 ### 감사 로그
 
@@ -395,11 +421,17 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - 증거는 이력으로 쌓이고, 조건 상태는 최신 결과를 따릅니다(실패가 성공으로 덮이지 않음).
 - 모든 조건이 Verified 또는 Waived일 때만 `complete`가 됩니다.
 
+### 성능
+
+실제 세션(Claude Code 2.1.295)에서 잰 Mod 자체 처리 시간은 프롬프트당 **2ms**(목표 20ms), 툴 호출당 **4ms**(상태 저장 포함, 목표 10ms)입니다. `--debug`로 실행하면 `SmartWorkbench timing:` 줄로 내 프로젝트에서의 시간을 볼 수 있습니다.
+
 ### 신뢰와 저장
+
+hook, 호출, 파일, 명령의 전체 목록은 [docs/PERMISSIONS.md](docs/PERMISSIONS.md)에 있습니다.
 
 - 자체 네트워크 요청 없음, 모델 추가 호출 없음, 텔레메트리 없음. `/swb ci`와 `/swb issue #n`만 직접 실행할 때 로컬 `gh` CLI를 씁니다.
 - 상태는 `$.store`에 프로젝트(작업 디렉터리)별로 저장되어 재시작 후 복원됩니다. 이전 버전에서 저장한 상태도 새 필드를 채워 그대로 읽습니다. 템플릿과 Context set은 프로젝트와 무관하게 저장됩니다. Live Pin 파일 내용, 환경 변수, 대화 기록은 저장하지 않습니다. 툴 기록 100개, 증거 200개로 제한합니다.
-- 로컬 명령은 모두 인자 배열로 실행합니다. 턴 종료 시 `git diff -U0 HEAD`, 감사 로그가 켜져 있으면 `git config user.name`, `/swb ci`·`/swb issue`에서 `git`/`gh`. 파일 쓰기는 handoff, `policy init`, `share`, 그리고 Guard 파일이 켠 감사 로그뿐입니다.
+- 로컬 명령은 모두 인자 배열로 실행합니다. 턴 종료 시 `git diff -U0 HEAD`, `/swb new`에서 `git rev-parse --abbrev-ref HEAD`, 감사 로그가 켜져 있으면 `git config user.name`, `/swb ci`·`/swb issue`에서 `git`/`gh`. 파일 쓰기는 handoff, `policy init`, `share`, 그리고 Guard 파일이 켠 감사 로그뿐입니다.
 - 사용하는 hook과 호출 목록은 `claude plugin validate .`로 확인할 수 있습니다.
 
 ### 개발
@@ -418,6 +450,8 @@ hooks/diff.ts        git diff 구간 파싱, 파일별 증거 연결
 hooks/team.ts        감사 로그, CI 결과, 이슈 참조, 공유 작업 파일
 types/index.d.ts     상태 타입 계약
 tests/               claude plugin test
+examples/            Guard 파일이 있는 샘플 프로젝트
+docs/                권한 문서
 ```
 
 ```bash
@@ -426,7 +460,7 @@ claude plugin test .
 claude --plugin-dir .      # 이 폴더를 불러와 세션 실행
 ```
 
-Claude Code 2.1.292에서 개발·검증했습니다. Mods API는 초기 단계라 버전마다 바뀔 수 있습니다.
+Claude Code 2.1.292에서 개발했고, 2.1.295 실제 터미널 세션(넓은 화면·좁은 화면)에서 확인했습니다. Desktop 앱에서는 아직 확인하지 않았습니다. Mods API는 초기 단계라 버전마다 바뀔 수 있습니다.
 
 ### 아직 안 된 것
 
