@@ -4,7 +4,7 @@ import type { Elements, EngineInterface, Register, RenderElement } from 'claude-
 import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Tab, Template, ToolCallRecord, Workbench } from '../types'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, parseDiff, type Coverage } from './diff'
-import { completionOf, evidenceKindOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
+import { checkOutcome, completionOf, evidenceKindOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
 import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy } from './policy'
@@ -1062,6 +1062,10 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
+    // This mod's own calls (its guard and confirmation questions) are not Claude's work.
+    if (next.origin.plugin === $.plugin.name) {
+      return next(e)
+    }
     const wb = await read($, wbAtom)
     const live = await read($, liveAtom)
     const cwd = await $.session.cwd()
@@ -1143,7 +1147,8 @@ export const register: Register = on => {
       if (kind && e.tool === 'Bash' && ran.deny === undefined) {
         const result = (ran.isError ? undefined : ran.result) as { interrupted?: boolean; backgroundTaskId?: string } | undefined
         const isUnknown = result?.interrupted === true || result?.backgroundTaskId !== undefined
-        const record: EvidenceRecord = { id: call.id, kind, command: e.command.slice(0, 200), ok: isUnknown ? null : isOk, at: endedAt }
+        const ok = isUnknown ? null : checkOutcome(e.command, kind, isOk)
+        const record: EvidenceRecord = { id: call.id, kind, command: e.command.slice(0, 200), ok, at: endedAt }
         updated = model.addEvidence(updated, record)
       }
 
