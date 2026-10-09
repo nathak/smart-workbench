@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, Template, ToolCallRecord, Workbench } from '../types'
+import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, Template, ToolCallRecord, Track, Workbench } from '../types'
+import * as crew from './crew'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, parseDiff, type Coverage } from './diff'
@@ -37,6 +38,8 @@ const HELP = [
   '  /smartworkbench run        open the Run tab',
   '  /smartworkbench verify     open the Evidence tab',
   '  /smartworkbench lock | unlock   lock the contract (added to every prompt) or unlock it to edit',
+  '  /smartworkbench team [on|off]   team mode: Sonnet builds, Haiku explores, Opus reviews',
+  '  /smartworkbench advise [topic]  ask the Opus advisor now',
   '  /smartworkbench status     text summary (works without UI)',
   '  /smartworkbench preview    show the context added to each prompt',
   '  /smartworkbench save <name>      save the contract, pins and guard as a template',
@@ -286,6 +289,51 @@ async function waiveFromBand($: $): Promise<void> {
   if (condition) await waive($, condition.id, condition.text)
 }
 
+async function updateTrack($: $, change: (track: Track) => Track): Promise<Track> {
+  let next = crew.EMPTY_TRACK
+  await setLive($, live => {
+    next = change(live.track ?? crew.EMPTY_TRACK)
+    return { ...live, track: next }
+  })
+
+  return next
+}
+
+// Team mode on: the agents are already registered; this switches the automatic reviews
+// on and tries to make Sonnet the session's model.
+async function setTeam($: $, enabled: boolean): Promise<string> {
+  await mutate($, wb => ({ ...wb, team: { enabled } }))
+  await audit($, enabled ? 'team.on' : 'team.off')
+
+  const rows = await $.config.list().catch(() => [])
+  const row = rows.find(one => one.key === 'model')
+
+  // The model row is the same setting /model changes, so team off puts the previous one back.
+  if (!enabled) {
+    const previous = await $.store.get('team:previousModel')
+    if (row && previous !== undefined && previous !== null) {
+      await $.config.set({ key: 'model', value: previous as string }).catch(() => undefined)
+      await $.store.delete('team:previousModel')
+      return `Team mode off: no automatic Opus reviews; the model is back to ${String(previous) || 'the default'}.`
+    }
+    return 'Team mode off: no automatic Opus reviews; the explorer and advisor agents stay available.'
+  }
+
+  if (row && (await $.store.get('team:previousModel')) === undefined) {
+    await $.store.set('team:previousModel', row.value ?? '')
+  }
+  const set = row ? await $.config.set({ key: 'model', value: 'sonnet' }).catch((error: unknown) => ({ deny: String(error) })) : undefined
+  const model = set && !('deny' in set && set.deny)
+    ? 'The session model is now Sonnet (team off puts the previous model back).'
+    : 'Switch the session to Sonnet with /model sonnet (or start with claude --model sonnet).'
+
+  return [
+    'Team mode on: Sonnet builds, Haiku explores, Opus reviews.',
+    model,
+    `Opus (${crew.ADVISOR}) steps in before a plan is presented, after the same command fails ${crew.REPEAT_LIMIT} times in a row, and before finishing a turn that changed code. /swb advise asks it any time.`,
+  ].join('\n')
+}
+
 async function toggleLock($: $): Promise<void> {
   const wb = await mutate($, model.toggleLock)
   await audit($, wb.task.locked ? 'contract.lock' : 'contract.unlock', { goal: wb.task.goal })
@@ -492,6 +540,7 @@ function statusText(wb: Workbench, live: Live): string {
     `Goal: ${wb.task.goal || '—'} (${wb.task.locked ? 'locked' : 'unlocked'}, ${wb.task.status})`,
     ...(constraints.length > 0 ? ['Constraints:', ...constraints] : []),
     ...(pins.length > 0 ? ['Pins:', ...pins] : []),
+    ...(wb.team?.enabled ? [`Team mode: on (Opus reviews this session: ${live.track?.advisorRuns ?? 0})`] : []),
     ...((live.sessionAllows ?? []).length > 0 ? [`Allowed for this session: ${(live.sessionAllows ?? []).map(one => one.label).join(', ')}`] : []),
     ...(live.policy ? [`Guard file: ${live.policy.source} (${live.policy.rules.length} rules${live.policy.profile ? `, profile ${live.policy.profile}` : ''})`] : []),
     ...(wb.task.doneConditions.length > 0 ? [turnSummary(wb.task, wb.evidence, lastCheckedEdit(wb.changed))] : []),
@@ -529,6 +578,24 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     const goal = draft ? ` Goal drafted as "${model.cut(draft, 60)}"; edit it if needed.` : ''
 
     return { text: `New SmartWorkbench task${from}.${goal} Add done conditions, then Lock.` }
+  }
+
+  if (word === 'team') {
+    const sub = args.trim().split(/\s+/)[1]?.toLowerCase()
+    if (sub === 'on' || sub === 'off') return { text: await setTeam($, sub === 'on') }
+    const wb = await read($, wbAtom)
+    const track = (await read($, liveAtom)).track ?? crew.EMPTY_TRACK
+
+    return {
+      text: wb.team?.enabled
+        ? `Team mode is on: Sonnet builds, Haiku explores (${crew.EXPLORER}), Opus reviews (${crew.ADVISOR}). Opus reviews this session: ${track.advisorRuns}. /swb team off to stop the automatic reviews.`
+        : 'Team mode is off. /swb team on: Sonnet builds, Haiku explores, Opus reviews plans, repeated errors and the final check.',
+    }
+  }
+
+  if (word === 'advise') {
+    await $.prompt.submit({ text: crew.advisePrompt(args.trim().slice(word.length)) })
+    return { text: 'Asked Claude to consult the Opus advisor.' }
   }
 
   if (word === 'lock' || word === 'unlock') {
@@ -1012,6 +1079,12 @@ function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
           onSelect={value => void mutate($, wb => model.setProfile(wb, value as GuardProfile))}
         />
       )}
+      <Box gap={1}>
+        <Text dimColor={!wb.team?.enabled}>
+          Team: {wb.team?.enabled ? `on · Sonnet builds, Haiku explores, Opus reviews · ${live.track?.advisorRuns ?? 0} Opus reviews` : 'off'}
+        </Text>
+        <Button key="team" plain dimColor label={wb.team?.enabled ? 'Turn off' : 'Turn on'} onPress={() => void setTeam($, !wb.team?.enabled).then(text => $.ui.toast(`SmartWorkbench: ${text.split('\n')[0]}`))} />
+      </Box>
       {live.policy ? (
         <Text dimColor={live.policy.errors.length === 0} color={live.policy.errors.length > 0 ? 'warning' : undefined} wrap="truncate-end">
           {POLICY_PATH}: {live.policy.rules.length} rules{live.policy.errors.length > 0 ? ` · ⚠ ${live.policy.errors[0]}` : ''}
@@ -1230,7 +1303,7 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const argumentHint = '[new|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|team|advise|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
@@ -1251,6 +1324,10 @@ export const register: Register = on => {
         required: ['change', 'reason'],
       },
     }).catch(error => $.ui.log(`SmartWorkbench: could not register propose_contract_change: ${String(error)}`, { to: 'debug' }))
+    // Team mode's agents: available to Claude at all times, the automatic reviews only when it is on.
+    for (const spec of [crew.EXPLORER_SPEC, crew.ADVISOR_SPEC]) {
+      await $.agent.register(spec).catch(error => $.ui.log(`SmartWorkbench: could not register ${spec.name}: ${String(error)}`, { to: 'debug' }))
+    }
     const sessionId = await $.session.id().catch(() => undefined)
     if (sessionId) await setLive($, live => ({ ...live, sessionId }))
     await load($)
@@ -1287,7 +1364,9 @@ export const register: Register = on => {
       return { drop: `This project requires a locked SmartWorkbench contract with at least one done condition (${POLICY_PATH}: requireContract). Run /swb new, fill it in and Lock.` }
     }
 
-    const { blocks, warnings } = await injection($, wb)
+    const { blocks: contract, warnings } = await injection($, wb)
+    const blocks = wb.team?.enabled ? [...contract, crew.TEAM_CONTEXT] : contract
+    await updateTrack($, track => ({ ...track, turnStartedAt: startedAt }))
     const { turnResult: _done, ...rest } = await read($, liveAtom)
     await setLive($, () => ({ ...rest, pinWarnings: warnings }))
 
@@ -1310,6 +1389,12 @@ export const register: Register = on => {
       return propose($, e as unknown as Record<string, unknown>)
     }
     const hookStart = await $.clock.now()
+    const isTeam = (await read($, wbAtom)).team?.enabled === true
+
+    if (isTeam && e.tool === 'ExitPlanMode' && crew.needsPlanReview((await read($, liveAtom)).track ?? crew.EMPTY_TRACK)) {
+      await audit($, 'team.plan-review-required')
+      return { deny: crew.PLAN_REVIEW }
+    }
     const wb = await read($, wbAtom)
     const live = await read($, liveAtom)
     const cwd = await $.session.cwd()
@@ -1404,6 +1489,23 @@ export const register: Register = on => {
     if (isOk && path === POLICY_PATH && model.isEditTool(e.tool)) {
       await loadPolicy($)
     }
+
+    if (e.tool === 'Agent' && e.subagent_type === crew.ADVISOR && isOk) {
+      await updateTrack($, track => crew.advisorRan(track, endedAt))
+      await audit($, 'team.advisor', { description: e.description })
+    } else if (isTeam && ran.deny === undefined && e.tool !== 'Agent') {
+      const key = crew.failureKey(e.tool, e as unknown as Record<string, unknown>)
+      let nudge = false
+      const track = await updateTrack($, current => {
+        const result = crew.trackResult(current, key, isOk)
+        nudge = result.nudge
+        return result.track
+      })
+      if (nudge) {
+        await audit($, 'team.repeat-error', { tool: e.tool, input: call.summary, count: track.failures[key] ?? 0 })
+        return { ...ran, context: [...(ran.context ?? []), crew.repeatNudge(track.failures[key] ?? crew.REPEAT_LIMIT)] }
+      }
+    }
     await badge($, { ...call, outcome })
 
     return ran
@@ -1449,6 +1551,20 @@ export const register: Register = on => {
     }
 
     return ran
+  }).catch(($, e, next) => next(e))
+
+  // Team mode's final check: a turn that changed code ends only after the advisor saw it.
+  // Asked once per stop; if Claude finishes anyway the next stop goes through.
+  on('classic.Stop', async ($, e, next) => {
+    const result = await next(e)
+    const wb = await read($, wbAtom)
+    if (!wb.team?.enabled) return result
+
+    const track = (await read($, liveAtom)).track ?? crew.EMPTY_TRACK
+    if (!crew.needsFinalCheck(track, lastCheckedEdit(wb.changed), e.stop_hook_active)) return result
+
+    await audit($, 'team.final-check-required')
+    return { ...result, block: crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text)) }
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

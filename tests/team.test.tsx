@@ -34,6 +34,8 @@ type WorldOptions = {
   ask?: (labels: string[]) => string
   // Collects the commands (or tool names) that actually ran.
   ran?: string[]
+  // Makes these commands fail as a non-zero exit would.
+  fail?: (command: string) => boolean
 }
 
 function world(on: On, options: WorldOptions = {}) {
@@ -84,7 +86,11 @@ function world(on: On, options: WorldOptions = {}) {
       const answer = options.ask ? options.ask(labels) : (options.answer ?? labels[0] ?? '')
       return { result: { questions: e.questions, answers: { [question?.question ?? '']: answer } } }
     }
-    options.ran?.push('command' in e ? String(e.command) : String(e.tool))
+    const command = 'command' in e ? String(e.command) : String(e.tool)
+    options.ran?.push(command)
+    if (options.fail?.(command)) {
+      return { isError: true, result: 'Exit code 1', text: 'Exit code 1\nauth: 1 failed' }
+    }
     return { result: { stdout: 'ok', stderr: '', interrupted: false } }
   })
 
@@ -446,4 +452,94 @@ test('/swb lock and unlock work without the panel', async ($, on) => {
   expect(workbench().task.locked).toBe(true)
   expect((await $.command.run({ command: 'swb', args: 'lock', ...COMMAND })).text).toBe('The contract is already locked.')
   expect((await $.command.run({ command: 'swb', args: 'unlock', ...COMMAND })).text).toContain('Contract unlocked')
+})
+
+const ADVISOR = 'smartworkbench:advisor'
+const advisorCall = { tool: 'Agent', description: 'review', prompt: 'Review this.', subagent_type: ADVISOR } as const
+
+test('team mode registers Haiku and Opus agents and briefs Claude on every prompt', async ($, on) => {
+  const { workbench } = world(on)
+  const agents: string[] = []
+  on('agent.register', ($, e) => {
+    agents.push(`${e.name}:${e.model}`)
+    return { value: { agent: `smartworkbench:${e.name}` } }
+  })
+  let context = ''
+  on('prompt.submit', ($, e) => {
+    context = (e.context ?? []).join('\n')
+    return { text: e.text, context: e.context }
+  })
+  await $.session.start(start)
+  expect(agents).toEqual(['explorer:haiku', 'advisor:opus'])
+
+  await $.prompt.submit({ text: 'hi', ...COMPOSER })
+  expect(context).not.toContain('smartworkbench_team')
+
+  const on1 = await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  expect(on1.text).toContain('Team mode on: Sonnet builds, Haiku explores, Opus reviews.')
+  expect(on1.text).toContain('/model sonnet')
+  expect(workbench().team).toEqual({ enabled: true })
+
+  await $.prompt.submit({ text: 'build it', ...COMPOSER })
+  expect(context).toContain('Delegate exploration')
+  expect(context).toContain(ADVISOR)
+})
+
+test('a plan is sent back for an Opus review before it reaches the user', async ($, on) => {
+  const ran: string[] = []
+  world(on, { ran })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'plan the fix', ...COMPOSER })
+
+  const first = await $.tool.call({ tool: 'ExitPlanMode' })
+  expect(JSON.stringify(first)).toContain(`have ${ADVISOR} review it`)
+  expect(ran).toEqual([])
+
+  await $.tool.call(advisorCall)
+  await $.tool.call({ tool: 'ExitPlanMode' })
+  expect(ran).toEqual(['Agent', 'ExitPlanMode'])
+})
+
+test('the second failure in a row of the same command adds an advisor nudge to its result', async ($, on) => {
+  world(on, { fail: command => command.startsWith('npm test') })
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+
+  const first = await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(JSON.stringify(first)).not.toContain('consult')
+  const second = await $.tool.call({ tool: 'Bash', command: 'npm test -- --verbose' })
+  expect(JSON.stringify(second)).toContain('failed 2 times in a row')
+  const third = await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(JSON.stringify(third)).not.toContain('times in a row')
+
+  await $.tool.call(advisorCall)
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  const after = await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(JSON.stringify(after)).toContain('failed 2 times in a row')
+})
+
+test('a turn that changed code is held for a final Opus check, once', async ($, on) => {
+  const { workbench } = world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'fix it', ...COMPOSER })
+
+  const quiet = await $.classic.Stop({ stop_hook_active: false })
+  expect(quiet.block).toBe(undefined)
+
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '30' })
+  expect(workbench().changed.files).toEqual(['src/auth.js'])
+  const held = await $.classic.Stop({ stop_hook_active: false })
+  expect(held.block).toContain(`run a final check with ${ADVISOR}`)
+  const again = await $.classic.Stop({ stop_hook_active: true })
+  expect(again.block).toBe(undefined)
+
+  await $.tool.call(advisorCall)
+  const checked = await $.classic.Stop({ stop_hook_active: false })
+  expect(checked.block).toBe(undefined)
+
+  await $.command.run({ command: 'swb', args: 'team off', ...COMMAND })
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: '31' })
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
 })

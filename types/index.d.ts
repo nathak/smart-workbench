@@ -162,6 +162,8 @@ export type Workbench = {
   evidence: EvidenceRecord[]
   changed: Changed
   proposals?: Proposal[]
+  // Team mode: Sonnet builds, Haiku explores, Opus reviews.
+  team?: { enabled: boolean }
 }
 
 export type Tab = 'intent' | 'context' | 'run' | 'evidence'
@@ -183,9 +185,20 @@ export type Live = {
   drafts?: Record<string, string>
   // The last turn's completion, shown in the band until dismissed or the next prompt.
   turnResult?: { met: number; total: number; failing: number }
+  track?: Track
 }
 
 export type SessionAllow = { key: string; label: string; at: number }
+
+// What team mode watches in this session: repeated failures and when the advisor last ran.
+export type Track = {
+  failures: Record<string, number>
+  // Keys Claude was already pointed at the advisor for; cleared when the advisor runs.
+  nudged: string[]
+  lastAdvisorAt?: number
+  turnStartedAt?: number
+  advisorRuns: number
+}
 
 declare module 'claude-code' {
   interface PluginState {
