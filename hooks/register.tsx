@@ -690,8 +690,10 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   if (word === 'advise') {
-    await $.prompt.submit({ text: crew.advisePrompt(args.trim().slice(word.length)) })
-    return { text: 'Asked Claude to consult the Opus advisor.' }
+    // Sent when this command's turn ends: the host refuses a submit from inside a command.
+    const text = crew.advisePrompt(args.trim().slice(word.length))
+    await setLive($, current => ({ ...current, pendingPrompt: text }))
+    return { text: 'Claude will consult the Opus advisor when this turn ends.' }
   }
 
   if (word === 'lock' || word === 'unlock') {
@@ -1733,6 +1735,12 @@ export const register: Register = on => {
       })
     }
 
+    const queued = (await read($, liveAtom)).pendingPrompt
+    if (queued && !e.isAborted) {
+      await setLive($, current => ({ ...current, pendingPrompt: undefined }))
+      void Promise.resolve($.prompt.submit({ text: queued })).catch(() => undefined)
+    }
+
     // Changed regions against HEAD, so the Evidence tab can say which ones a check has seen.
     const diff = await $.process.run(['git', 'diff', '-U0', '--no-color', '--no-ext-diff', 'HEAD']).catch(() => undefined)
     if (diff?.exitCode === 0) {
@@ -1781,7 +1789,8 @@ export const register: Register = on => {
     // The command's own turn ends before pass 1 went out; that stop is not a pass.
     if (!running || running.pending) return result
 
-    const step = loop.advance(running)
+    const lastEdit = lastCheckedEdit(wb.changed)
+    const step = loop.advance(running, lastEdit !== undefined && lastEdit >= (running.passAt ?? 0), await $.clock.now())
     await setLive($, current => ({ ...current, loop: step.loop }))
     await audit($, step.loop ? 'loop.pass' : 'loop.done', { done: running.done + 1 }).catch(() => undefined)
     if (step.text) $.ui.toast(`SmartWorkbench: ${step.text}`)

@@ -200,6 +200,8 @@ export type Live = {
   track?: Track
   // A running /swb loop; session-only, so a restart never resumes one by surprise.
   loop?: LoopState
+  // A prompt a command wants sent; the host refuses a submit from inside a command, so the turn's end sends it.
+  pendingPrompt?: string
 }
 
 // What /swb loop repeats. limit null = until stopped; continuing = the last stop was held for the next pass;
@@ -211,6 +213,9 @@ export type LoopState = {
   startedAt: number
   continuing?: boolean
   pending?: boolean
+  // When the current pass began, and how many passes in a row changed no file.
+  passAt?: number
+  idle?: number
 }
 
 export type SessionAllow = { key: string; label: string; at: number }
