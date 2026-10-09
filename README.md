@@ -166,6 +166,16 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
 
 Choices are kept per project. The tab also shows the session's current model setting and how many advisor reviews ran.
 
+### Loop
+
+`/swb loop <count|inf> <item>[; <item>...]` repeats a task. It works with or without team mode.
+
+- `/swb loop 5 fix the lint errors; run the tests` runs five passes; `inf` (or `forever`, `무한`) runs until stopped. A count is 1 to 1000. Items split on `;` and are all done, in order, on every pass.
+- A pass counts when the turn really ends: the loop uses the same Stop hold as team mode's final check, so with team mode on a pass that changed code goes through the Opus final check first, then the next pass starts.
+- `/swb loop status` shows the passes done; `/swb loop stop` ends it after the current turn. A prompt you type yourself also ends it, so you always take the session back.
+- To stop an `inf` loop: `/swb loop stop`, or press Esc and type any prompt. Each pass costs a full turn (and, with team mode, an Opus final check when code changed), so prefer a count unless you are watching.
+- Loop state lives in the session only; a restart never resumes one. The audit log records `loop.start`, `loop.pass`, `loop.done`, `loop.stop` and `loop.cancel`.
+
 ### Built-in guard rules (Balanced)
 
 | Category | Examples | Policy |
@@ -437,6 +447,16 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 | Advisor | `opus`, `high` | 위와 같음. effort를 받지 않는 모델이면 기본 effort로 실행하고 알려 줍니다 |
 
 선택은 프로젝트마다 저장됩니다. 탭에는 현재 세션 모델 설정과 조언자 검토 횟수도 나옵니다.
+
+### 루프
+
+`/swb loop <횟수|inf> <항목>[; <항목>...]` 으로 작업을 반복합니다. 팀 모드가 켜져 있든 꺼져 있든 동작합니다.
+
+- `/swb loop 5 린트 오류 고치기; 테스트 실행` 은 5회 반복하고, `inf`(또는 `forever`, `무한`)는 멈출 때까지 반복합니다. 횟수는 1~1000입니다. 항목은 `;` 로 나누며, 매 회차에 순서대로 모두 수행합니다.
+- 회차는 턴이 실제로 끝날 때 셉니다. 팀 모드의 최종 점검과 같은 Stop 지점을 쓰므로, 팀 모드에서는 코드를 바꾼 회차가 Opus 최종 점검을 먼저 거친 뒤 다음 회차가 시작됩니다.
+- `/swb loop status` 로 진행 횟수를 보고, `/swb loop stop` 으로 현재 턴이 끝난 뒤 종료합니다. 직접 프롬프트를 입력해도 종료되어 세션은 항상 사용자에게 돌아옵니다.
+- `inf` 루프를 멈추려면 `/swb loop stop`, 또는 Esc 를 누르고 아무 프롬프트나 입력하세요. 한 회차가 한 턴 분량의 비용(팀 모드에서 코드를 바꾸면 Opus 최종 점검 포함)이므로 지켜보지 않을 때는 횟수를 지정하세요.
+- 루프 상태는 세션에만 있어 재시작해도 이어지지 않습니다. 감사 로그에 `loop.start`·`loop.pass`·`loop.done`·`loop.stop`·`loop.cancel` 이 남습니다.
 
 ### 기본 Guard 규칙 (Balanced)
 
