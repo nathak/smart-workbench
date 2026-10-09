@@ -50,6 +50,8 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb` | Open the panel |
 | `/swb new` | Start a new task contract |
 | `/swb lock` · `/swb unlock` | Lock or unlock the contract |
+| `/swb team [on\|off]` | Team mode: Sonnet builds, Haiku explores, Opus reviews |
+| `/swb advise [topic]` | Ask the Opus advisor now |
 | `/swb intent` · `context` · `run` · `verify` | Open that tab |
 | `/swb status` | Text summary |
 | `/swb preview` | Show what is added to each prompt |
@@ -72,6 +74,9 @@ Starts a fresh task contract and opens the Intent tab; when the project guard fi
 
 #### `/swb lock` · `/swb unlock`
 Lock the contract (it is added to every prompt from then on) or unlock it to edit; the same as the Intent tab's `Lock` button, handy from the keyboard or a remote surface. Locking needs a goal.
+
+#### `/swb team [on|off]` · `/swb advise [topic]`
+See *Team mode* below. `/swb team` alone shows whether it is on and how many Opus reviews ran this session. `/swb advise` asks Claude to consult the Opus advisor about the topic (or the task as a whole) with a focused brief and report its verdict.
 
 #### `/swb intent` · `/swb context` · `/swb run` · `/swb verify`
 Open the panel on that tab. `/swb evidence` is the same as `/swb verify`.
@@ -135,6 +140,20 @@ After asking (`Clear` / `Cancel`), resets this project's workbench: contract, pi
 - **Turn result**: when a turn ends with conditions unmet, the band shows `Turn ended INCOMPLETE · 0/1 done · 1 failing` with `Fix failures` (or `Ask Claude to finish`), `Waive`, `Open evidence` and `×`; it clears on the next prompt.
 
 Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guard BALANCED [Open]`
+
+### Team mode
+
+**Sonnet builds. Haiku explores. Opus reviews.** Opus's context is spent only on the decisions that need it.
+
+- At session start SmartWorkbench registers two read-only agents:
+  - `smartworkbench:explorer` (Haiku): finds files, reads code and searches docs; Claude can launch several at once.
+  - `smartworkbench:advisor` (Opus): reviews from a focused brief Claude writes (goal, plan or error, what was tried, paths) and answers `VERDICT / BLOCKERS / RISKS / MISSING`. It never sees the whole conversation and never edits.
+- `/swb team on` switches the session model to Sonnet (the same setting `/model` changes; `/swb team off` puts the previous model back) and adds a short role brief to every prompt. Opus then steps in by itself:
+  - **Plan review**: `ExitPlanMode` is sent back until the advisor has reviewed the plan in this turn.
+  - **Repeated error**: when the same command fails twice in a row, its result tells Claude to consult the advisor with the error output and what it tried (once per command until it does).
+  - **Final check**: a turn that changed code is held once at the end until the advisor has looked at it; if Claude finishes anyway, the next stop goes through.
+- `/swb advise [topic]` asks the advisor any time. The Run tab shows team mode and the number of Opus reviews; the band shows `Team`; the audit log records `team.*` events.
+- Haiku here is Haiku 4.5, the current Haiku model.
 
 ### Built-in guard rules (Balanced)
 
@@ -292,6 +311,8 @@ claude plugin update smartworkbench
 | `/swb` | 패널 열기 |
 | `/swb new` | 새 작업 계약 시작 |
 | `/swb lock` · `/swb unlock` | 계약 잠금·해제 |
+| `/swb team [on\|off]` | 팀 모드: Sonnet 구축, Haiku 탐색, Opus 검토 |
+| `/swb advise [topic]` | Opus 조언자에게 바로 묻기 |
 | `/swb intent` · `context` · `run` · `verify` | 해당 탭 열기 |
 | `/swb status` | 텍스트 요약 |
 | `/swb preview` | 프롬프트에 붙는 내용 보기 |
@@ -314,6 +335,9 @@ SmartWorkbench 패널을 마지막에 보던 탭으로 엽니다. 패널을 띄�
 
 #### `/swb lock` · `/swb unlock`
 계약을 잠그거나(이때부터 매 프롬프트에 붙음) 편집하려고 잠금을 풉니다. Intent 탭의 `Lock` 버튼과 같고, 키보드나 원격 화면에서 쓰기 편합니다. 잠그려면 목표가 있어야 합니다.
+
+#### `/swb team [on|off]` · `/swb advise [topic]`
+아래 *팀 모드*를 참고하세요. `/swb team`만 입력하면 켜져 있는지와 이 세션에서 Opus 검토가 몇 번 돌았는지 보여 줍니다. `/swb advise`는 주제(없으면 작업 전체)에 대해 Claude가 Opus 조언자에게 핵심 요약을 주고 판정을 받아 보고하게 합니다.
 
 #### `/swb intent` · `/swb context` · `/swb run` · `/swb verify`
 해당 탭으로 패널을 엽니다. `/swb evidence`는 `/swb verify`와 같습니다.
@@ -377,6 +401,20 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - **턴 결과**: 조건이 남은 채 턴이 끝나면 밴드에 `Turn ended INCOMPLETE · 0/1 done · 1 failing`과 `Fix failures`(실패가 없으면 `Ask Claude to finish`), `Waive`, `Open evidence`, `×`가 나옵니다. 다음 프롬프트에서 사라집니다.
 
 입력창 위 밴드: `WB ● 목표 │ Ctx +2 pins · 42% │ Done 1/2 │ Guard BALANCED [Open]`
+
+### 팀 모드
+
+**Sonnet이 구축하고, Haiku가 탐색하고, Opus가 검토합니다.** Opus의 컨텍스트는 꼭 필요한 결정에만 씁니다.
+
+- 세션 시작 시 읽기 전용 에이전트 둘을 등록합니다.
+  - `smartworkbench:explorer`(Haiku): 파일 찾기, 코드 읽기, 문서 검색. Claude가 여러 개를 동시에 띄울 수 있습니다.
+  - `smartworkbench:advisor`(Opus): Claude가 쓴 핵심 요약(목표, 계획이나 오류, 시도한 것, 경로)만 받아 검토하고 `VERDICT / BLOCKERS / RISKS / MISSING` 형식으로 답합니다. 대화 전체를 받지 않고, 파일을 고치지 않습니다.
+- `/swb team on`은 세션 모델을 Sonnet으로 바꾸고(`/model`과 같은 설정. `/swb team off`가 이전 모델로 되돌림), 매 프롬프트에 짧은 역할 안내를 붙입니다. 그다음 Opus가 스스로 개입합니다.
+  - **계획 검토**: 이번 턴에 advisor가 계획을 검토하기 전까지 `ExitPlanMode`를 돌려보냅니다.
+  - **반복 오류**: 같은 명령이 연속 2번 실패하면, 그 결과에 오류 출력과 시도한 내용을 들고 advisor와 상의하라는 안내를 붙입니다(명령마다 상의할 때까지 한 번).
+  - **마무리 점검**: 코드를 고친 턴은 advisor가 본 뒤에 끝나도록 마지막에 한 번 붙잡습니다. 그래도 끝내면 다음 종료는 통과합니다.
+- `/swb advise [주제]`로 언제든 물을 수 있습니다. Run 탭에 팀 모드와 Opus 검토 횟수가, 밴드에 `Team`이, 감사 로그에 `team.*` 사건이 남습니다.
+- 여기서 Haiku는 현재 Haiku 모델인 Haiku 4.5입니다.
 
 ### 기본 Guard 규칙 (Balanced)
 
