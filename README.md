@@ -50,7 +50,8 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb` | Open the panel |
 | `/swb new` | Start a new task contract |
 | `/swb lock` · `/swb unlock` | Lock or unlock the contract |
-| `/swb team [on\|off]` | Team mode: Sonnet builds, Haiku explores, Opus reviews |
+| `/swb team [on\|off]` | Team mode: Sonnet builds, Haiku explores, Opus reviews; opens the Team tab |
+| `/swb team <role> <model> [effort]` | Set a role's model and effort (`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Ask the Opus advisor now |
 | `/swb intent` · `context` · `run` · `verify` | Open that tab |
 | `/swb status` | Text summary |
@@ -154,6 +155,16 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
   - **Final check**: a turn that changed code is held once at the end until the advisor has looked at it; if Claude finishes anyway, the next stop goes through.
 - `/swb advise [topic]` asks the advisor any time. The Run tab shows team mode and the number of Opus reviews; the band shows `Team`; the audit log records `team.*` events.
 - Haiku here is Haiku 4.5, the current Haiku model.
+
+**Team tab** (hotkey `5`, or `/swb team`): turn team mode on or off and pick each role's model and effort from drop-downs. Remote or keyboard: `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`.
+
+| Role | Default | What a change does |
+|---|---|---|
+| Lead (the session) | `sonnet`, effort `default` | model: the session's model setting (choices as `/model` offers them), applied while team mode is on and restored when it goes off; effort: runs `/effort`, which Claude Code keeps as your default for that model, so it is left alone until you pick a level |
+| Explorer | `haiku`, `low` | the agent is registered again; used from the next delegation |
+| Advisor | `opus`, `high` | the same; a model that refuses an effort setting runs at its default and you are told |
+
+Choices are kept per project. The tab also shows the session's current model setting and how many advisor reviews ran.
 
 ### Built-in guard rules (Balanced)
 
@@ -311,7 +322,8 @@ claude plugin update smartworkbench
 | `/swb` | 패널 열기 |
 | `/swb new` | 새 작업 계약 시작 |
 | `/swb lock` · `/swb unlock` | 계약 잠금·해제 |
-| `/swb team [on\|off]` | 팀 모드: Sonnet 구축, Haiku 탐색, Opus 검토 |
+| `/swb team [on\|off]` | 팀 모드: Sonnet 구축, Haiku 탐색, Opus 검토. Team 탭 열기 |
+| `/swb team <role> <model> [effort]` | 역할별 모델·effort 지정(`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Opus 조언자에게 바로 묻기 |
 | `/swb intent` · `context` · `run` · `verify` | 해당 탭 열기 |
 | `/swb status` | 텍스트 요약 |
@@ -415,6 +427,16 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
   - **마무리 점검**: 코드를 고친 턴은 advisor가 본 뒤에 끝나도록 마지막에 한 번 붙잡습니다. 그래도 끝내면 다음 종료는 통과합니다.
 - `/swb advise [주제]`로 언제든 물을 수 있습니다. Run 탭에 팀 모드와 Opus 검토 횟수가, 밴드에 `Team`이, 감사 로그에 `team.*` 사건이 남습니다.
 - 여기서 Haiku는 현재 Haiku 모델인 Haiku 4.5입니다.
+
+**Team 탭**(단축키 `5`, 또는 `/swb team`): 팀 모드를 켜고 끄며, 역할마다 모델과 effort를 드롭다운에서 고릅니다. 원격·키보드에서는 `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`처럼 씁니다.
+
+| 역할 | 기본값 | 바꾸면 |
+|---|---|---|
+| Lead(세션) | `sonnet`, effort `default` | 모델: 세션 모델 설정을 바꿉니다(선택지는 `/model`과 같음). 팀 모드가 켜져 있을 때 적용하고 끄면 되돌립니다. effort: `/effort`를 실행하며, Claude Code가 이를 그 모델의 기본값으로 저장하므로 직접 단계를 고르기 전에는 건드리지 않습니다 |
+| Explorer | `haiku`, `low` | 에이전트를 다시 등록합니다. 다음 위임부터 적용 |
+| Advisor | `opus`, `high` | 위와 같음. effort를 받지 않는 모델이면 기본 effort로 실행하고 알려 줍니다 |
+
+선택은 프로젝트마다 저장됩니다. 탭에는 현재 세션 모델 설정과 조언자 검토 횟수도 나옵니다.
 
 ### 기본 Guard 규칙 (Balanced)
 

@@ -20,7 +20,7 @@ A mod runs with your own user rights and is not sandboxed. This page lists every
 
 ### Engine calls
 
-`$.clock`, `$.command.register`, `$.tool.register`, `$.agent.register`, `$.config` (list, set: only the model row, by `/swb team`), `$.state`, `$.store`, `$.fs` (read, write, stat, exists), `$.process.run`, `$.prompt.submit`, `$.session` (cwd, id, messages, usage), `$.ui` (ask, focus, log, open, resolve, toast). No `$.http`, no `$.model`.
+`$.clock`, `$.command.register`, `$.tool.register`, `$.agent.register`, `$.config` (list, set: only the model row, by team mode), `$.command.run` (only `/effort`, when you pick a lead effort in team mode; Claude Code keeps it as that model's default), `$.state`, `$.store`, `$.fs` (read, write, stat, exists), `$.process.run`, `$.prompt.submit`, `$.session` (cwd, id, messages, usage), `$.ui` (ask, focus, log, open, resolve, toast). No `$.http`, no `$.model`.
 
 ### Files
 
@@ -77,7 +77,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 ### 엔진 호출
 
-`$.clock`, `$.command.register`, `$.tool.register`, `$.agent.register`, `$.config` (list, set: only the model row, by `/swb team`), `$.state`, `$.store`, `$.fs`(읽기·쓰기·stat·exists), `$.process.run`, `$.prompt.submit`, `$.session`(cwd·id·messages·usage), `$.ui`(ask·focus·log·open·resolve·toast). `$.http`와 `$.model`은 쓰지 않습니다.
+`$.clock`, `$.command.register`, `$.tool.register`, `$.agent.register`, `$.config` (list, set: only the model row, by team mode), `$.command.run` (only `/effort`, when you pick a lead effort in team mode; Claude Code keeps it as that model's default), `$.state`, `$.store`, `$.fs`(읽기·쓰기·stat·exists), `$.process.run`, `$.prompt.submit`, `$.session`(cwd·id·messages·usage), `$.ui`(ask·focus·log·open·resolve·toast). `$.http`와 `$.model`은 쓰지 않습니다.
 
 ### 파일
 

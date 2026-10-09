@@ -1,10 +1,40 @@
 // Team mode: Sonnet builds, Haiku explores, Opus reviews. Pure decisions only;
 // register.tsx registers the agents and applies these at the hooks.
-import type { Track } from '../types'
+import type { TeamConfig, TeamRole, TeamRoleName, Track } from '../types'
 import { commandPrefix, splitCommand } from './risk'
 
 export const EXPLORER = 'smartworkbench:explorer'
 export const ADVISOR = 'smartworkbench:advisor'
+
+export const ROLES: readonly TeamRoleName[] = ['lead', 'explorer', 'advisor']
+
+// The lead's effort is Claude Code's /effort, which it saves as the default for that model,
+// so it starts at 'default' (left alone) and changes only when the person picks a level.
+export const DEFAULT_ROLES: Record<TeamRoleName, TeamRole> = {
+  lead: { model: 'sonnet', effort: 'default' },
+  explorer: { model: 'haiku', effort: 'low' },
+  advisor: { model: 'opus', effort: 'high' },
+}
+
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export const LEAD_EFFORTS = ['default', ...EFFORTS] as const
+export const AGENT_MODELS = ['haiku', 'sonnet', 'opus', 'fable', 'inherit'] as const
+
+export function roleOf(team: TeamConfig | undefined, role: TeamRoleName): TeamRole {
+  return team?.[role] ?? DEFAULT_ROLES[role]
+}
+
+export function setRole(team: TeamConfig | undefined, role: TeamRoleName, change: Partial<TeamRole>): TeamConfig {
+  return { enabled: team?.enabled ?? false, ...team, [role]: { ...roleOf(team, role), ...change } }
+}
+
+// The agent definition for a role, with the model and effort the person chose.
+export function agentSpec(role: 'explorer' | 'advisor', team: TeamConfig | undefined) {
+  const base = role === 'explorer' ? EXPLORER_SPEC : ADVISOR_SPEC
+  const { model, effort } = roleOf(team, role)
+
+  return { ...base, model, effort }
+}
 
 // How many failures in a row of the same command before Claude is pointed at the advisor.
 export const REPEAT_LIMIT = 2

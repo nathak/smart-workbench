@@ -51,6 +51,10 @@ function world(on: On, options: WorldOptions = {}) {
     return { value: undefined }
   })
   on('store.keys', () => ({ value: Object.keys(store) }))
+  on('store.delete', ($, e) => {
+    delete store[e.key]
+    return { value: undefined }
+  })
   on('session.cwd', () => ({ value: CWD }))
   on('session.id', () => ({ value: 'session-a' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
@@ -476,9 +480,9 @@ test('team mode registers Haiku and Opus agents and briefs Claude on every promp
   expect(context).not.toContain('smartworkbench_team')
 
   const on1 = await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
-  expect(on1.text).toContain('Team mode on: Sonnet builds, Haiku explores, Opus reviews.')
+  expect(on1.text).toContain('Team mode on: lead sonnet (default) builds, explorer haiku (low) explores, advisor opus (high) reviews.')
   expect(on1.text).toContain('/model sonnet')
-  expect(workbench().team).toEqual({ enabled: true })
+  expect(workbench().team?.enabled).toBe(true)
 
   await $.prompt.submit({ text: 'build it', ...COMPOSER })
   expect(context).toContain('Delegate exploration')
@@ -542,4 +546,55 @@ test('a turn that changed code is held for a final Opus check, once', async ($, 
   await $.command.run({ command: 'swb', args: 'team off', ...COMMAND })
   await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: '31' })
   expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+})
+
+test('the Team tab changes each role model and effort; agents are re-registered, the lead goes to the session', async ($, on) => {
+  const { workbench } = world(on)
+  const registered: string[] = []
+  const efforts: string[] = []
+  let sessionModel = 'opus[1m]'
+  on('agent.register', ($, e) => {
+    registered.push(`${e.name}:${e.model}:${e.effort ?? '-'}`)
+    return { value: { agent: `smartworkbench:${e.name}` } }
+  })
+  on('config.list', () => ({
+    value: [{ key: 'model', label: 'Model', kind: 'choice', value: sessionModel, options: ['default', 'sonnet', 'opus', 'opus[1m]', 'haiku'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false }],
+  }))
+  on('config.set', ($, e) => {
+    sessionModel = String(e.value)
+    return { value: e.value }
+  })
+  on('command.run', { command: 'effort' }, ($, e) => {
+    efforts.push(e.args)
+    return { text: `Set effort level to ${e.args}` }
+  })
+  await $.session.start(start)
+  expect(registered).toEqual(['explorer:haiku:low', 'advisor:opus:high'])
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-team' })
+  expect(await ui.find({ type: 'Text', text: /○ off/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Session model setting now: opus\[1m\]/ })).toBeDefined()
+
+  await ui.select({ key: 'model-advisor', value: 'sonnet' })
+  await ui.select({ key: 'effort-explorer', value: 'medium' })
+  expect(registered.slice(2)).toEqual(['advisor:sonnet:high', 'explorer:haiku:medium'])
+  expect(workbench().team?.advisor).toEqual({ model: 'sonnet', effort: 'high' })
+
+  // The lead waits for team mode; turning it on applies model and effort, off restores the model.
+  await ui.select({ key: 'model-lead', value: 'opus' })
+  expect(sessionModel).toBe('opus[1m]')
+  await ui.press({ key: 'team-toggle' })
+  expect(sessionModel).toBe('opus')
+  // The lead's effort stays the person's own until they pick a level.
+  expect(efforts).toEqual([])
+  await ui.select({ key: 'effort-lead', value: 'xhigh' })
+  expect(efforts).toEqual(['xhigh'])
+  await ui.press({ key: 'team-toggle' })
+  expect(sessionModel).toBe('opus[1m]')
+  await ui.unmount()
+
+  const set = await $.command.run({ command: 'swb', args: 'team explorer sonnet low', ...COMMAND })
+  expect(set.text).toContain('explorer: sonnet (low)')
+  expect(registered[registered.length - 1]).toBe('explorer:sonnet:low')
 })
