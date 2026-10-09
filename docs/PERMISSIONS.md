@@ -14,12 +14,13 @@ A mod runs with your own user rights and is not sandboxed. This page lists every
 | `prompt.submit` | add the locked contract and pins as model-only context; `requireContract` may hold a prompt back | the prompt goes through unchanged |
 | `tool.call` | record each call, apply guard rules (allow, ask, block), collect check results | high-risk calls are refused, the rest run normally (fail closed for high risk only) |
 | `turn.complete` | completion summary, `git diff -U0 HEAD`, context usage | skipped; the turn is unaffected |
+| `classic.Stop` | team mode's final check: hold a turn that changed code once for an Opus review | the turn ends normally |
 | `command.run` | answer its own commands only | the command prints nothing |
 | `ui.render` (`Pane`, `AbovePrompt`, `ToolUse`) | draw the panel, the band and one extra line under tool rows; Claude Code's own rows are kept | Claude Code draws its own |
 
 ### Engine calls
 
-`$.clock`, `$.command.register`, `$.tool.register`, `$.state`, `$.store`, `$.fs` (read, write, stat, exists), `$.process.run`, `$.prompt.submit`, `$.session` (cwd, id, messages, usage), `$.ui` (ask, focus, log, open, resolve, toast). No `$.http`, no `$.model`.
+`$.clock`, `$.command.register`, `$.tool.register`, `$.agent.register`, `$.config` (list, set: only the model row, by `/swb team`), `$.state`, `$.store`, `$.fs` (read, write, stat, exists), `$.process.run`, `$.prompt.submit`, `$.session` (cwd, id, messages, usage), `$.ui` (ask, focus, log, open, resolve, toast). No `$.http`, no `$.model`.
 
 ### Files
 
@@ -56,7 +57,7 @@ None of its own. `gh` reaches GitHub only when you run `/swb ci` or `/swb issue`
 
 ### Model
 
-No extra model calls. Explain, Retry, Fix failures and Ask Claude to finish send a normal prompt in your session, only when you press them.
+No extra model calls of its own. Explain, Retry, Fix failures and Ask Claude to finish send a normal prompt in your session, only when you press them. In team mode Claude runs the Haiku explorer and the Opus advisor as subagents; the mod only asks it to.
 
 ## 한국어
 
@@ -70,12 +71,13 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 | `prompt.submit` | 잠긴 계약과 Pin을 Claude만 읽는 컨텍스트로 추가, `requireContract`면 프롬프트 보류 | 프롬프트는 그대로 전송 |
 | `tool.call` | 호출 기록, Guard 규칙 적용(허용·질문·차단), 검증 결과 수집 | 고위험 호출만 거부, 나머지는 정상 실행 |
 | `turn.complete` | 완료 요약, `git diff -U0 HEAD`, 컨텍스트 사용량 | 건너뜀(턴에는 영향 없음) |
+| `classic.Stop` | 팀 모드 마무리 점검: 코드를 고친 턴을 Opus 검토 전에 한 번 붙잡음 | 턴이 정상 종료 |
 | `command.run` | 자기 명령에만 응답 | 명령 출력 없음 |
 | `ui.render` (`Pane`, `AbovePrompt`, `ToolUse`) | 패널·밴드, 툴 행 아래 한 줄 추가(기본 행은 유지) | Claude Code 기본 화면 |
 
 ### 엔진 호출
 
-`$.clock`, `$.command.register`, `$.tool.register`, `$.state`, `$.store`, `$.fs`(읽기·쓰기·stat·exists), `$.process.run`, `$.prompt.submit`, `$.session`(cwd·id·messages·usage), `$.ui`(ask·focus·log·open·resolve·toast). `$.http`와 `$.model`은 쓰지 않습니다.
+`$.clock`, `$.command.register`, `$.tool.register`, `$.agent.register`, `$.config` (list, set: only the model row, by `/swb team`), `$.state`, `$.store`, `$.fs`(읽기·쓰기·stat·exists), `$.process.run`, `$.prompt.submit`, `$.session`(cwd·id·messages·usage), `$.ui`(ask·focus·log·open·resolve·toast). `$.http`와 `$.model`은 쓰지 않습니다.
 
 ### 파일
 
@@ -112,4 +114,4 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 ### 모델
 
-추가 모델 호출은 없습니다. Explain, Retry, Fix failures, Ask Claude to finish는 누를 때만 현재 세션에 일반 프롬프트를 보냅니다.
+자체 모델 호출은 없습니다. Explain, Retry, Fix failures, Ask Claude to finish는 누를 때만 현재 세션에 일반 프롬프트를 보냅니다. 팀 모드에서는 Claude가 Haiku 탐색 에이전트와 Opus 조언자를 서브에이전트로 실행하고, Mod는 그렇게 하도록 요청만 합니다.
