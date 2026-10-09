@@ -48,6 +48,13 @@ export function hunkLabel(hunks: readonly Hunk[], max = 3): string {
   return ranges.length > max ? `${ranges.slice(0, max).join(', ')} +${ranges.length - max}` : ranges.join(', ')
 }
 
+// The most recent edit of any file, docs and generated files included: what a loop pass counts as work.
+export function lastEdit(changed: Changed): number | undefined {
+  const times = Object.values(changed.edits ?? {})
+
+  return times.length === 0 ? undefined : Math.max(...times)
+}
+
 // The most recent edit that a check should have seen: docs and generated files do not count.
 export function lastCheckedEdit(changed: Changed): number | undefined {
   const times = Object.entries(changed.edits ?? {})

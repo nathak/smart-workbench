@@ -44,7 +44,7 @@ function world(on: On, options: WorldOptions = {}) {
   const commands = options.commands ?? {}
   const fileAt = (path: string) => Object.keys(files).find(name => path === name || path.endsWith(`/${name}`))
 
-  mock.clock(on, { now: Date.UTC(2026, 9, 8, 1, 0, 0) })
+  const clock = mock.clock(on, { now: Date.UTC(2026, 9, 8, 1, 0, 0) })
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
     store[e.key] = JSON.parse(JSON.stringify(e.value))
@@ -101,7 +101,7 @@ function world(on: On, options: WorldOptions = {}) {
   // The engine hands fs hooks absolute paths; read back by project-relative name.
   const file = (name: string) => Object.entries(files).find(([key]) => key === name || key.endsWith(`/${name}`))?.[1]
 
-  return { file, store, workbench: () => store[`ws:${CWD}`] as Workbench }
+  return { clock, file, store, workbench: () => store[`ws:${CWD}`] as Workbench }
 }
 
 const start = { cwd: CWD, surface: 'terminal', isInteractive: true } as const
@@ -720,4 +720,59 @@ test('the Team tab changes each role model and effort; agents are re-registered,
   const set = await $.command.run({ command: 'swb', args: 'team explorer sonnet low', ...COMMAND })
   expect(set.text).toContain('explorer: sonnet (low)')
   expect(registered[registered.length - 1]).toBe('explorer:sonnet:low')
+})
+
+test('Esc during a loop pass ends the loop, so a later slash command does not start another pass', async ($, on) => {
+  world(on)
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'loop 5 fix lint', ...COMMAND })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('pass 2/5')
+
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't2', reason: 'aborted' })
+
+  expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('No loop is running')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+})
+
+test('a skipped final check does not hold later passes that changed nothing', async ($, on) => {
+  const { clock } = world(on)
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'loop inf tidy', ...COMMAND })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '30' })
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('final check')
+  // The lead never calls the advisor; the next stop moves on to the next pass.
+  await clock.set(Date.UTC(2026, 9, 8, 1, 1, 0))
+  expect((await $.classic.Stop({ stop_hook_active: true })).block).toContain('pass 2')
+
+  await clock.set(Date.UTC(2026, 9, 8, 1, 2, 0))
+  // Pass 2 edits nothing, so it has nothing to check.
+  const quiet = await $.classic.Stop({ stop_hook_active: false })
+  expect(quiet.block).not.toContain('final check')
+})
+
+test('an infinite loop that only edits notebooks or docs is not stopped as idle', async ($, on) => {
+  const { clock } = world(on)
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'loop inf update the notebook', ...COMMAND })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+
+  for (let pass = 2; pass <= 5; pass++) {
+    await clock.set(Date.UTC(2026, 9, 8, 1, pass, 0))
+    await $.tool.call({ tool: 'NotebookEdit', notebook_path: `${CWD}/analysis.ipynb`, new_source: `cell ${pass}` })
+    const stop = await $.classic.Stop({ stop_hook_active: pass > 2 })
+    expect(stop.block).toContain(`pass ${pass}`)
+  }
 })

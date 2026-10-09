@@ -6,7 +6,7 @@ import * as crew from './crew'
 import * as loop from './loop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
-import { coverageOf, hunkLabel, lastCheckedEdit, parseDiff, type Coverage } from './diff'
+import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
 import { checkOutcome, completionOf, evidenceKindOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
@@ -1681,7 +1681,9 @@ export const register: Register = on => {
     const isOk = ran.deny === undefined && ran.isError !== true
     const outcome = ran.deny !== undefined ? 'blocked' : isOk ? 'ok' : 'error'
     const kind = e.tool === 'Bash' ? evidenceKindOf(e.command) : undefined
-    const rawPath = 'file_path' in e && typeof e.file_path === 'string' ? e.file_path : undefined
+    const notebookPath = (e as unknown as Record<string, unknown>).notebook_path
+    const rawPath =
+      'file_path' in e && typeof e.file_path === 'string' ? e.file_path : typeof notebookPath === 'string' ? notebookPath : undefined
     const path = rawPath?.startsWith(`${cwd}/`) ? rawPath.slice(cwd.length + 1) : rawPath
 
     await mutate($, current => {
@@ -1698,8 +1700,7 @@ export const register: Register = on => {
       return path && isOk ? model.observe(updated, e.tool, path, endedAt) : updated
     })
 
-    const notebook = (e as unknown as Record<string, unknown>).notebook_path
-    const editedFile = typeof notebook === 'string' && rawPath === undefined ? notebook : rawPath
+    const editedFile = rawPath
     if (isTeam && isOk && e.agentId === undefined && editedFile?.startsWith(`${cwd}/`) && model.isEditTool(e.tool)) {
       const lines = crew.editSize(e.tool, e as unknown as Record<string, unknown>).lines
       await updateTrack($, track => crew.noteEdit(track, editedFile.slice(cwd.length + 1), lines))
@@ -1763,6 +1764,15 @@ export const register: Register = on => {
       })
     }
 
+    // Esc takes the session back: a loop already running ends here, since an aborted turn sends no Stop.
+    if (e.isAborted) {
+      const running = (await read($, liveAtom)).loop
+      if (running && !running.pending) {
+        await setLive($, current => ({ ...current, loop: undefined }))
+        await audit($, 'loop.stop', { done: running.done, by: 'abort' }).catch(() => undefined)
+      }
+    }
+
     const queued = (await read($, liveAtom)).pendingPrompt
     if (queued && !e.isAborted) {
       await setLive($, current => ({ ...current, pendingPrompt: undefined }))
@@ -1804,7 +1814,9 @@ export const register: Register = on => {
     if (wb.team?.enabled) {
       // A stop right after the loop held the turn starts a new pass, not a repeat of the same stop.
       const isRepeat = e.stop_hook_active && !running?.continuing
-      const track = live.track ?? crew.EMPTY_TRACK
+      const held = live.track ?? crew.EMPTY_TRACK
+      // Later loop passes never go through prompt.submit, so the turn start is the start of this pass.
+      const track = running?.passAt === undefined ? held : { ...held, turnStartedAt: Math.max(held.turnStartedAt ?? 0, running.passAt) }
 
       if (crew.needsFinalCheck(track, lastCheckedEdit(wb.changed), isRepeat)) {
         if (running?.continuing) await setLive($, current => ({ ...current, loop: current.loop && { ...current.loop, continuing: false } }))
@@ -1817,7 +1829,7 @@ export const register: Register = on => {
     // The command's own turn ends before pass 1 went out; that stop is not a pass.
     if (!running || running.pending) return result
 
-    const lastEdit = lastCheckedEdit(wb.changed)
+    const lastEdit = lastAnyEdit(wb.changed)
     const step = loop.advance(running, lastEdit !== undefined && lastEdit >= (running.passAt ?? 0), await $.clock.now())
     await setLive($, current => ({ ...current, loop: step.loop }))
     await updateTrack($, ({ turnEdits: _passEdits, ...track }) => track)
