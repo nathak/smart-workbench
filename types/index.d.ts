@@ -198,6 +198,19 @@ export type Live = {
   // The last turn's completion, shown in the band until dismissed or the next prompt.
   turnResult?: { met: number; total: number; failing: number }
   track?: Track
+  // A running /swb loop; session-only, so a restart never resumes one by surprise.
+  loop?: LoopState
+}
+
+// What /swb loop repeats. limit null = until stopped; continuing = the last stop was held for the next pass;
+// pending = started by the command, first pass not sent yet (a command cannot submit a prompt itself).
+export type LoopState = {
+  items: string[]
+  limit: number | null
+  done: number
+  startedAt: number
+  continuing?: boolean
+  pending?: boolean
 }
 
 export type SessionAllow = { key: string; label: string; at: number }

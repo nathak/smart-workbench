@@ -548,6 +548,82 @@ test('a turn that changed code is held for a final Opus check, once', async ($, 
   expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
 })
 
+test('a counted loop holds each stop for the next pass and ends after the last, with or without team mode', async ($, on) => {
+  world(on)
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  const submitted: string[] = []
+  on('prompt.submit', ($, e) => {
+    submitted.push(e.text)
+    return { text: e.text, context: e.context }
+  })
+  on('classic.Stop', () => ({}))
+
+  expect((await $.command.run({ command: 'swb', args: 'loop 2 fix lint; run tests', ...COMMAND })).text).toContain('2 passes')
+  expect(submitted).toEqual([])
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(submitted[0]).toContain('pass 1/2')
+  expect(submitted[0]).toContain('1. fix lint\n2. run tests')
+  expect((await $.command.run({ command: 'swb', args: 'loop 3 x', ...COMMAND })).text).toContain('already running')
+
+  const first = await $.classic.Stop({ stop_hook_active: false })
+  expect(first.block).toContain('pass 2/2')
+  const last = await $.classic.Stop({ stop_hook_active: true })
+  expect(last.block).toBe(undefined)
+  expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('No loop is running')
+})
+
+test('a loop in team mode runs the Opus final check on a later pass before the next one starts', async ($, on) => {
+  world(on)
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'loop inf tidy', ...COMMAND })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('pass 2')
+
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '30' })
+  const held = await $.classic.Stop({ stop_hook_active: true })
+  expect(held.block).toContain(`run a final check with ${ADVISOR}`)
+  expect((await $.classic.Stop({ stop_hook_active: true })).block).toContain('pass 3')
+
+  await $.command.run({ command: 'swb', args: 'loop stop', ...COMMAND })
+  // Stopped: no more passes; the unchecked edit still gets team mode's final check.
+  const after = await $.classic.Stop({ stop_hook_active: false })
+  expect(after.block).toContain('final check')
+  expect(after.block).not.toContain('pass')
+})
+
+test('the command\'s own stop is not a pass, and a slash command neither ends nor consumes the loop', async ($, on) => {
+  world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.command.run({ command: 'swb', args: 'loop 2 tidy', ...COMMAND })
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+  expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('0 of 2')
+
+  await $.prompt.submit({ text: '/swb loop status', ...COMPOSER })
+  expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('0 of 2')
+})
+
+test('a prompt the person types ends a running loop', async ($, on) => {
+  world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'loop inf tidy', ...COMMAND })
+  // First prompt after the command carries pass 1 instead of ending the loop; the next one ends it.
+  const carried = await $.prompt.submit({ text: 'go', ...COMPOSER })
+  expect(JSON.stringify(carried)).toContain('pass 1')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('pass 2')
+  await $.prompt.submit({ text: 'something else', ...COMPOSER })
+
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+})
+
 test('the Team tab changes each role model and effort; agents are re-registered, the lead goes to the session', async ($, on) => {
   const { workbench } = world(on)
   const registered: string[] = []

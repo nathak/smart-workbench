@@ -3,6 +3,7 @@ import type { Elements, EngineInterface, Register, RenderElement } from 'claude-
 
 import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, TeamRoleName, Template, ToolCallRecord, Track, Workbench } from '../types'
 import * as crew from './crew'
+import * as loop from './loop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, parseDiff, type Coverage } from './diff'
@@ -40,6 +41,7 @@ const HELP = [
   '  /smartworkbench lock | unlock   lock the contract (added to every prompt) or unlock it to edit',
   '  /smartworkbench team [on|off]   team mode: Sonnet builds, Haiku explores, Opus reviews',
   '  /smartworkbench advise [topic]  ask the Opus advisor now',
+  '  /smartworkbench loop <count|inf> <item>[; <item>...]   repeat a task; works with team mode (loop stop | loop status)',
   '  /smartworkbench status     text summary (works without UI)',
   '  /smartworkbench preview    show the context added to each prompt',
   '  /smartworkbench save <name>      save the contract, pins and guard as a template',
@@ -598,6 +600,7 @@ function statusText(wb: Workbench, live: Live): string {
   return [
     model.bandText(wb, live),
     `Goal: ${wb.task.goal || '—'} (${wb.task.locked ? 'locked' : 'unlocked'}, ${wb.task.status})`,
+    ...(live.loop ? [loop.describe(live.loop).split('\n')[0]] : []),
     ...(constraints.length > 0 ? ['Constraints:', ...constraints] : []),
     ...(pins.length > 0 ? ['Pins:', ...pins] : []),
     ...(wb.team?.enabled ? [`Team mode: on (Opus reviews this session: ${live.track?.advisorRuns ?? 0})`] : []),
@@ -661,6 +664,29 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     return {
       text: `Team mode ${wb.team?.enabled ? 'on' : 'off'}: ${roles}. Opus reviews this session: ${track.advisorRuns}.\n/swb team on|off · /swb team <lead|explorer|advisor> <model> [effort]`,
     }
+  }
+
+  if (word === 'loop') {
+    const command = loop.parse(args.trim().slice(word.length))
+    const live = await read($, liveAtom)
+
+    if (command.kind === 'error') return { text: command.text }
+    if (command.kind === 'status') return { text: loop.describe(live.loop) }
+
+    if (command.kind === 'stop') {
+      if (!live.loop) return { text: 'No loop is running.' }
+      await setLive($, current => ({ ...current, loop: undefined }))
+      await audit($, 'loop.stop', { done: live.loop.done })
+
+      return { text: `Loop stopped after ${live.loop.done} passes. The current turn finishes normally.` }
+    }
+
+    if (live.loop) return { text: 'A loop is already running. /swb loop stop first.' }
+    const started = loop.begin(command.items, command.limit, await $.clock.now())
+    await setLive($, current => ({ ...current, loop: started }))
+
+    // The host refuses a prompt from inside a command; the first pass goes out when this command's turn completes.
+    return { text: `Loop set: ${command.limit === null ? 'until stopped' : `${command.limit} passes`}. Pass 1 starts when this turn ends. /swb loop stop ends it.` }
   }
 
   if (word === 'advise') {
@@ -1452,7 +1478,8 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const argumentHint = '[new|team|advise|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
+    await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
+    const argumentHint = '[new|team|advise|loop|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
@@ -1515,6 +1542,20 @@ export const register: Register = on => {
 
     const { blocks: contract, warnings } = await injection($, wb)
     const blocks = wb.team?.enabled ? [...contract, crew.TEAM_CONTEXT] : contract
+    // A prompt the person types takes the session back: a running loop ends (its own passes come from the Stop hook).
+    // A loop whose first pass never went out (no turn.complete after the command) rides on that prompt instead.
+    let loopBlocks: string[] = []
+    if (e.origin.kind !== 'plugin' && !e.text.trimStart().startsWith('/')) {
+      const { loop: running } = await read($, liveAtom)
+      if (running?.pending) {
+        loopBlocks = [loop.iterationPrompt(running)]
+        await setLive($, current => ({ ...current, loop: current.loop && { ...current.loop, pending: false } }))
+      } else if (running) {
+        await setLive($, current => ({ ...current, loop: undefined }))
+        await audit($, 'loop.cancel', { done: running.done })
+        $.ui.toast('SmartWorkbench: loop ended because you sent a prompt.')
+      }
+    }
     await updateTrack($, track => ({ ...track, turnStartedAt: startedAt }))
     const { turnResult: _done, ...rest } = await read($, liveAtom)
     await setLive($, () => ({ ...rest, pinWarnings: warnings }))
@@ -1526,7 +1567,9 @@ export const register: Register = on => {
     // Own work only, for checking the performance targets with --debug.
     $.ui.log(`SmartWorkbench timing: prompt.submit ${(await $.clock.now()) - startedAt}ms before the prompt went on`, { to: 'debug' })
 
-    return blocks.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...blocks] })
+    const all = [...blocks, ...loopBlocks]
+
+    return all.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...all] })
   }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
@@ -1679,6 +1722,17 @@ export const register: Register = on => {
 
     await refreshUsage($).catch(() => undefined)
 
+    // The loop's first pass: a command cannot submit a prompt, the end of its turn can.
+    // Not awaited: submit returns when the pass's turn ends, and this hook must not wait for a whole loop.
+    const waiting = (await read($, liveAtom)).loop
+    if (waiting?.pending && !e.isAborted) {
+      await setLive($, current => ({ ...current, loop: current.loop && { ...current.loop, pending: false } }))
+      await audit($, 'loop.start', { items: waiting.items.length, limit: waiting.limit ?? 'inf' }).catch(() => undefined)
+      void Promise.resolve($.prompt.submit({ text: loop.iterationPrompt(waiting) })).catch(async () => {
+        await setLive($, current => ({ ...current, loop: current.loop && { ...current.loop, pending: true } })).catch(() => undefined)
+      })
+    }
+
     // Changed regions against HEAD, so the Evidence tab can say which ones a check has seen.
     const diff = await $.process.run(['git', 'diff', '-U0', '--no-color', '--no-ext-diff', 'HEAD']).catch(() => undefined)
     if (diff?.exitCode === 0) {
@@ -1702,18 +1756,37 @@ export const register: Register = on => {
     return ran
   }).catch(($, e, next) => next(e))
 
-  // Team mode's final check: a turn that changed code ends only after the advisor saw it.
-  // Asked once per stop; if Claude finishes anyway the next stop goes through.
+  // Two things can hold a turn here, in this order: team mode's final check (a turn that
+  // changed code ends only after the advisor saw it, asked once per stop), then the loop's
+  // next pass. A loop pass is counted only when the turn really ends.
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
     const wb = await read($, wbAtom)
-    if (!wb.team?.enabled) return result
+    const live = await read($, liveAtom)
+    const running = live.loop
 
-    const track = (await read($, liveAtom)).track ?? crew.EMPTY_TRACK
-    if (!crew.needsFinalCheck(track, lastCheckedEdit(wb.changed), e.stop_hook_active)) return result
+    if (wb.team?.enabled) {
+      // A stop right after the loop held the turn starts a new pass, not a repeat of the same stop.
+      const isRepeat = e.stop_hook_active && !running?.continuing
+      const track = live.track ?? crew.EMPTY_TRACK
 
-    await audit($, 'team.final-check-required')
-    return { ...result, block: crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text)) }
+      if (crew.needsFinalCheck(track, lastCheckedEdit(wb.changed), isRepeat)) {
+        if (running?.continuing) await setLive($, current => ({ ...current, loop: current.loop && { ...current.loop, continuing: false } }))
+        await audit($, 'team.final-check-required')
+
+        return { ...result, block: crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text)) }
+      }
+    }
+
+    // The command's own turn ends before pass 1 went out; that stop is not a pass.
+    if (!running || running.pending) return result
+
+    const step = loop.advance(running)
+    await setLive($, current => ({ ...current, loop: step.loop }))
+    await audit($, step.loop ? 'loop.pass' : 'loop.done', { done: running.done + 1 }).catch(() => undefined)
+    if (step.text) $.ui.toast(`SmartWorkbench: ${step.text}`)
+
+    return step.reason ? { ...result, block: step.reason } : result
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
