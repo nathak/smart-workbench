@@ -576,6 +576,25 @@ test('a big edit is sent back once for a design; a design, a small edit or anoth
   expect(JSON.stringify(await $.tool.call({ tool: 'Write', file_path: `${CWD}/src/off.js`, content: BIG }))).not.toContain('no design from')
 })
 
+test('plan review and design are each asked once per turn; notebook edits and subagent edits are judged right', async ($, on) => {
+  world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'plan it', ...COMPOSER })
+
+  expect(JSON.stringify(await $.tool.call({ tool: 'ExitPlanMode', plan: 'p' }))).toContain('plans come from')
+  expect(JSON.stringify(await $.tool.call({ tool: 'ExitPlanMode', plan: 'p' }))).not.toContain('plans come from')
+
+  await $.prompt.submit({ text: 'build', ...COMPOSER })
+  const nb = await $.tool.call({ tool: 'NotebookEdit', notebook_path: `${CWD}/a.ipynb`, new_source: BIG })
+  expect(JSON.stringify(nb)).toContain('no design from')
+
+  await $.prompt.submit({ text: 'again', ...COMPOSER })
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/b.js`, old_string: '1', new_string: '2', agentId: 'sub-1' })
+  const mine = await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '6' })
+  expect(JSON.stringify(mine)).not.toContain('no design from')
+})
+
 test('a counted loop holds each stop for the next pass and ends after the last, with or without team mode', async ($, on) => {
   world(on)
   on('turn.complete', ($, e) => ({ text: e.answer }))

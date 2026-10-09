@@ -1587,13 +1587,16 @@ export const register: Register = on => {
     const isTeam = (await read($, wbAtom)).team?.enabled === true
 
     if (isTeam && e.tool === 'ExitPlanMode' && crew.needsPlanReview((await read($, liveAtom)).track ?? crew.EMPTY_TRACK)) {
+      await updateTrack($, current => ({ ...current, planReviewDeniedAt: hookStart }))
       await audit($, 'team.plan-review-required')
       return { deny: crew.PLAN_REVIEW }
     }
     // Design first: a big edit needs a design from the advisor; asked once per turn so it can never deadlock.
     if (isTeam && e.agentId === undefined && model.isEditTool(e.tool)) {
       const cwd = await $.session.cwd()
-      const file = 'file_path' in e && typeof e.file_path === 'string' ? e.file_path : undefined
+      const input = e as unknown as Record<string, unknown>
+      const target = input.file_path ?? input.notebook_path
+      const file = typeof target === 'string' ? target : undefined
       const inside = file?.startsWith(`${cwd}/`) ? file.slice(cwd.length + 1) : undefined
       const track = (await read($, liveAtom)).track ?? crew.EMPTY_TRACK
 
@@ -1695,9 +1698,11 @@ export const register: Register = on => {
       return path && isOk ? model.observe(updated, e.tool, path, endedAt) : updated
     })
 
-    if (isTeam && isOk && path !== undefined && rawPath?.startsWith(`${cwd}/`) && model.isEditTool(e.tool)) {
+    const notebook = (e as unknown as Record<string, unknown>).notebook_path
+    const editedFile = typeof notebook === 'string' && rawPath === undefined ? notebook : rawPath
+    if (isTeam && isOk && e.agentId === undefined && editedFile?.startsWith(`${cwd}/`) && model.isEditTool(e.tool)) {
       const lines = crew.editSize(e.tool, e as unknown as Record<string, unknown>).lines
-      await updateTrack($, track => crew.noteEdit(track, path, lines))
+      await updateTrack($, track => crew.noteEdit(track, editedFile.slice(cwd.length + 1), lines))
     }
     if (isTeam && isOk && e.tool === 'ExitPlanMode') {
       await updateTrack($, track => ({ ...track, planApprovedAt: endedAt }))
@@ -1815,6 +1820,7 @@ export const register: Register = on => {
     const lastEdit = lastCheckedEdit(wb.changed)
     const step = loop.advance(running, lastEdit !== undefined && lastEdit >= (running.passAt ?? 0), await $.clock.now())
     await setLive($, current => ({ ...current, loop: step.loop }))
+    await updateTrack($, ({ turnEdits: _passEdits, ...track }) => track)
     await audit($, step.loop ? 'loop.pass' : 'loop.done', { done: running.done + 1 }).catch(() => undefined)
     if (step.text) $.ui.toast(`SmartWorkbench: ${step.text}`)
 
