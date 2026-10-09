@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { EvidenceRecord, Task } from '../types'
 import { parsePinSpec, sliceLines } from '../hooks/context'
+import * as evidence from '../hooks/evidence'
 import { completionOf, evidenceKindOf, guessLink, statusOf } from '../hooks/evidence'
 import { serializeContract } from '../hooks/intent'
 
@@ -70,5 +71,21 @@ describe('pins and reports', () => {
     expect(parsePinSpec('src/a.ts#L12')).toEqual({ path: 'src/a.ts', lines: { from: 12, to: 12 } })
     expect(parsePinSpec('src/a.ts:40-10')).toEqual({ path: 'src/a.ts', lines: { from: 10, to: 40 } })
     expect(sliceLines('a\nb\nc', { from: 2, to: 3 })).toBe('b\nc')
+  })
+})
+
+describe('exit codes the shell hides', () => {
+  test('a pipe, || or ; after the check makes its result unknown', async () => {
+    const { checkOutcome } = evidence
+    expect(checkOutcome('npm test', 'test', false)).toBe(false)
+    expect(checkOutcome('npm test 2>&1 | tail -20', 'test', true)).toBe(null)
+    expect(checkOutcome('npm test || true', 'test', true)).toBe(null)
+    expect(checkOutcome('npm test; echo done', 'test', true)).toBe(null)
+    expect(checkOutcome('cd app && npm test', 'test', true)).toBe(true)
+    expect(checkOutcome('npm test && npm run build', 'test', true)).toBe(true)
+    expect(checkOutcome('npm test && npm run build', 'test', false)).toBe(null)
+    expect(checkOutcome('set -o pipefail; npm test | tail -5', 'test', true)).toBe(true)
+    expect(checkOutcome('npm test | tail -5; set -o pipefail', 'test', true)).toBe(null)
+    expect(checkOutcome('set -o pipefail && npm test | tail -5', 'test', true)).toBe(true)
   })
 })

@@ -103,3 +103,21 @@ export function turnSummary(task: Task, evidence: readonly EvidenceRecord[], las
 
   return [`WORKBENCH · ${isComplete ? 'COMPLETE' : 'INCOMPLETE'}`, ...lines].join('\n')
 }
+
+// What a finished run proves about its check. The shell reports the exit code of the
+// last command only, so a pipe, `||` or `;` after the check hides its result
+// (`npm test | tail` exits 0 when the tests fail). After `&&` only a success proves it.
+export function checkOutcome(command: string, kind: EvidenceKind, isOk: boolean): boolean | null {
+  const parts = command.split(/(\|\||&&|\||;|\n)/)
+  const segments = parts.filter((_, i) => i % 2 === 0)
+  const operators = parts.filter((_, i) => i % 2 === 1)
+  const at = segments.findIndex(one => evidenceKindOf(one) === kind)
+  const hasPipefail = /set\s+-[a-z]*o\s+pipefail|set\s+-o\s+pipefail/.test(command)
+  const after = operators.slice(Math.max(0, at)).map(op => (op === '|' && hasPipefail ? '&&' : op))
+
+  if (at < 0) return null
+  if (after.length === 0) return isOk
+  if (after.every(op => op === '&&')) return isOk ? true : null
+
+  return null
+}
