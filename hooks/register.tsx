@@ -1277,6 +1277,7 @@ export const register: Register = on => {
   // Adds the locked contract and the pins as context the model alone reads;
   // the prompt text is left as typed. On failure the prompt goes through unchanged.
   on('prompt.submit', async ($, e, next) => {
+    const startedAt = await $.clock.now()
     await pull($)
     const wb = await read($, wbAtom)
     const { policy } = await read($, liveAtom)
@@ -1294,6 +1295,9 @@ export const register: Register = on => {
       $.ui.toast(`SmartWorkbench: ${warnings.join(', ')}`)
     }
 
+    // Own work only, for checking the performance targets with --debug.
+    $.ui.log(`SmartWorkbench timing: prompt.submit ${(await $.clock.now()) - startedAt}ms before the prompt went on`, { to: 'debug' })
+
     return blocks.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...blocks] })
   }).catch(($, e, next) => next(e))
 
@@ -1305,6 +1309,7 @@ export const register: Register = on => {
     if (e.tool === PROPOSE_TOOL) {
       return propose($, e as unknown as Record<string, unknown>)
     }
+    const hookStart = await $.clock.now()
     const wb = await read($, wbAtom)
     const live = await read($, liveAtom)
     const cwd = await $.session.cwd()
@@ -1370,6 +1375,8 @@ export const register: Register = on => {
         ...(answer === 'Allow' || !scope ? {} : { scope: scope.label }),
       })
     }
+
+    $.ui.log(`SmartWorkbench timing: tool.call guard ${(await $.clock.now()) - hookStart}ms for ${e.tool}`, { to: 'debug' })
 
     // Allow still goes through Claude Code's own permission check beneath.
     const ran = await next(e)

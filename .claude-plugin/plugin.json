@@ -1,6 +1,6 @@
 {
   "name": "smartworkbench",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "SmartWorkbench for Claude Code: set the task contract, pin context, guard tool calls and verify the result",
   "author": {
     "name": "nathak"
