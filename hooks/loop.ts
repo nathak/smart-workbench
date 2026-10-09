@@ -6,6 +6,8 @@ import type { LoopState } from '../types'
 // A mistyped count cannot run for days; "inf" is the only way to ask for no limit.
 export const MAX_COUNT = 1000
 const MAX_ITEMS = 20
+// An infinite loop ends when this many passes in a row changed no file; a counted loop always runs its count.
+export const IDLE_LIMIT = 3
 
 const INFINITE = new Set(['inf', 'infinite', 'forever', '∞', '무한'])
 
@@ -38,7 +40,8 @@ export function parse(args: string): LoopCommand {
     return { kind: 'error', text: `Count must be 1 to ${MAX_COUNT}; use "inf" to run until stopped.` }
   }
 
-  const items = body.split(/\s*;\s*/).map(one => one.trim()).filter(Boolean)
+  // "\;" keeps a semicolon inside an item.
+  const items = body.split(/\s*(?<!\\);\s*/).map(one => one.replaceAll('\\;', ';').trim()).filter(Boolean)
   if (items.length === 0 || rest.length === 0) return { kind: 'error', text: `Say what to do each time. ${USAGE}` }
   if (items.length > MAX_ITEMS) return { kind: 'error', text: `At most ${MAX_ITEMS} items.` }
 
@@ -46,7 +49,7 @@ export function parse(args: string): LoopCommand {
 }
 
 export function begin(items: string[], limit: number | null, at: number): LoopState {
-  return { items, limit, done: 0, startedAt: at, pending: true }
+  return { items, limit, done: 0, startedAt: at, passAt: at, idle: 0, pending: true }
 }
 
 function label(loop: LoopState, n: number): string {
@@ -69,11 +72,16 @@ export function iterationPrompt(loop: LoopState): string {
 export type Step = { loop: LoopState | undefined; reason?: string; text?: string }
 
 // A turn ended with a loop running: count the pass and either hold the turn for the next one or end the loop.
-export function advance(loop: LoopState): Step {
-  const next: LoopState = { ...loop, done: loop.done + 1, continuing: true, pending: false }
+// edited = the pass changed a file; an infinite loop that changes nothing IDLE_LIMIT times in a row ends.
+export function advance(loop: LoopState, edited: boolean, now: number): Step {
+  const idle = edited ? 0 : (loop.idle ?? 0) + 1
+  const next: LoopState = { ...loop, done: loop.done + 1, idle, passAt: now, continuing: true, pending: false }
 
   if (loop.limit !== null && next.done >= loop.limit) {
     return { loop: undefined, text: `Loop finished: ${next.done} of ${loop.limit} passes done.` }
+  }
+  if (loop.limit === null && idle >= IDLE_LIMIT) {
+    return { loop: undefined, text: `Loop stopped after ${next.done} passes: the last ${IDLE_LIMIT} changed no file.` }
   }
 
   return { loop: next, reason: iterationPrompt(next) }
