@@ -163,6 +163,8 @@ export type Live = {
   user?: string
   // What the person chose "Allow for session" for; gone when the session ends.
   sessionAllows?: SessionAllow[]
+  // Text typed into the panel's fields and not yet submitted, by field key.
+  drafts?: Record<string, string>
 }
 
 export type SessionAllow = { key: string; label: string; at: number }
