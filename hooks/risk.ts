@@ -43,14 +43,14 @@ const BASH_RULES: readonly Rule[] = [
     category: 'secret-output',
     risk: 'medium',
     policy: 'ask',
-    pattern: /(^|[;&|]\s*)(env|printenv|set)\s*($|[;&|])|\b(cat|less|head|tail|grep)\b[^;&|]*(\.env\b|credentials|\.npmrc|\.netrc|id_rsa|\.pem\b)|\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)\w*|\bgh\s+auth\s+token\b/i,
+    pattern: /(^|[;&|]\s*)(env|printenv|set)\s*($|[;&|])|\b(cat|less|head|tail|grep)\b[^;&|]*((^|[^\w.])\.env(?!\.(example|sample|template)\b)(\.[\w-]+)?(?=$|[^\w-])|credentials|\.npmrc|\.netrc|id_rsa|\.pem\b)|\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)\w*|\bgh\s+auth\s+token\b/i,
     reason: 'may print secrets',
   },
   {
     category: 'external-send',
     risk: 'medium',
     policy: 'ask',
-    pattern: /\bgit\s+push\b|\bgh\s+(pr\s+(create|merge)|release|issue\s+(create|comment)|api\s+[^;&|]*-X\s*(POST|PUT|PATCH|DELETE))|\b(npm|pnpm|yarn|cargo)\s+publish\b|\bcurl\b[^;&|]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s(-d|--data|-F|--form)\b)|\b(scp|sftp)\b|\brsync\b[^;&|]*\S+:|\bkubectl\s+(apply|delete)|\b(vercel|netlify|fly|firebase)\s+deploy|\bdeploy\b/,
+    pattern: /\bgit\s+push\b|\bgh\s+(pr\s+(create|merge)|release|issue\s+(create|comment)|api\s+[^;&|]*-X\s*(POST|PUT|PATCH|DELETE))|\b(npm|pnpm|yarn|cargo)\s+publish\b|\bcurl\b[^;&|]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s(-d|--data|-F|--form)\b)|\b(scp|sftp)\b|\brsync\b[^;&|]*\S+:|\bkubectl\s+(apply|delete)|\b(vercel|netlify|fly|firebase)\s+deploy|(^|[;&|(`]\s*|\$\()((sudo|env|time|exec|xargs|nohup|bash|sh|zsh|node|python3?|ruby|npx|make|(npm|pnpm|yarn|bun)(\s+run)?)\s+)*[\w./-]*deploy[\w.-]*(\s|$)/,
     reason: 'sends to an external system',
   },
 ]

@@ -17,6 +17,15 @@ describe('risk rules', () => {
     }
   })
 
+  test('words that merely mention a secret file or a deploy are not asked', async () => {
+    for (const command of ['grep -rn process.env src', 'grep -n "deploy" README.md', 'git commit -m "fix deploy script"', 'cat .env.example', 'head -5 docs/deploy.md']) {
+      expect(classify('Bash', { command }).policy).toBe('allow')
+    }
+    for (const command of ['npm run deploy', 'make deploy', './scripts/deploy.sh prod', 'cd app && deploy', 'cat ./.env', 'grep KEY .env.local', 'bash scripts/deploy.sh', 'sudo make deploy', 'cat <.env', 'echo $(cat .env)', 'cat (.env)']) {
+      expect(classify('Bash', { command }).policy).toBe('ask')
+    }
+  })
+
   test('ordinary work is allowed', async () => {
     expect(classify('Bash', { command: 'npm test -- auth' }).policy).toBe('allow')
     expect(classify('Bash', { command: 'rm notes.txt' }).policy).toBe('allow')
