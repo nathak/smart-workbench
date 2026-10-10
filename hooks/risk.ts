@@ -15,42 +15,42 @@ const BASH_RULES: readonly Rule[] = [
     category: 'destructive-git',
     risk: 'high',
     policy: 'block',
-    pattern: /\bgit\s+push\b[^;&|]*(\s--force\b|\s-f\b|\s--force-with-lease\b|\s\+\S)/,
+    pattern: /\bgit\s+push\b[^;&|\n]*(\s--force\b|\s-f\b|\s--force-with-lease\b|\s\+\S)/,
     reason: 'force push rewrites remote history',
   },
   {
     category: 'destructive-git',
     risk: 'high',
     policy: 'block',
-    pattern: /\bgit\s+(reset\s+[^;&|]*--hard|clean\s+[^;&|]*-[a-z]*f|checkout\s+[^;&|]*--\s+\.|branch\s+[^;&|]*-D\b)/,
+    pattern: /\bgit\s+(reset\s+[^;&|\n]*--hard|clean\s+[^;&|\n]*-[a-z]*f|checkout\s+[^;&|\n]*--\s+\.|branch\s+[^;&|\n]*-D\b)/,
     reason: 'destructive git command discards work',
   },
   {
     category: 'broad-delete',
     risk: 'high',
     policy: 'block',
-    pattern: /(^|[;&|(]\s*|\s)(sudo\s+)?rm\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b|\bfind\b[^;&|]*\s-delete\b/,
+    pattern: /(^|[;&|(]\s*|\s)(sudo\s+)?rm\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b|\bfind\b[^;&|\n]*\s-delete\b/,
     reason: 'recursive delete',
   },
   {
     category: 'guard-policy',
     risk: 'medium',
     policy: 'ask',
-    pattern: /\.claude\/smartworkbench\.json[^;&|]*(>|\|\s*tee\b)|(\btee\b|\bsed\s+-i\b|\brm\b|\bmv\b|\bcp\b|>)[^;&|]*\.claude\/smartworkbench\.json/,
+    pattern: /\.claude\/smartworkbench\.json[^;&|\n]*(>|\|\s*tee\b)|(\btee\b|\bsed\s+-i\b|\brm\b|\bmv\b|\bcp\b|>)[^;&|\n]*\.claude\/smartworkbench\.json/,
     reason: 'changes the project guard policy',
   },
   {
     category: 'secret-output',
     risk: 'medium',
     policy: 'ask',
-    pattern: /(^|[;&|]\s*)(env|printenv|set)\s*($|[;&|])|\b(cat|less|head|tail|grep)\b[^;&|]*((^|[^\w.])\.env(?!\.(example|sample|template)\b)(\.[\w-]+)?(?=$|[^\w-])|credentials|\.npmrc|\.netrc|id_rsa|\.pem\b)|\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)\w*|\bgh\s+auth\s+token\b/i,
+    pattern: /(^|[;&|]\s*)(env|printenv|set)\s*($|[;&|])|\b(cat|less|head|tail|grep)\b[^;&|\n]*((^|[^\w.])\.env(?!\.(example|sample|template)\b)(\.[\w-]+)?(?=$|[^\w-])|credentials|\.npmrc|\.netrc|id_rsa|\.pem\b)|\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)\w*|\bgh\s+auth\s+token\b/i,
     reason: 'may print secrets',
   },
   {
     category: 'external-send',
     risk: 'medium',
     policy: 'ask',
-    pattern: /\bgit\s+push\b|\bgh\s+(pr\s+(create|merge)|release|issue\s+(create|comment)|api\s+[^;&|]*-X\s*(POST|PUT|PATCH|DELETE))|\b(npm|pnpm|yarn|cargo)\s+publish\b|\bcurl\b[^;&|]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s(-d|--data|-F|--form)\b)|\b(scp|sftp)\b|\brsync\b[^;&|]*\S+:|\bkubectl\s+(apply|delete)|\b(vercel|netlify|fly|firebase)\s+deploy|(^|[;&|(`]\s*|\$\()((sudo|env|time|exec|xargs|nohup|bash|sh|zsh|node|python3?|ruby|npx|make|(npm|pnpm|yarn|bun)(\s+run)?)\s+)*[\w./-]*deploy[\w.-]*(\s|$)/,
+    pattern: /\bgit\s+push\b|\bgh\s+(pr\s+(create|merge)|release|issue\s+(create|comment)|api\s+[^;&|\n]*-X\s*(POST|PUT|PATCH|DELETE))|\b(npm|pnpm|yarn|cargo)\s+publish\b|\bcurl\b[^;&|\n]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s(-d|--data|-F|--form)\b)|\b(scp|sftp)\b|\brsync\b[^;&|\n]*\S+:|\bkubectl\s+(apply|delete)|\b(vercel|netlify|fly|firebase)\s+deploy|(^|[;&|(`]\s*|\$\()((sudo|env|time|exec|xargs|nohup|bash|sh|zsh|node|python3?|ruby|npx|make|(npm|pnpm|yarn|bun)(\s+run)?)\s+)*[\w./-]*deploy[\w.-]*(\s|$)/,
     reason: 'sends to an external system',
   },
 ]
@@ -99,7 +99,8 @@ export function classify(tool: string, input: unknown): Verdict {
   const args = (input ?? {}) as Record<string, unknown>
 
   if (tool === 'Bash') {
-    const command = String(args.command ?? '')
+    // A backslash before a newline continues the command, as in bash; join it so a rule still reads one line.
+    const command = String(args.command ?? '').replace(/\\\r?\n/g, ' ')
     const rule = BASH_RULES.find(one => one.pattern.test(command))
 
     return rule

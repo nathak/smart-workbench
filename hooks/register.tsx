@@ -112,9 +112,26 @@ async function pull($: $): Promise<void> {
   }
 }
 
+// Live feed for tools/live.mjs: one JSON line per event, written only while that server keeps the file in place.
+// Never throws and costs one fs.exists per event when nobody watches.
+const LIVE_FILE = '.claude/smartworkbench-live.jsonl'
+
+async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
+  try {
+    const path = `${await $.session.cwd()}/${LIVE_FILE}`
+    if (!(await $.fs.exists(path))) return
+    const session = (await read($, liveAtom)).sessionId
+    const line = JSON.stringify({ at: await $.clock.now(), kind, ...(session ? { session } : {}), ...detail })
+    await $.process.run(['sh', '-c', 'printf "%s\\n" "$1" >> "$2"', 'sh', line, path])
+  } catch {
+    // The feed is optional.
+  }
+}
+
 // Appends to the audit log when the project guard file turns it on; never throws, so a
 // failed write can never let a guarded call through.
 async function audit($: $, event: string, detail: Record<string, unknown> = {}): Promise<void> {
+  await emit($, event, detail)
   try {
     const live = await read($, liveAtom)
     const config = live.policy?.audit
@@ -610,8 +627,63 @@ function statusText(wb: Workbench, live: Live): string {
   ].join('\n')
 }
 
+// The live view's web server (tools/live.mjs), a child of this session: it ends with /swb live stop, the session or a reload.
+let liveServer: { url: string; stop: () => void } | undefined
+
+async function liveCommand($: $, rest: string): Promise<{ text: string }> {
+  const arg = rest.trim().toLowerCase()
+
+  if (arg === 'stop' || arg === 'off') {
+    if (!liveServer) return { text: 'The live view is not running.' }
+    liveServer.stop()
+    liveServer = undefined
+
+    return { text: 'Live view stopped; the feed file is removed.' }
+  }
+  if (liveServer) return { text: `Live view: ${liveServer.url}\n/swb live stop to end it.` }
+
+  const port = arg === '' ? 4317 : Number(arg)
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) return { text: 'Usage: /swb live [port 1024-65535] | /swb live stop' }
+
+  const url = `http://127.0.0.1:${port}`
+  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--port', String(port)] })
+  const iterator = child[Symbol.asyncIterator]()
+  let output = ''
+  const handle = { url, stop: () => void Promise.resolve(iterator.return?.()).catch(() => undefined) }
+
+  const started = new Promise<boolean>(resolve => {
+    void (async () => {
+      try {
+        for (;;) {
+          const step = await iterator.next()
+          if (step.done) break
+          output += step.value.text
+          if (output.includes('SmartWorkbench live:')) {
+            liveServer = handle
+            resolve(true)
+          }
+        }
+      } catch (error) {
+        output += error instanceof Error ? error.message : String(error)
+      }
+      if (liveServer === handle) liveServer = undefined
+      resolve(false)
+    })()
+  })
+  const timeout = $.clock.sleep(3000).then(() => false, () => false)
+
+  if (await Promise.race([started, timeout])) {
+    return { text: `Live view: ${url}\nOpen it in a browser. /swb live stop to end it. The feed holds prompt starts, so do not commit .claude/smartworkbench-live.jsonl.` }
+  }
+  handle.stop()
+
+  return { text: `The live view did not start${output.trim() ? `: ${model.cut(output.trim().split('\n').pop() ?? '', 160)}` : ' (is node installed? is the port free?)'}` }
+}
+
 async function runCommand($: $, args: string): Promise<{ text: string }> {
   const word = (args.trim().split(/\s+/)[0] ?? '').toLowerCase()
+
+  if (word === 'live') return liveCommand($, args.trim().slice(word.length))
 
   if (word === '' || word in TAB_ARGS) {
     const isPlaced = await openPane($, TAB_ARGS[word])
@@ -1570,6 +1642,8 @@ export const register: Register = on => {
     // Own work only, for checking the performance targets with --debug.
     $.ui.log(`SmartWorkbench timing: prompt.submit ${(await $.clock.now()) - startedAt}ms before the prompt went on`, { to: 'debug' })
 
+    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(e.text.replace(/\s+/g, ' '), 120), team: wb.team?.enabled === true, loop: loopBlocks.length > 0 })
+
     const all = [...blocks, ...loopBlocks]
 
     return all.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...all] })
@@ -1626,6 +1700,17 @@ export const register: Register = on => {
       ...(e.agentId ? { agentId: e.agentId } : {}),
     }
     await mutate($, current => model.recordCall(current, call))
+    const sub = (e as unknown as Record<string, unknown>).subagent_type
+    await emit($, 'tool.start', {
+      id: call.id,
+      tool: e.tool,
+      summary: call.summary,
+      category: verdict.category,
+      risk: verdict.risk,
+      policy,
+      ...(e.agentId ? { agent: e.agentId } : {}),
+      ...(typeof sub === 'string' ? { subagent: sub } : {}),
+    })
 
     if (policy === 'block') {
       await mutate($, current => model.recordCall(current, { ...call, outcome: 'blocked', durationMs: 0 }))
@@ -1730,6 +1815,7 @@ export const register: Register = on => {
       }
     }
     await badge($, { ...call, outcome })
+    await emit($, 'tool.end', { id: call.id, outcome })
 
     return ran
   }).catch(($, e, next) => {
@@ -1752,6 +1838,7 @@ export const register: Register = on => {
     }
 
     await refreshUsage($).catch(() => undefined)
+    await emit($, 'turn', { aborted: e.isAborted === true })
 
     // The loop's first pass: a command cannot submit a prompt, the end of its turn can.
     // Not awaited: submit returns when the pass's turn ends, and this hook must not wait for a whole loop.
