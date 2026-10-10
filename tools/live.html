@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workbench Live</title>
+<style>
+/* 다크 전용. 모델은 색 사각형, 판정은 배지 색으로 구분한다.
+   opus 보라 · sonnet 주황 · haiku 청록 · guard 연두 / allow 초록 · ask 노랑 · block 빨강 · hold 보라 · loop 파랑 */
+:root{
+  color-scheme:dark;
+  --bg:#0a0d12; --win:#0d1117; --panel:#10151c; --line:#2a3340; --fg:#c9d1d9; --dim:#6b7785; --faint:#3a4452;
+  --opus:#b388ff; --sonnet:#ff9d52; --haiku:#3cc8e6; --guard:#a6e22e;
+  --allow:#2fb562; --ask:#e9a820; --block:#ff5d73; --hold:#b388ff; --loop:#6ea8ff;
+  --mono:ui-monospace,"JetBrains Mono","SF Mono",Menlo,Consolas,"Noto Sans Mono CJK KR",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.55 var(--mono)}
+.page{max-width:1120px;margin:0 auto;padding:20px 16px 40px}
+.win{background:var(--win);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.bar{display:flex;align-items:center;gap:7px;padding:9px 14px;border-bottom:1px solid var(--line);color:var(--dim);font-size:.78rem}
+.bar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+.bar .t{flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .live{color:var(--allow)} .bar .live.off{color:var(--block)}
+.body{padding:16px 18px 14px}
+.head{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:baseline;margin-bottom:4px;font-size:.92rem;letter-spacing:.03em}
+.head b{color:var(--sonnet);font-weight:600}
+.head .m{font-size:.8rem}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--dim);font-size:.74rem;padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.sq{display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:0}
+.c-opus{color:var(--opus)}.c-sonnet{color:var(--sonnet)}.c-haiku{color:var(--haiku)}.c-guard{color:var(--guard)}.c-loop{color:var(--loop)}
+.sq.opus{background:var(--opus)}.sq.sonnet{background:var(--sonnet)}.sq.haiku{background:var(--haiku)}.sq.guard{background:var(--guard)}
+.sq.allow{background:var(--allow)}.sq.ask{background:var(--ask)}.sq.block{background:var(--block)}.sq.loop{background:var(--loop)}
+
+.grid{display:grid;grid-template-columns:minmax(210px,270px) minmax(0,1fr);gap:18px;align-items:start}
+.box{border:1px dashed var(--line);border-radius:3px;padding:10px 13px;background:transparent;min-width:0}
+body.ready .box{transition:box-shadow .2s}
+.box h3{margin:0 0 3px;font-size:.88rem;font-weight:600}
+.box .sub{color:var(--dim);font-size:.72rem}
+.box.opus{border-color:var(--opus)} .box.opus h3{color:var(--opus)}
+.box.sonnet{border-color:var(--sonnet)} .box.sonnet h3{color:var(--sonnet)}
+.box.haiku{border-color:var(--haiku)} .box.haiku h3{color:var(--haiku)}
+.box.guard{border-color:var(--guard)} .box.guard h3{color:var(--guard)}
+.box.loop{border-color:var(--loop)} .box.loop h3{color:var(--loop)}
+.box.user{border-color:var(--faint)} .box.user h3{color:var(--fg)}
+.box.busy{box-shadow:0 0 0 1px currentColor,0 0 14px -4px currentColor}
+.box.opus.busy{color:var(--opus)}.box.sonnet.busy{color:var(--sonnet)}.box.haiku.busy{color:var(--haiku)}.box.loop.busy{color:var(--loop)}
+.kv{display:flex;justify-content:space-between;gap:10px;font-size:.78rem;padding:1px 0}
+.kv span:first-child{color:var(--dim)}
+.state{margin-top:8px;font-size:.78rem}
+.state.run{color:inherit}
+.state.idle{color:var(--dim)}
+.tree{display:flex;flex-direction:column;align-items:stretch;min-width:0}
+.link{align-self:center;width:0;height:16px;border-left:1px dashed var(--faint)}
+.rows{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.bars{margin-top:8px}
+.bar-row{display:grid;grid-template-columns:54px 1fr 38px;gap:10px;align-items:center;font-size:.78rem;padding:2px 0}
+.track{height:9px;background:#1a212b;border-radius:1px;overflow:hidden}
+.fill{height:100%;width:0}
+body.ready .fill{transition:width .3s}
+.fill.allow{background:var(--allow)}.fill.ask{background:var(--ask)}.fill.block{background:var(--block)}
+.bar-row b{text-align:right;font-weight:400}
+.note{margin-top:6px;color:var(--dim);font-size:.72rem}
+.tag{display:inline-block;min-width:58px;text-align:center;font-size:.68rem;letter-spacing:.04em;padding:0 7px;border-radius:2px;white-space:nowrap}
+.tag.allow{background:#143b25;color:#6be39a}.tag.ask{background:#4a3708;color:#ffcc55}.tag.block{background:#4d1a24;color:#ff8a9a}
+.tag.hold{background:#2c2150;color:#cdb6ff}.tag.loop{background:#16294d;color:#9cc2ff}.tag.info{background:#1d2530;color:#9aa7b5}.tag.run{background:#0f3340;color:#7fdcf2}
+
+section.panel{margin-top:16px;border:1px dashed var(--line);border-radius:3px}
+section.panel>h4{margin:0;padding:7px 13px 0;font-size:.74rem;font-weight:400;color:var(--dim);letter-spacing:.04em}
+.flags{padding:6px 10px 8px;display:flex;flex-direction:column;gap:4px;min-height:44px}
+.flag{display:grid;grid-template-columns:78px 1fr auto;gap:12px;align-items:center;border-left:3px solid var(--faint);padding:3px 8px;background:#10151c;font-size:.78rem;min-width:0}
+.flag.ask{border-left-color:var(--ask)}.flag.block{border-left-color:var(--block)}.flag.hold{border-left-color:var(--hold)}
+.flag .m{overflow-wrap:anywhere}.flag .w{color:var(--dim);font-size:.72rem;white-space:nowrap}
+.log{padding:4px 6px 8px;max-height:320px;overflow:auto}
+.row{display:grid;grid-template-columns:62px 92px minmax(0,1fr) 66px;gap:10px;align-items:baseline;padding:2px 8px;font-size:.78rem}
+.row .tm{color:var(--faint)} .row .m{overflow-wrap:anywhere} .row .m i{font-style:normal;color:var(--dim)}
+.row.ask{background:#2b2209}.row.block{background:#2f1319}.row.hold{background:#1e1736}
+.empty{color:var(--dim);padding:8px 10px;font-size:.78rem}
+.cmd{margin-top:14px;color:var(--dim);font-size:.78rem;overflow-wrap:anywhere}
+.cmd b{color:var(--guard);font-weight:400}
+.cmd .r{float:right;margin-left:12px}
+button{font:inherit;font-size:.72rem;background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:3px;padding:1px 9px;cursor:pointer}
+button:hover{color:var(--fg)}
+:focus-visible{outline:2px solid var(--haiku);outline-offset:2px}
+@keyframes in{from{opacity:0}to{opacity:1}}
+.row.new,.flag.new{animation:in .3s}
+@media (max-width:820px){.grid{grid-template-columns:1fr}.rows{grid-template-columns:1fr}.row{grid-template-columns:56px 80px 1fr 60px}}
+@media (prefers-reduced-motion:reduce){.row.new,.flag.new{animation:none}body.ready .box,body.ready .fill{transition:none}}
+</style>
+</head>
+<body>
+<div class="page">
+ <div class="win">
+  <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>
+    <span class="t" id="title"></span><span class="live off" id="state"></span></div>
+  <div class="body">
+    <div class="head"><b>SMARTWORKBENCH FLOW</b>
+      <span class="m c-opus">◆ OPUS · ON CALL</span><span class="m c-sonnet">◆ SONNET · LEAD</span><span class="m c-haiku">◆ HAIKU · SWARM</span></div>
+    <div class="legend">
+      <span><span class="sq opus"></span><span data-i="lg-advisor"></span></span><span><span class="sq sonnet"></span><span data-i="lg-lead"></span></span>
+      <span><span class="sq haiku"></span><span data-i="lg-sub"></span></span><span><span class="sq guard"></span><span data-i="lg-guard"></span></span>
+      <span><span class="sq allow"></span>allow</span><span><span class="sq ask"></span>ask</span>
+      <span><span class="sq block"></span>block</span><span><span class="sq opus"></span>hold</span><span><span class="sq loop"></span>loop</span>
+      <span style="margin-left:auto"><button id="lang" aria-label="language"></button> <button id="clear" data-i="clear"></button></span>
+    </div>
+
+    <div class="grid">
+      <aside class="box opus" id="b-opus">
+        <h3>Opus · on call</h3>
+        <div class="sub" data-i="o-sub"></div>
+        <div style="margin:10px 0 4px" class="sub" data-i="o-when"></div>
+        <div class="kv"><span data-i="o-design-l"></span><span id="o-design">0</span></div>
+        <div class="kv"><span data-i="o-plan-l"></span><span id="o-plan">0</span></div>
+        <div class="kv"><span data-i="o-final-l"></span><span id="o-final">0</span></div>
+        <div style="margin:10px 0 0;border-top:1px dashed var(--line);padding-top:8px"></div>
+        <div class="kv"><span data-i="o-calls-l"></span><span id="o-calls">0</span></div>
+        <div class="kv"><span data-i="o-team-l"></span><span id="o-team">?</span></div>
+        <div class="state idle" id="o-state"></div>
+      </aside>
+
+      <div class="tree">
+        <div class="box user" id="b-user"><h3 data-i="u-h"></h3><div class="sub" id="u-text"></div></div>
+        <div class="link"></div>
+        <div class="box sonnet" id="b-lead">
+          <h3>Sonnet · main session</h3>
+          <div class="sub" data-i="l-sub"></div>
+          <div class="kv" style="margin-top:6px"><span data-i="l-now-l"></span><span id="l-now"></span></div>
+          <div class="kv"><span data-i="l-calls-l"></span><span id="l-calls">0</span></div>
+        </div>
+        <div class="link"></div>
+        <div class="box guard" id="b-guard">
+          <h3 data-i="g-h"></h3>
+          <div class="bars">
+            <div class="bar-row"><span>allow</span><div class="track"><div class="fill allow" id="f-allow"></div></div><b id="n-allow">0</b></div>
+            <div class="bar-row"><span>ask</span><div class="track"><div class="fill ask" id="f-ask"></div></div><b id="n-ask">0</b></div>
+            <div class="bar-row"><span>block</span><div class="track"><div class="fill block" id="f-block"></div></div><b id="n-block">0</b></div>
+          </div>
+          <div class="note" data-i="g-note"></div>
+        </div>
+        <div class="link"></div>
+        <div class="box haiku" id="b-sub">
+          <h3>HAIKU · SUBAGENT DISPATCHER</h3>
+          <div class="sub" data-i="s-sub"></div>
+          <div class="kv" style="margin-top:6px"><span data-i="s-exp-l"></span><span id="s-exp">0</span></div>
+          <div class="kv"><span data-i="s-calls-l"></span><span id="s-calls">0</span></div>
+        </div>
+        <div class="link"></div>
+        <div class="rows">
+          <div class="box sonnet" id="b-worker"><h3>worker</h3><div class="sub" data-i="w-sub"></div>
+            <div class="kv" style="margin-top:6px"><span data-i="w-edit-l"></span><span id="w-edit">0</span></div>
+            <div class="kv"><span data-i="w-sh-l"></span><span id="w-sh">0</span></div>
+            <div class="state idle" id="w-state"></div></div>
+          <div class="box haiku" id="b-explorer"><h3>explorer</h3><div class="sub" data-i="e-sub"></div>
+            <div class="kv" style="margin-top:6px"><span data-i="e-read-l"></span><span id="e-read">0</span></div>
+            <div class="kv"><span data-i="e-run-l"></span><span id="e-run">0</span></div>
+            <div class="state idle" id="e-state"></div></div>
+          <div class="box loop" id="b-loop"><h3>loop</h3><div class="sub" data-i="p-sub"></div>
+            <div class="kv" style="margin-top:6px"><span data-i="p-pass-l"></span><span id="p-pass">-</span></div>
+            <div class="kv"><span data-i="p-turn-l"></span><span id="p-turn">0</span></div>
+            <div class="state idle" id="p-state"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <section class="panel"><h4>── flags · ask · block · hold ──</h4><div class="flags" id="flags"></div></section>
+    <section class="panel"><h4>── session log ──</h4><div class="log" id="log"></div></section>
+    <div class="cmd"><span class="r" id="count">0 events</span><b id="cwd">~/project $</b> swb live &nbsp;<span id="status-line" data-i="tagline"></span></div>
+  </div>
+ </div>
+</div>
+<script>
+var loadedAt = Date.now();
+var lang = 'en';
+try { lang = localStorage.getItem('swb-lang') === 'ko' ? 'ko' : 'en'; } catch (e) {}
+var q = /[?&]lang=(en|ko)\b/.exec(location.search);
+if (q) lang = q[1];
+function L(en, ko){ return lang === 'ko' ? ko : en; }
+
+var DICT = {
+  'lg-advisor': ['advisor', '조언자'], 'lg-lead': ['lead', '리드'], 'lg-sub': ['subagents', '서브에이전트'], 'lg-guard': ['guard', '가드'],
+  'clear': ['clear', '비우기'],
+  'o-sub': ['/advisor · reviewer (read-only)', '/advisor · 조언자 (읽기 전용)'], 'o-when': ['called when', '호출 시점'],
+  'o-design-l': ['◇ design before a big edit', '◇ 큰 편집 전 설계'], 'o-plan-l': ['◇ plan review', '◇ 계획 검토'], 'o-final-l': ['◇ final check', '◇ 종료 전 점검'],
+  'o-calls-l': ['calls', '호출'], 'o-team-l': ['team mode', '팀 모드'],
+  'u-h': ['USER · PROMPT', '사용자 · 프롬프트'],
+  'l-sub': ['plans · decides · tool calls', '계획 · 판단 · 도구 호출'], 'l-now-l': ['now', '지금'], 'l-calls-l': ['tool calls', '도구 호출'],
+  'g-h': ['GUARD · DECISION LAYER', 'GUARD · 판정 계층'], 'g-note': ['rule-based · no model call', '규칙 판정 · 모델 호출 없음'],
+  's-sub': ['runs explorers in parallel · read-only', '탐색기를 병렬로 호출 · 읽기 전용'], 's-exp-l': ['explorer runs', 'explorer 호출'], 's-calls-l': ['subagent tool calls', '서브에이전트 도구 호출'],
+  'w-sub': ['Sonnet · edits + tests', 'Sonnet · 편집 + 테스트'], 'w-edit-l': ['edits', '편집'], 'w-sh-l': ['shell', '셸'],
+  'e-sub': ['Haiku · read code + docs', 'Haiku · 코드·문서 읽기'], 'e-read-l': ['reads', '읽기'], 'e-run-l': ['running', '실행 중'],
+  'p-sub': ['repeats a task', '회차 반복'], 'p-pass-l': ['pass', '회차'], 'p-turn-l': ['turns', '턴'],
+  'tagline': ['plan on high · delegate on medium · keep Opus on call', '높은 effort로 계획 · 중간으로 위임 · Opus는 호출 대기']
+};
+function T(k){ var d = DICT[k]; return d ? d[lang === 'ko' ? 1 : 0] : k; }
+
+var S, inflight, events = [];
+var EDIT = { Edit: 1, Write: 1, NotebookEdit: 1, MultiEdit: 1 };
+function reset(){
+  S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, expCalls: 0, subCalls: 0, leadCalls: 0,
+    edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '' };
+  inflight = {};
+  $('log').innerHTML = '<div class="empty">' + L('waiting for events', '이벤트를 기다리는 중') + '</div>';
+  $('flags').innerHTML = '<div class="empty">' + L('none yet', '아직 없음') + '</div>';
+}
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function clock(at){ return new Date(at).toTimeString().slice(0, 8); }
+function cut(s, n){ s = String(s == null ? '' : s).replace(/\s+/g, ' '); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+var replaying = false;
+function fresh(){ return !replaying && Date.now() - loadedAt > 1500 ? ' new' : ''; }
+
+function addLog(at, who, whoClass, html, kind, tag, tagClass){
+  var log = $('log');
+  if (log.firstChild && log.firstChild.className === 'empty') log.innerHTML = '';
+  var row = document.createElement('div');
+  row.className = 'row ' + (kind || '') + fresh();
+  row.innerHTML = '<span class="tm">' + clock(at) + '</span><span class="' + whoClass + '">' + esc(who) + '</span><span class="m">' + html + '</span><span>' +
+    (tag ? '<span class="tag ' + tagClass + '">' + tag + '</span>' : '') + '</span>';
+  log.insertBefore(row, log.firstChild);
+  while (log.children.length > 120) log.removeChild(log.lastChild);
+  return row;
+}
+function addFlag(at, kind, label, text){
+  var f = $('flags');
+  if (f.firstChild && f.firstChild.className === 'empty') f.innerHTML = '';
+  var el = document.createElement('div');
+  el.className = 'flag ' + kind + fresh();
+  el.innerHTML = '<span class="tag ' + kind + '">' + label + '</span><span class="m">' + text + '</span><span class="w">' + L('turn ', '턴 ') + (S.turn + 1) + ' · ' + clock(at) + '</span>';
+  f.insertBefore(el, f.firstChild);
+  while (f.children.length > 10) f.removeChild(f.lastChild);
+}
+function running(lane){ var n = 0; for (var k in inflight) if (inflight[k].lane === lane) n++; return n; }
+function setBusy(boxId, stateId, n, label){
+  $(boxId).classList.toggle('busy', n > 0);
+  var st = $(stateId);
+  st.className = 'state ' + (n > 0 ? 'run' : 'idle');
+  st.textContent = n > 0 ? '[ ' + (label || L('running', '실행 중')) + (n > 1 ? ' ×' + n : '') + ' ]' : L('[ idle ]', '[ 대기 ]');
+}
+function render(){
+  var total = S.allow + S.ask + S.block || 1;
+  ['allow', 'ask', 'block'].forEach(function(k){ $('f-' + k).style.width = Math.round(S[k] / total * 100) + '%'; $('n-' + k).textContent = S[k]; });
+  $('o-design').textContent = S.design; $('o-plan').textContent = S.plan; $('o-final').textContent = S.final;
+  $('o-calls').textContent = S.opusCalls; $('o-team').textContent = S.team === null ? '?' : S.team ? 'ON' : 'OFF';
+  var adv = running('advisor');
+  $('b-opus').classList.toggle('busy', adv > 0);
+  $('o-state').className = 'state ' + (adv > 0 ? 'run' : 'idle');
+  $('o-state').textContent = adv > 0 ? L('[ reviewing ]', '[ 검토 중 ]') : L('stands by until called', '호출될 때까지 대기');
+  var leadNow = null;
+  for (var k in inflight) if (inflight[k].lane === 'lead' || inflight[k].lane === 'worker') leadNow = inflight[k];
+  $('b-lead').classList.toggle('busy', !!leadNow);
+  $('l-now').textContent = leadNow ? cut(leadNow.tool + ' ' + leadNow.summary, 34) : L('idle', '대기');
+  $('l-calls').textContent = S.leadCalls;
+  $('u-text').textContent = S.userText ? cut(S.userText, 90) : L('none yet', '아직 없음');
+  $('s-exp').textContent = S.expCalls; $('s-calls').textContent = S.subCalls;
+  $('b-sub').classList.toggle('busy', running('explorer') + running('sub') > 0);
+  $('w-edit').textContent = S.edits; $('w-sh').textContent = S.shells;
+  setBusy('b-worker', 'w-state', running('worker'));
+  $('e-read').textContent = S.reads; $('e-run').textContent = running('explorer') + running('sub');
+  setBusy('b-explorer', 'e-state', running('explorer') + running('sub'));
+  $('p-pass').textContent = S.pass || '-'; $('p-turn').textContent = S.turn;
+  $('p-state').className = 'state ' + (S.pass ? 'run' : 'idle');
+  $('p-state').textContent = S.pass ? L('[ looping ]', '[ 반복 중 ]') : L('[ idle ]', '[ 대기 ]');
+  $('b-loop').classList.toggle('busy', !!S.pass);
+  $('count').textContent = S.events + L(' events', '개 이벤트');
+}
+
+var HOLD = {
+  'team.design-required': ['design', 'big edit → design first', '큰 편집 → 설계 먼저'],
+  'team.plan-review-required': ['plan', 'plan → Opus review first', '계획 → Opus 검토 먼저'],
+  'team.final-check-required': ['final', 'final check before finishing', '종료 전 최종 점검']
+};
+
+function handle(ev){
+  var at = ev.at || Date.now();
+  S.events++;
+  switch (ev.kind) {
+    case 'prompt':
+      S.team = !!ev.team;
+      S.userText = ev.text;
+      addLog(at, 'user', 'c-guard', esc(cut(ev.text, 110)) + (ev.loop ? ' <i>' + L('(loop pass)', '(루프 회차)') + '</i>' : ''), '', ev.origin === 'plugin' ? 'PLUGIN' : 'PROMPT', 'info');
+      break;
+    case 'tool.start': {
+      var sub = ev.subagent || '';
+      var lane = ev.agent ? 'sub' : /advisor/.test(sub) ? 'advisor' : /explorer/.test(sub) ? 'explorer' : (EDIT[ev.tool] || ev.tool === 'Bash') ? 'worker' : 'lead';
+      var who = lane === 'advisor' ? 'opus:adv' : lane === 'explorer' ? 'haiku:exp' : lane === 'sub' ? 'sub:' + cut(ev.agent, 4) : 'sonnet';
+      var whoClass = lane === 'advisor' ? 'c-opus' : (lane === 'explorer' || lane === 'sub') ? 'c-haiku' : 'c-sonnet';
+      if (lane === 'advisor') S.opusCalls++;
+      if (lane === 'explorer') S.expCalls++;
+      if (lane === 'sub') { S.subCalls++; S.reads++; }
+      if (!ev.agent) { S.leadCalls++; if (EDIT[ev.tool]) S.edits++; else if (ev.tool === 'Bash') S.shells++; else if (lane === 'lead') S.reads++; }
+      if (ev.policy === 'allow') S.allow++;
+      inflight[ev.id] = { lane: lane, tool: ev.tool, summary: ev.summary };
+      var kind = ev.policy === 'ask' ? 'ask' : ev.policy === 'block' ? 'block' : '';
+      var row = addLog(at, who, whoClass, esc(ev.tool) + ' <i>' + esc(cut(ev.summary, 80)) + '</i>', kind, String(ev.policy).toUpperCase(), ev.policy);
+      inflight[ev.id].row = row;
+      if (ev.policy === 'block') delete inflight[ev.id];
+      break;
+    }
+    case 'tool.end': {
+      var c = inflight[ev.id];
+      if (c && c.row) {
+        c.row.querySelector('.m').insertAdjacentHTML('beforeend', ' <i>→ ' + esc(ev.outcome) + '</i>');
+        if (ev.outcome === 'error') c.row.className += ' block';
+      }
+      delete inflight[ev.id];
+      break;
+    }
+    case 'guard.block':
+      S.block++;
+      addFlag(at, 'block', 'BLOCK', esc(ev.reason) + ' · <code>' + esc(cut(ev.input, 70)) + '</code>');
+      addLog(at, 'guard', 'c-guard', esc(ev.tool) + L(' blocked ', ' 차단 ') + '<i>' + esc(cut(ev.input, 70)) + '</i>', 'block', 'BLOCK', 'block');
+      break;
+    case 'guard.ask':
+      S.ask++;
+      addFlag(at, ev.answer === 'declined' ? 'block' : 'ask', 'ASK', esc(ev.reason) + ' → ' + esc(ev.answer) + ' · <code>' + esc(cut(ev.input, 60)) + '</code>');
+      addLog(at, 'guard', 'c-guard', esc(ev.tool) + L(' asked → ', ' 확인 → ') + esc(ev.answer), 'ask', 'ASK', 'ask');
+      break;
+    case 'team.design-required':
+    case 'team.plan-review-required':
+    case 'team.final-check-required': {
+      var h = HOLD[ev.kind];
+      S[h[0]]++;
+      var label = L(h[1], h[2]);
+      addFlag(at, 'hold', 'HOLD', esc(label) + (ev.tool ? ' · ' + esc(ev.tool) : ''));
+      addLog(at, 'opus', 'c-opus', esc(label) + L(' required', ' 요구'), 'hold', 'HOLD', 'hold');
+      break;
+    }
+    case 'loop.start':
+      S.pass = L('started · ', '시작 · ') + (ev.limit === 'inf' ? L('no limit', '무한') : ev.limit + L(' passes', '회'));
+      addLog(at, 'loop', 'c-loop', L('start · items ', '시작 · 항목 ') + esc(ev.items) + ' · ' + esc(ev.limit), '', 'LOOP', 'loop');
+      break;
+    case 'loop.pass':
+      S.pass = L('pass ' + ev.done + ' done', ev.done + '회차 끝');
+      addLog(at, 'loop', 'c-loop', L('pass ' + esc(ev.done) + ' done → next pass', esc(ev.done) + '회차 끝 → 다음 회차'), '', 'LOOP', 'loop');
+      break;
+    case 'loop.done': case 'loop.stop': case 'loop.cancel': {
+      S.pass = null;
+      var end = { 'loop.done': L('finished', '완료'), 'loop.stop': L('stopped', '중지'), 'loop.cancel': L('ended by your prompt', '사용자 입력으로 종료') }[ev.kind];
+      addLog(at, 'loop', 'c-loop', end + (ev.done != null ? ' · ' + esc(ev.done) + L(' passes', '회') : ''), '', 'LOOP', 'loop');
+      break;
+    }
+    case 'turn':
+      S.turn++;
+      addLog(at, 'turn', 'c-guard', ev.aborted ? L('turn aborted (Esc)', '턴 중단 (Esc)') : L('turn done', '턴 완료'), ev.aborted ? 'block' : '', ev.aborted ? 'ABORT' : 'DONE', ev.aborted ? 'block' : 'info');
+      break;
+    default:
+      if (/^(contract|condition|task|session)\./.test(ev.kind)) addLog(at, 'wb', 'c-guard', esc(ev.kind), '', '', '');
+  }
+  render();
+}
+
+function translate(){
+  document.documentElement.lang = lang;
+  var nodes = document.querySelectorAll('[data-i]');
+  for (var i = 0; i < nodes.length; i++) nodes[i].textContent = T(nodes[i].getAttribute('data-i'));
+  $('lang').textContent = lang === 'ko' ? 'EN' : '한국어';
+  $('lang').title = lang === 'ko' ? 'Switch to English' : '한글로 보기';
+  $('title').textContent = connected ? 'swb live — ' + location.host : L('swb live — connecting', 'swb live — 연결 중');
+  $('state').textContent = connected ? '● LIVE' : (everOpened ? L('● disconnected', '● 끊김') : L('● waiting', '● 대기'));
+}
+function replay(){
+  replaying = true;
+  reset();
+  events.forEach(handle);
+  replaying = false;
+  translate();
+  render();
+}
+$('lang').onclick = function(){
+  lang = lang === 'ko' ? 'en' : 'ko';
+  try { localStorage.setItem('swb-lang', lang); } catch (e) {}
+  replay();
+};
+$('clear').onclick = function(){ events = []; replay(); };
+
+var connected = false, everOpened = false;
+var es = new EventSource('/events');
+es.onopen = function(){ connected = true; everOpened = true; $('state').className = 'live'; translate(); };
+es.onerror = function(){ connected = false; $('state').className = 'live off'; translate(); };
+es.onmessage = function(m){
+  try { var ev = JSON.parse(m.data); events.push(ev); if (events.length > 2000) events.shift(); handle(ev); } catch (e) {}
+};
+reset();
+translate();
+render();
+setTimeout(function(){ document.body.classList.add('ready'); }, 1500);
+</script>
+</body>
+</html>

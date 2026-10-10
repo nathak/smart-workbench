@@ -51,6 +51,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb new` | Start a new task contract |
 | `/swb lock` · `/swb unlock` | Lock or unlock the contract |
 | `/swb team [on\|off]` | Team mode: Opus designs and reviews, Sonnet builds, Haiku explores; opens the Team tab |
+| `/swb live [port\|stop]` | Start or stop the live web view of the request flow |
 | `/swb team <role> <model> [effort]` | Set a role's model and effort (`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Ask the Opus advisor now |
 | `/swb intent` · `context` · `run` · `verify` | Open that tab |
@@ -197,6 +198,16 @@ Choices are kept per project. The tab also shows the session's current model set
 - If the guard itself fails, only high-risk calls are refused (fail closed); everything else falls back to the normal flow.
 - This is a regex-based workflow control, not a security sandbox.
 
+### Live view
+
+Watch a request flow in a browser: prompts, tool calls and guard decisions, subagents, holds, loop passes and turns.
+
+- `/swb live [port]` starts the server as a child of the session and prints its address (default `http://127.0.0.1:4317`); open it in a browser. `/swb live stop` ends it, and it also ends with the session. To run it yourself: `node <plugin folder>/tools/live.mjs [project] [--port 4317]`.
+- The server creates `.claude/smartworkbench-live.jsonl` in the project; while it exists the plugin appends one JSON line per event and the server streams it to the page (SSE). Stopping the server removes the file and the writes stop. With no server, the plugin only checks that the file exists.
+- The server listens on `127.0.0.1` only. The feed holds the start of each prompt and command summaries, so do not commit it.
+- The page is in English by default. The `한국어` / `EN` button in the top right switches it (remembered in the browser); `http://127.0.0.1:4317/?lang=ko` opens it in Korean.
+- Panels: Opus advisor, user prompt, Sonnet lead, guard decisions (allow / ask / block bars), Haiku dispatcher, worker / explorer / loop, flags and the session log.
+
 ### Project guard file
 
 Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `/smartworkbench policy init` writes an example.
@@ -334,6 +345,7 @@ claude plugin update smartworkbench
 | `/swb new` | 새 작업 계약 시작 |
 | `/swb lock` · `/swb unlock` | 계약 잠금·해제 |
 | `/swb team [on\|off]` | 팀 모드: Sonnet 구축, Haiku 탐색, Opus 검토. Team 탭 열기 |
+| `/swb live [포트\|stop]` | 요청 흐름 실시간 웹 화면 시작·종료 |
 | `/swb team <role> <model> [effort]` | 역할별 모델·effort 지정(`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Opus 조언자에게 바로 묻기 |
 | `/swb intent` · `context` · `run` · `verify` | 해당 탭 열기 |
@@ -478,6 +490,16 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - Block은 툴을 실행하지 않고 이유를 Claude에게 돌려줍니다.
 - Guard 내부 오류 시 High-risk 호출만 막고(fail closed) 나머지는 기본 흐름으로 돌아갑니다.
 - 정규식 기반의 작업 흐름 통제 장치이며 보안 샌드박스가 아닙니다.
+
+### 실시간 보기
+
+요청 흐름(프롬프트, 도구 호출과 가드 판정, 서브에이전트, Hold, 루프, 턴)을 웹 화면으로 실시간 확인합니다.
+
+- `/swb live [포트]` 가 서버를 세션의 자식 프로세스로 띄우고 주소(기본 `http://127.0.0.1:4317`)를 알려 줍니다. 브라우저로 여세요. `/swb live stop` 으로 끄고, 세션이 끝나도 같이 꺼집니다. 직접 실행하려면 `node <플러그인 폴더>/tools/live.mjs [프로젝트 경로] [--port 4317]` 입니다.
+- 서버가 프로젝트의 `.claude/smartworkbench-live.jsonl` 을 만들면 플러그인이 이벤트를 한 줄씩 덧붙이고, 서버가 이를 SSE로 화면에 보냅니다. 서버를 끄면 파일이 지워져 기록도 멈춥니다. 서버가 없을 때 플러그인이 하는 일은 파일 존재 확인뿐입니다.
+- 서버는 `127.0.0.1` 에만 열립니다. 피드에는 프롬프트 앞부분과 명령 요약이 들어 있으므로 커밋하지 마세요.
+- 화면은 기본이 영어입니다. 오른쪽 위의 `한국어` / `EN` 버튼으로 바꾸고(브라우저에 기억됨), `http://127.0.0.1:4317/?lang=ko` 로 열면 처음부터 한글입니다.
+- 패널은 Opus 조언자, 사용자 프롬프트, Sonnet 리드, 가드 판정(allow / ask / block 막대), Haiku 디스패처, worker / explorer / loop, flags, session log 입니다.
 
 ### 프로젝트 Guard 파일
 

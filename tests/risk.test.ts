@@ -17,6 +17,22 @@ describe('risk rules', () => {
     }
   })
 
+  test('a rule reads one line: a push in one line and a flag in another do not make a force push', async () => {
+    const script = 'cat > run.sh <<EOF\ngit push origin main\nEOF\nchmod +x run.sh'
+    expect(classify('Bash', { command: script }).policy).toBe('ask')
+    expect(classify('Bash', { command: 'git push origin main\nchmod +x run.sh' }).policy).toBe('ask')
+    expect(classify('Bash', { command: 'git push origin main\nrm notes.txt -f' }).policy).toBe('ask')
+    expect(classify('Bash', { command: 'echo done\ngit push -f origin main' }).policy).toBe('block')
+    expect(classify('Bash', { command: 'git push origin +main' }).policy).toBe('block')
+  })
+
+  test('a command continued with a backslash at the end of a line is read as one line', async () => {
+    for (const command of ['git push origin main \\\n--force', 'git reset \\\n--hard HEAD~1', 'git push \\\r\n  -f', 'rm \\\n-rf build']) {
+      expect(classify('Bash', { command }).policy).toBe('block')
+    }
+    expect(classify('Bash', { command: 'git push origin main \\\n  --tags' }).policy).toBe('ask')
+  })
+
   test('words that merely mention a secret file or a deploy are not asked', async () => {
     for (const command of ['grep -rn process.env src', 'grep -n "deploy" README.md', 'git commit -m "fix deploy script"', 'cat .env.example', 'head -5 docs/deploy.md']) {
       expect(classify('Bash', { command }).policy).toBe('allow')
