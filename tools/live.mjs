@@ -60,8 +60,9 @@ function pump() {
 const timer = setInterval(pump, 150)
 
 // A page on another site can point its own hostname at 127.0.0.1 (DNS rebinding) and read the feed;
-// only a loopback Host header is served.
-const HOSTS = new Set([`127.0.0.1:${port}`, `localhost:${port}`])
+// only a loopback Host header or a named host the owner trusts (a reverse proxy in front of this server) is served.
+const TRUSTED = ['claude.j2w2.org', ...(process.env.SWB_LIVE_HOSTS ?? '').split(',').map(one => one.trim().toLowerCase()).filter(Boolean)]
+const HOSTS = new Set([`127.0.0.1:${port}`, `localhost:${port}`, ...TRUSTED.flatMap(name => [name, `${name}:80`, `${name}:443`])])
 
 // The page is one file with inline script and style and talks only to this server; anything else it is tricked into loading is refused.
 const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'"
