@@ -33,6 +33,18 @@ export function codexCall(command: string): CodexCall | undefined {
   return { op: hit[1] as CodexOp, write: /\s--write\b/.test(command), background: /\s--background\b/.test(command) }
 }
 
+// The one shape the team setting may allow unasked: node <the detected script> <op> with plain flags and quoted text only.
+// Anything chained, redirected or expanded ($(...), backticks, a variable) is left to the Guard, whose first matching rule
+// would otherwise hide a later one (`... review; git push`) behind this allowance.
+export function isPlainInvocation(command: string, path: string): boolean {
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const head = new RegExp(`^node\\s+(?:"${escaped}"|${escaped})\\s+(?:review|adversarial-review|task)(?=\\s|$)`).exec(command.trim())
+  if (!head) return false
+  const rest = command.trim().slice(head[0].length)
+
+  return /^(?:\s+(?:--(?!write\b)[a-z][a-z-]*|"[^"$`\\\n]*"|'[^'\n]*'))*$/.test(rest)
+}
+
 // Reviews and tasks send code out; the rest only read local job state.
 export function isCodexSend(call: CodexCall): boolean {
   return call.op === 'review' || call.op === 'adversarial-review' || call.op === 'task'

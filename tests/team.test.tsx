@@ -931,6 +931,8 @@ test('with Codex on in team mode: the prompt carries the Codex brief, a review r
   const held = await $.classic.Stop({ stop_hook_active: false })
   expect(held.block).toContain('First run the Codex review once')
 
+  // A chained command is not the plain review: the Guard asks, so the rest of the chain cannot ride on the allowance.
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: `${REVIEW}; git push origin main` }))).toContain('declined')
   await $.tool.call({ tool: 'Bash', command: REVIEW })
   expect(ran).toContain(REVIEW)
   const second = await $.tool.call({ tool: 'Bash', command: REVIEW })

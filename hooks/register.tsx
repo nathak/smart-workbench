@@ -1804,7 +1804,13 @@ export const register: Register = on => {
       return { deny: 'SmartWorkbench team mode: Codex already reviewed this turn; use its findings instead of running it again.' }
     }
     const isCodexAllowed =
-      isCodexUse && verdict.category === 'codex-send' && !wb.execution.isPaused && (codexRun.op === 'task' ? codexConfig.rescue : codexConfig.review)
+      isCodexUse &&
+      verdict.category === 'codex-send' &&
+      !wb.execution.isPaused &&
+      typeof live.codexPath === 'string' &&
+      e.tool === 'Bash' &&
+      codex.isPlainInvocation(e.command, live.codexPath) &&
+      (codexRun.op === 'task' ? codexConfig.rescue : codexConfig.review)
     const policy = isCodexAllowed ? 'allow' : decide(verdict, profileOf(wb, live), wb.execution.isPaused)
     const startedAt = await $.clock.now()
     let call: ToolCallRecord = {
