@@ -63,6 +63,9 @@ const timer = setInterval(pump, 150)
 // only a loopback Host header is served.
 const HOSTS = new Set([`127.0.0.1:${port}`, `localhost:${port}`])
 
+// The page is one file with inline script and style and talks only to this server; anything else it is tricked into loading is refused.
+const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'"
+
 const server = createServer((req, res) => {
   if (!HOSTS.has((req.headers.host ?? '').toLowerCase())) {
     res.writeHead(403).end()
@@ -80,7 +83,7 @@ const server = createServer((req, res) => {
   if (req.url === '/' || req.url?.startsWith('/?')) {
     try {
       const html = readFileSync(page)
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': CSP })
       res.end(html)
     } catch {
       res.writeHead(500).end()

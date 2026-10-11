@@ -37,6 +37,16 @@ function follow() {
   return { lines, close: () => req.destroy() }
 }
 
+function headerOf(path, name) {
+  return new Promise(done => {
+    const req = get({ host: '127.0.0.1', port, path, headers: { host: `127.0.0.1:${port}` } }, res => {
+      done(res.headers[name])
+      res.resume()
+    })
+    req.on('error', () => done(undefined))
+  })
+}
+
 function request(path, host) {
   return new Promise(done => {
     const req = get({ host: '127.0.0.1', port, path, headers: { host } }, res => {
@@ -68,6 +78,7 @@ try {
   check(events.body.split('data: ').length === 3, 'replays each appended line once')
   check((await request('/', `evil.test:${port}`)).status === 403, 'refuses a foreign Host header')
   check((await request('/', `127.0.0.1:${port}`)).status === 200, 'serves the page on a loopback Host')
+  check(await headerOf('/', 'content-security-policy').then(value => value?.includes("default-src 'none'")), 'sends a content security policy with the page')
 
   const second = launch()
   for (let i = 0; i < 40 && second.out.code === undefined; i++) await sleep(100)
