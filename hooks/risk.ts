@@ -285,7 +285,7 @@ export function classify(tool: string, input: unknown): Verdict {
   }
 
   if (EDIT_TOOLS.has(tool)) {
-    const path = String(args.file_path ?? args.notebook_path ?? '')
+    const path = normalisePath(String(args.file_path ?? args.notebook_path ?? ''))
 
     if (GUARD_FILE.test(path)) {
       return { category: 'guard-policy', risk: 'medium', policy: 'ask', reason: 'changes the project guard policy' }
@@ -297,7 +297,7 @@ export function classify(tool: string, input: unknown): Verdict {
   }
 
   if (READ_TOOLS.has(tool)) {
-    const path = String(args.file_path ?? '')
+    const path = normalisePath(String(args.file_path ?? ''))
 
     return tool === 'Read' && SECRET_PATH.test(path)
       ? { category: 'secret-output', risk: 'medium', policy: 'ask', reason: 'reads a secrets file' }
@@ -348,12 +348,41 @@ export function summarize(tool: string, input: unknown): string {
 // Commands whose meaning sits in two subcommand words (gh pr create, kubectl rollout restart).
 const TWO_WORDS = new Set(['gh', 'kubectl', 'docker', 'aws', 'gcloud', 'az', 'helm', 'fly', 'vercel', 'firebase'])
 const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'exec'])
+const ARGUMENT_WRAPPERS = new Set(['timeout', 'nice'])
+
+// Folds `.`, empty segments and `..` out of a path as text, so `.claude/./x` and `src/../secrets/k` cannot dodge a path rule.
+// No file system access: symlinks are not followed.
+export function normalisePath(path: string): string {
+  const absolute = path.startsWith('/')
+  const out: string[] = []
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part !== '..') out.push(part)
+    else if (out.length > 0 && out[out.length - 1] !== '..') out.pop()
+    else if (!absolute) out.push('..')
+  }
+
+  return (absolute ? '/' : '') + out.join('/')
+}
+
+// timeout and nice take their own arguments before the command they run.
+const FLAG_VALUE = /^(?:-[skn]|--(?:signal|kill-after|adjustment))$/
+
+function dropWrapper(words: string[]): void {
+  const wrapper = words.shift()
+  while (words.length > 0 && (words[0] ?? '').startsWith('-')) {
+    const flag = words.shift() ?? ''
+    if (FLAG_VALUE.test(flag)) words.shift()
+  }
+  if (wrapper === 'timeout' && /^\d+(?:\.\d+)?[smhd]?$/.test(words[0] ?? '')) words.shift()
+}
 
 // "FOO=1 sudo git push origin main" → "git push"; flags and later arguments are dropped.
 export function commandPrefix(segment: string): string | undefined {
   const words = segment.trim().split(/\s+/).filter(Boolean)
-  while (words.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? '') || WRAPPERS.has(words[0] ?? ''))) {
-    words.shift()
+  while (words.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? '') || WRAPPERS.has(words[0] ?? '') || ARGUMENT_WRAPPERS.has(words[0] ?? ''))) {
+    if (ARGUMENT_WRAPPERS.has(words[0] ?? '')) dropWrapper(words)
+    else words.shift()
   }
   const [command, ...rest] = words
   if (!command) return undefined

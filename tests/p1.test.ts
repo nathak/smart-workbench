@@ -4,7 +4,7 @@ import type { Changed, EvidenceRecord } from '../types'
 import { coverageOf, hunkLabel, lastCheckedEdit, parseDiff } from '../hooks/diff'
 import { statusOf } from '../hooks/evidence'
 import { categoryOf, suggestionsOf } from '../hooks/files'
-import { applyRule, globToRegExp, matchRule, parsePolicy } from '../hooks/policy'
+import { applyRule, globToRegExp, matchRule, parsePolicy, repoPath } from '../hooks/policy'
 import { classify, decide } from '../hooks/risk'
 
 describe('project guard file', () => {
@@ -153,5 +153,16 @@ describe('diff regions and evidence', () => {
     expect(statusOf(condition, [pass], 100)).toBe('verified')
     expect(statusOf(condition, [pass], 250)).toBe('observed')
     expect(statusOf(condition, [pass, { ...pass, id: 'b', at: 300 }], 250)).toBe('verified')
+  })
+})
+
+describe('repository paths', () => {
+  test('dot-dot and sibling folders are folded before a project rule or a team gate sees the path', async () => {
+    expect(repoPath('src/a.ts', '/w')).toBe('src/a.ts')
+    expect(repoPath('/w/src/../secrets/k', '/w')).toBe('secrets/k')
+    expect(repoPath('/w/../x', '/w')).toBe(undefined)
+    expect(repoPath('/w2/a', '/w')).toBe(undefined)
+    const rules = parsePolicy(JSON.stringify({ rules: [{ tool: 'Edit', path: 'secrets/**', policy: 'block' }] })).rules
+    expect(matchRule(rules, 'Edit', { file_path: '/w/src/../secrets/k' }, '/w')?.policy).toBe('block')
   })
 })

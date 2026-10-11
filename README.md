@@ -183,7 +183,7 @@ Choices are kept per project. The tab also shows the session's current model set
 - `/swb loop 5 fix the lint errors; run the tests` runs five passes; `inf` (or `forever`, `무한`) runs until stopped. A count is 1 to 1000. Items split on `;` and are all done, in order, on every pass.
 - A pass counts when the turn really ends: the loop uses the same Stop hold as team mode's final check, so with team mode on a pass that changed code goes through the Opus final check first, then the next pass starts.
 - `/swb loop status` shows the passes done; `/swb loop stop` ends it after the current turn. A prompt you type yourself also ends it, so you always take the session back.
-- To stop an `inf` loop: `/swb loop stop`, or press Esc and type any prompt. Each pass costs a full turn (and, with team mode, an Opus final check when code changed), so prefer a count unless you are watching.
+- To stop an `inf` loop: `/swb loop stop`, or press Esc and type any prompt. An `inf` loop also ends by itself after 3 passes in a row that change no file with Edit, Write, MultiEdit or NotebookEdit; changes made only by shell commands do not count. Each pass costs a full turn (and, with team mode, an Opus final check when code changed), so prefer a count unless you are watching.
 - Loop state lives in the session only; a restart never resumes one. The audit log records `loop.start`, `loop.pass`, `loop.done`, `loop.stop` and `loop.cancel`.
 
 ### Built-in guard rules (Balanced)
@@ -214,7 +214,7 @@ Choices are kept per project. The tab also shows the session's current model set
 Watch a request flow in a browser: prompts, tool calls and guard decisions, subagents, holds, loop passes and turns.
 
 - `/swb live [port]` starts the server as a child of the session and prints its address (default `http://127.0.0.1:4317`); open it in a browser. `/swb live stop` ends it, and it also ends with the session. To run it yourself: `node <plugin folder>/tools/live.mjs [project] [--port 4317]`.
-- The server creates `.claude/smartworkbench-live.jsonl` in the project; while it exists the plugin appends one JSON line per event and the server streams it to the page (SSE). Stopping the server removes the file and the writes stop. With no server, the plugin only checks that the file exists.
+- The server creates `.claude/smartworkbench-live.jsonl` in the project; while it exists the plugin appends one JSON line per event and the server streams it to the page (SSE). The server empties the file in place once it has read past 8 MB. Stopping the server removes the file and the writes stop. With no server, the plugin only checks that the file exists.
 - The server listens on `127.0.0.1` only. The feed holds the start of each prompt and command summaries, so do not commit it.
 - The page is in English by default. The `한국어` / `EN` button in the top right switches it (remembered in the browser); `http://127.0.0.1:4317/?lang=ko` opens it in Korean.
 - Panels: Opus advisor, user prompt, Sonnet lead, guard decisions (allow / ask / block bars), Haiku dispatcher, worker / explorer / loop, flags and the session log.
@@ -497,7 +497,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - `/swb loop 5 린트 오류 고치기; 테스트 실행` 은 5회 반복하고, `inf`(또는 `forever`, `무한`)는 멈출 때까지 반복합니다. 횟수는 1~1000입니다. 항목은 `;` 로 나누며, 매 회차에 순서대로 모두 수행합니다.
 - 회차는 턴이 실제로 끝날 때 셉니다. 팀 모드의 최종 점검과 같은 Stop 지점을 쓰므로, 팀 모드에서는 코드를 바꾼 회차가 Opus 최종 점검을 먼저 거친 뒤 다음 회차가 시작됩니다.
 - `/swb loop status` 로 진행 횟수를 보고, `/swb loop stop` 으로 현재 턴이 끝난 뒤 종료합니다. 직접 프롬프트를 입력해도 종료되어 세션은 항상 사용자에게 돌아옵니다.
-- `inf` 루프를 멈추려면 `/swb loop stop`, 또는 Esc 를 누르고 아무 프롬프트나 입력하세요. 한 회차가 한 턴 분량의 비용(팀 모드에서 코드를 바꾸면 Opus 최종 점검 포함)이므로 지켜보지 않을 때는 횟수를 지정하세요.
+- `inf` 루프를 멈추려면 `/swb loop stop`, 또는 Esc 를 누르고 아무 프롬프트나 입력하세요. `inf` 루프는 Edit·Write·MultiEdit·NotebookEdit 로 파일을 바꾸지 않은 회차가 3번 이어지면 스스로 끝납니다(셸 명령으로만 바꾼 것은 세지 않습니다). 한 회차가 한 턴 분량의 비용(팀 모드에서 코드를 바꾸면 Opus 최종 점검 포함)이므로 지켜보지 않을 때는 횟수를 지정하세요.
 - 루프 상태는 세션에만 있어 재시작해도 이어지지 않습니다. 감사 로그에 `loop.start`·`loop.pass`·`loop.done`·`loop.stop`·`loop.cancel` 이 남습니다.
 
 ### 기본 Guard 규칙 (Balanced)
@@ -528,7 +528,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 요청 흐름(프롬프트, 도구 호출과 가드 판정, 서브에이전트, Hold, 루프, 턴)을 웹 화면으로 실시간 확인합니다.
 
 - `/swb live [포트]` 가 서버를 세션의 자식 프로세스로 띄우고 주소(기본 `http://127.0.0.1:4317`)를 알려 줍니다. 브라우저로 여세요. `/swb live stop` 으로 끄고, 세션이 끝나도 같이 꺼집니다. 직접 실행하려면 `node <플러그인 폴더>/tools/live.mjs [프로젝트 경로] [--port 4317]` 입니다.
-- 서버가 프로젝트의 `.claude/smartworkbench-live.jsonl` 을 만들면 플러그인이 이벤트를 한 줄씩 덧붙이고, 서버가 이를 SSE로 화면에 보냅니다. 서버를 끄면 파일이 지워져 기록도 멈춥니다. 서버가 없을 때 플러그인이 하는 일은 파일 존재 확인뿐입니다.
+- 서버가 프로젝트의 `.claude/smartworkbench-live.jsonl` 을 만들면 플러그인이 이벤트를 한 줄씩 덧붙이고, 서버가 이를 SSE로 화면에 보냅니다. 서버는 8MB를 넘게 읽으면 파일을 제자리에서 비웁니다. 서버를 끄면 파일이 지워져 기록도 멈춥니다. 서버가 없을 때 플러그인이 하는 일은 파일 존재 확인뿐입니다.
 - 서버는 `127.0.0.1` 에만 열립니다. 피드에는 프롬프트 앞부분과 명령 요약이 들어 있으므로 커밋하지 마세요.
 - 화면은 기본이 영어입니다. 오른쪽 위의 `한국어` / `EN` 버튼으로 바꾸고(브라우저에 기억됨), `http://127.0.0.1:4317/?lang=ko` 로 열면 처음부터 한글입니다.
 - 패널은 Opus 조언자, 사용자 프롬프트, Sonnet 리드, 가드 판정(allow / ask / block 막대), Haiku 디스패처, worker / explorer / loop, flags, session log 입니다.

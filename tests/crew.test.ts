@@ -147,3 +147,16 @@ describe('codex plugin', () => {
     expect(ok(`node\t${path}\treview\t--wait`)).toBe(true)
   })
 })
+
+describe('failure keys', () => {
+  test('different scripts and wrapped commands keep their own count', async () => {
+    expect(crew.failureKey('Bash', { command: 'npm run lint' })).not.toBe(crew.failureKey('Bash', { command: 'npm run test' }))
+    expect(crew.failureKey('Bash', { command: 'timeout 60 pytest' })).not.toBe(crew.failureKey('Bash', { command: 'timeout 60 npm test' }))
+    expect(crew.failureKey('Bash', { command: 'npm run lint -- --fix' })).toBe(crew.failureKey('Bash', { command: 'npm run lint' }))
+  })
+
+  test('the team context states the real size limits', async () => {
+    expect(crew.TEAM_CONTEXT).toContain(`more than ${crew.SMALL_EDIT_LINES} lines`)
+    expect(crew.DESIGN_FIRST).toContain(`${crew.SMALL_TURN_LINES} lines in this turn`)
+  })
+})

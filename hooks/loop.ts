@@ -60,7 +60,10 @@ function label(loop: LoopState, n: number): string {
 export function iterationPrompt(loop: LoopState): string {
   const n = loop.done + 1
   const list = loop.items.length === 1 ? loop.items[0] : loop.items.map((one, i) => `${i + 1}. ${one}`).join('\n')
-  const ends = loop.limit === null ? 'It repeats until the person runs /swb loop stop.' : `It repeats ${loop.limit} times.`
+  const ends =
+    loop.limit === null
+      ? `It repeats until the person runs /swb loop stop, or until ${IDLE_LIMIT} passes in a row change no file with an edit tool.`
+      : `${loop.limit} passes in all.`
 
   return [
     `SmartWorkbench loop, pass ${label(loop, n)}. ${ends}`,
@@ -81,7 +84,7 @@ export function advance(loop: LoopState, edited: boolean, now: number): Step {
     return { loop: undefined, text: `Loop finished: ${next.done} of ${loop.limit} passes done.` }
   }
   if (loop.limit === null && idle >= IDLE_LIMIT) {
-    return { loop: undefined, text: `Loop stopped after ${next.done} passes: the last ${IDLE_LIMIT} changed no file.` }
+    return { loop: undefined, text: `Loop stopped after ${next.done} passes: the last ${IDLE_LIMIT} changed no file with an edit tool (changes made only by shell commands do not count).` }
   }
 
   return { loop: next, reason: iterationPrompt(next) }
@@ -93,5 +96,5 @@ export function describe(loop: LoopState | undefined): string {
   const what = loop.items.length === 1 ? loop.items[0] : `${loop.items.length} items`
   const where = loop.limit === null ? `${loop.done} passes done, no limit` : `${loop.done} of ${loop.limit} passes done`
 
-  return `Loop running: ${where}. ${what}\n/swb loop stop to end it.`
+  return `${loop.pending ? 'Loop set, pass 1 not started' : 'Loop running'}: ${where}. ${what}\n/swb loop stop to end it.`
 }

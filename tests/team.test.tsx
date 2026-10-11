@@ -1003,3 +1003,32 @@ test('the Team tab says so when the Codex plugin is not found', async ($, on) =>
   await ui.press({ key: 'tab-team' })
   expect(await ui.find({ type: 'Text', text: /Codex plugin not found/ })).toBeDefined()
 })
+
+test('a relative path or a dot-dot path cannot slip past the design gate', async ($, on) => {
+  world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'build it', ...COMPOSER })
+
+  const sibling = await $.tool.call({ tool: 'Write', file_path: `${CWD}/../elsewhere/plan.md`, content: BIG })
+  expect(JSON.stringify(sibling)).not.toContain('no design from')
+  const relative = await $.tool.call({ tool: 'Edit', file_path: 'src/auth.js', old_string: '30', new_string: BIG })
+  expect(JSON.stringify(relative)).toContain('no design from')
+})
+
+test('a loop stopped while the Stop hook was working stays stopped, and Esc before pass 1 cancels the loop', async ($, on) => {
+  world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'loop 3 x', ...COMMAND })
+  await $.prompt.submit({ text: 'go', ...COMPOSER })
+  await Promise.all([$.classic.Stop({ stop_hook_active: false }), $.command.run({ command: 'swb', args: 'loop stop', ...COMMAND })])
+  expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('No loop is running')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+
+  await $.command.run({ command: 'swb', args: 'loop 2 y', ...COMMAND })
+  expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('not started')
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't9', reason: 'aborted' })
+  expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('No loop is running')
+})
