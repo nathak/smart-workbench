@@ -847,3 +847,50 @@ test('the live feed pairs every started call with an end, a blocked one too, and
   expect(ended.map(one => one.outcome)).toEqual(['blocked', 'ok'])
   expect(typeof ended[1]?.ms).toBe('number')
 })
+
+const CODEX_DIR = '/home/u/.claude/plugins/cache/openai-codex/codex/1.0.6'
+const CODEX_FILES = {
+  '/home/u/.claude/plugins/installed_plugins.json': JSON.stringify({ plugins: { 'codex@openai-codex': [{ installPath: CODEX_DIR }] } }),
+  [`${CODEX_DIR}/scripts/codex-companion.mjs`]: '',
+}
+const CODEX_RUNS = {
+  'printenv HOME': { exitCode: 0, stdout: '/home/u\n' },
+  [`node ${CODEX_DIR}/scripts/codex-companion.mjs setup --json`]: {
+    exitCode: 0,
+    stdout: JSON.stringify({ ready: true, codex: { detail: 'codex-cli 0.156.1' }, auth: { loggedIn: true, detail: 'ChatGPT login active' } }),
+  },
+}
+
+test('/swb team codex turns Codex on only with consent and an installed plugin, and off again', async ($, on) => {
+  const { workbench } = world(on, { files: CODEX_FILES, commands: CODEX_RUNS })
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+
+  expect((await $.command.run({ command: 'swb', args: 'team codex', ...COMMAND })).text).toContain('Codex off')
+  expect((await $.command.run({ command: 'swb', args: 'team codex review on', ...COMMAND })).text).toContain('Turn Codex on first')
+  expect((await $.command.run({ command: 'swb', args: 'team codex check', ...COMMAND })).text).toContain('reports ready')
+
+  const on1 = await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })
+  expect(on1.text).toContain('Codex on')
+  expect(workbench().team?.codex).toEqual({ enabled: true, review: true, rescue: false })
+
+  await $.command.run({ command: 'swb', args: 'team codex rescue on', ...COMMAND })
+  expect(workbench().team?.codex?.rescue).toBe(true)
+
+  await $.command.run({ command: 'swb', args: 'team codex off', ...COMMAND })
+  expect(workbench().team?.codex?.enabled).toBe(false)
+})
+
+test('Codex stays off when the person declines or the plugin is not installed', async ($, on) => {
+  const declined = world(on, { files: CODEX_FILES, commands: CODEX_RUNS, ask: () => 'Cancel' })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })).text).toContain('stays off')
+  expect(declined.workbench()?.team?.codex?.enabled ?? false).toBe(false)
+})
+
+test('Codex stays off when no plugin list is found', async ($, on) => {
+  const { workbench } = world(on, { commands: { 'printenv HOME': { exitCode: 0, stdout: '/home/u\n' } } })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })).text).toContain('not found')
+  expect(workbench()?.team?.codex?.enabled ?? false).toBe(false)
+})
