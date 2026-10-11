@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import * as crew from '../hooks/crew'
+import * as codex from '../hooks/codex'
 
 describe('team mode decisions', () => {
   test('the same command failing twice in a row points Claude at the advisor once', async () => {
@@ -89,3 +90,36 @@ describe('design first', () => {
   })
 })
 
+
+describe('codex plugin', () => {
+  test('is off until the person turns it on, and only counts with team mode', () => {
+    expect(codex.codexOf(undefined)).toEqual({ enabled: false, review: false, rescue: false })
+    expect(codex.isCodexOn(codex.setCodex({ enabled: true }, { enabled: true, review: true }))).toBe(true)
+    expect(codex.isCodexOn(codex.setCodex({ enabled: false }, { enabled: true }))).toBe(false)
+    expect(codex.setCodex(undefined, { review: true }).enabled).toBe(false)
+  })
+
+  test('recognises the companion script and what it is asked to do', () => {
+    expect(codex.codexCall('node /home/u/.claude/plugins/cache/openai-codex/codex/1.0.6/scripts/codex-companion.mjs review --wait')).toEqual({ op: 'review', write: false, background: false })
+    expect(codex.codexCall('node "${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task --write --background "fix it"')).toEqual({ op: 'task', write: true, background: true })
+    expect(codex.codexCall('node x.mjs review')).toBeUndefined()
+    expect(codex.codexCall('node /a/codex-companion.mjs bogus')).toBeUndefined()
+    expect(codex.codexCall('grep codex-companion.mjs README.md')).toBeUndefined()
+  })
+
+  test('finds the installed plugin and treats damage as unknown', () => {
+    const json = JSON.stringify({ plugins: { 'other@x': [{ installPath: '/x' }], 'codex@openai-codex': [{ installPath: '/home/u/.claude/plugins/cache/openai-codex/codex/1.0.6' }] } })
+    expect(codex.companionFrom(json)).toBe('/home/u/.claude/plugins/cache/openai-codex/codex/1.0.6/scripts/codex-companion.mjs')
+    expect(codex.companionFrom('{not json')).toBeUndefined()
+    expect(codex.companionFrom(JSON.stringify({ plugins: { 'codex@x': [{ installPath: 'relative' }] } }))).toBeUndefined()
+  })
+
+  test('one review per turn', () => {
+    const track = { failures: {}, nudged: [], advisorRuns: 0, turnStartedAt: 100 }
+    expect(codex.hasReviewedThisTurn(track)).toBe(false)
+    const ran = codex.codexRan(track, 150)
+    expect(codex.hasReviewedThisTurn(ran)).toBe(true)
+    expect(ran.codexRuns).toBe(1)
+    expect(codex.hasReviewedThisTurn({ ...ran, turnStartedAt: 200 })).toBe(false)
+  })
+})
