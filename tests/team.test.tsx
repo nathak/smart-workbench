@@ -894,3 +894,65 @@ test('Codex stays off when no plugin list is found', async ($, on) => {
   expect((await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })).text).toContain('not found')
   expect(workbench()?.team?.codex?.enabled ?? false).toBe(false)
 })
+
+const REVIEW = `node ${CODEX_DIR}/scripts/codex-companion.mjs review --wait`
+
+test('with Codex on in team mode: the prompt carries the Codex brief, a review runs unasked once per turn, and the final check names it', async ($, on) => {
+  const ran: string[] = []
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, {
+    files: { ...CODEX_FILES, '.claude/smartworkbench-live.jsonl': '' },
+    commands: { ...CODEX_RUNS, [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } },
+    ran,
+    processed: writes,
+    ask: labels => (labels.includes('Turn on') ? 'Turn on' : 'Block'),
+  })
+  let context = ''
+  on('prompt.submit', ($, e) => {
+    context = (e.context ?? []).join('\n')
+    return { text: e.text, context: e.context }
+  })
+  on('classic.Stop', () => ({}))
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+
+  await $.prompt.submit({ text: 'turn one', ...COMPOSER })
+  expect(context).not.toContain('smartworkbench_codex')
+  // Off: a review is a guard question, and this test blocks it.
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: REVIEW }))).toContain('declined')
+  expect(ran).toEqual([])
+
+  await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })
+  await $.prompt.submit({ text: 'turn two', ...COMPOSER })
+  expect(context).toContain('<smartworkbench_codex>')
+  expect(context).toContain(`node "${CODEX_DIR}/scripts/codex-companion.mjs" review --wait`)
+
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '30' })
+  const held = await $.classic.Stop({ stop_hook_active: false })
+  expect(held.block).toContain('First run the Codex review once')
+
+  await $.tool.call({ tool: 'Bash', command: REVIEW })
+  expect(ran).toContain(REVIEW)
+  const second = await $.tool.call({ tool: 'Bash', command: REVIEW })
+  expect(JSON.stringify(second)).toContain('Codex already reviewed this turn')
+
+  // A write still asks, and the feed marks Codex calls.
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: `node ${CODEX_DIR}/scripts/codex-companion.mjs task --write "x"` }))).toContain('declined')
+  const lines = writes.filter(one => one.argv[0] === 'tee').map(one => JSON.parse(one.stdin ?? '{}') as Record<string, unknown>)
+  expect(lines.filter(one => one.kind === 'tool.start' && one.codex === 'review').length).toBeGreaterThan(0)
+  expect(lines.some(one => one.kind === 'tool.start' && one.codex === 'task' && one.codexWrite === true)).toBe(true)
+  expect(lines.find(one => one.kind === 'prompt' && one.codex === true)).toBeDefined()
+})
+
+test('Codex review stays a question while a loop pass runs, and without team mode', async ($, on) => {
+  const ran: string[] = []
+  world(on, { files: CODEX_FILES, commands: CODEX_RUNS, ran, ask: labels => (labels.includes('Turn on') ? 'Turn on' : 'Block') })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'team off', ...COMMAND })
+  await $.prompt.submit({ text: 'no team', ...COMPOSER })
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: REVIEW }))).toContain('declined')
+  expect(ran).toEqual([])
+})

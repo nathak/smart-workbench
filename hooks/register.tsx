@@ -1687,7 +1687,11 @@ export const register: Register = on => {
     }
 
     const { blocks: contract, warnings } = await injection($, wb)
-    const blocks = wb.team?.enabled ? [...contract, crew.TEAM_CONTEXT] : contract
+    const codexPath = (await read($, liveAtom)).codexPath
+    const codexConfig = codex.codexOf(wb.team)
+    // Never inside a loop: a review per pass would run on the person's Codex account without anyone watching.
+    const codexBlock = codex.isCodexOn(wb.team) && codexPath && !((await read($, liveAtom)).loop && e.origin.kind === 'plugin') ? [codex.codexContext(codexPath, codexConfig)] : []
+    const blocks = wb.team?.enabled ? [...contract, crew.TEAM_CONTEXT, ...codexBlock] : contract
     // A prompt the person types takes the session back: a running loop ends (its own passes come from the Stop hook).
     // A loop whose first pass never went out (no turn.complete after the command) rides on that prompt instead.
     let loopBlocks: string[] = []
@@ -1714,7 +1718,7 @@ export const register: Register = on => {
     // Own work only, for checking the performance targets with --debug.
     $.ui.log(`SmartWorkbench timing: prompt.submit ${(await $.clock.now()) - startedAt}ms before the prompt went on`, { to: 'debug' })
 
-    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(e.text.replace(/\s+/g, ' '), 120), team: wb.team?.enabled === true, loop: loopBlocks.length > 0 })
+    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(e.text.replace(/\s+/g, ' '), 120), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
 
     const all = [...blocks, ...loopBlocks]
 
@@ -1757,7 +1761,19 @@ export const register: Register = on => {
     const live = await read($, liveAtom)
     const cwd = await $.session.cwd()
     const verdict = applyRule(classify(e.tool, e), live.policy ? matchRule(live.policy.rules, e.tool, e, cwd) : undefined)
-    const policy = decide(verdict, profileOf(wb, live), wb.execution.isPaused)
+    // Codex through the companion script: the person's team setting lets a read-only review (or a rescue task) run without
+    // asking, once per turn. A write, a transfer, a paused session and a project rule that blocks still decide for themselves.
+    const codexRun = e.tool === 'Bash' ? codex.codexCall(e.command) : undefined
+    const codexConfig = codex.codexOf(wb.team)
+    const isCodexUse = isTeam && codexConfig.enabled && codexRun !== undefined
+    if (isCodexUse && codexRun.op !== 'task' && codexRun.op !== 'status' && verdict.category === 'codex-send' && codex.hasReviewedThisTurn((live.track ?? crew.EMPTY_TRACK))) {
+      await audit($, 'team.codex-repeat')
+
+      return { deny: 'SmartWorkbench team mode: Codex already reviewed this turn; use its findings instead of running it again.' }
+    }
+    const isCodexAllowed =
+      isCodexUse && verdict.category === 'codex-send' && !wb.execution.isPaused && (codexRun.op === 'task' ? codexConfig.rescue : codexConfig.review)
+    const policy = isCodexAllowed ? 'allow' : decide(verdict, profileOf(wb, live), wb.execution.isPaused)
     const startedAt = await $.clock.now()
     let call: ToolCallRecord = {
       id: e.tool_use_id ?? `call-${startedAt}`,
@@ -1766,7 +1782,7 @@ export const register: Register = on => {
       risk: verdict.risk,
       policy,
       category: verdict.category,
-      ...(verdict.reason ? { reason: verdict.reason } : {}),
+      ...(verdict.reason ? { reason: isCodexAllowed ? 'allowed by the team Codex setting' : verdict.reason } : {}),
       outcome: 'running',
       startedAt,
       ...(e.agentId ? { agentId: e.agentId } : {}),
@@ -1785,6 +1801,7 @@ export const register: Register = on => {
       policy: isSessionAllowed ? 'allow' : policy,
       ...(e.agentId ? { agent: e.agentId } : {}),
       ...(typeof sub === 'string' ? { subagent: sub } : {}),
+      ...(codexRun ? { codex: codexRun.op, ...(codexRun.background ? { codexBg: true } : {}), ...(codexRun.write ? { codexWrite: true } : {}) } : {}),
     })
 
     if (policy === 'block') {
@@ -1873,6 +1890,11 @@ export const register: Register = on => {
 
     if (isOk && path === POLICY_PATH && model.isEditTool(e.tool)) {
       await loadPolicy($)
+    }
+
+    if (isTeam && isOk && codexRun && (codexRun.op === 'review' || codexRun.op === 'adversarial-review')) {
+      await updateTrack($, track => codex.codexRan(track, endedAt))
+      await audit($, 'team.codex-review', { id: call.id })
     }
 
     if (e.tool === 'Agent' && e.subagent_type === crew.ADVISOR && isOk) {
@@ -1989,7 +2011,9 @@ export const register: Register = on => {
         if (running?.continuing) await setLive($, current => ({ ...current, loop: current.loop && { ...current.loop, continuing: false } }))
         await audit($, 'team.final-check-required')
 
-        return { ...result, block: crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text)) }
+        const wantsCodex = codex.isCodexOn(wb.team) && codex.codexOf(wb.team).review && !!live.codexPath && !running && !codex.hasReviewedThisTurn(track)
+
+        return { ...result, block: crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text), wantsCodex) }
       }
     }
 
