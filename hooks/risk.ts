@@ -71,7 +71,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     pattern: re(
-      String.raw`${AT}dd\s[^;&|\n]*\bof=\/dev\/(?!null\b|zero\b|stdout\b|stderr\b|tty\b|fd\/|shm\/)|${CMD}mkfs(?:\.\w+)?\s+(?!(?:-h|--help|-V|--version)(?:\s|$))(?!(?![^;&|\n]*(?:\/dev\/|\$|\`))[^;&|\n]*\.(?:img|raw|iso|bin|qcow2)["']?\s*(?:$|[;&|]))[^\s;&|]|>\s*\/dev\/(?:sd[a-z]|hd[a-z]|vd[a-z]|xvd[a-z]|nvme\d|mmcblk\d|disk\d)`,
+      String.raw`${AT}dd\s[^;&|\n]*\bof=\/dev\/(?!null\b|zero\b|stdout\b|stderr\b|tty\b|fd\/|shm\/)|${CMD}mkfs(?:\.\w+)?\s+(?!(?:-h|--help|-V|--version)(?:\s|$))[^\s;&|]|>\s*\/dev\/(?:sd[a-z]|hd[a-z]|vd[a-z]|xvd[a-z]|nvme\d|mmcblk\d|disk\d)`,
     ),
     reason: 'overwrites a disk or device',
   },
