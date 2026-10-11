@@ -56,7 +56,7 @@ It never reads environment variables and never stores the conversation or Live p
 
 ### Network
 
-None of its own. `/swb live` starts a local web server that listens on `127.0.0.1` only (default port 4317) and answers only requests whose Host is `127.0.0.1` or `localhost`; it makes no outgoing requests. `gh` reaches GitHub only when you run `/swb ci` or `/swb issue` with a GitHub reference.
+None of its own. `/swb live` starts a local web server that listens on `127.0.0.1` only (default port 4317) and answers only requests whose Host is `127.0.0.1`, `localhost`, `claude.j2w2.org` or a name listed in `SWB_LIVE_HOSTS` (comma separated); it makes no outgoing requests. `gh` reaches GitHub only when you run `/swb ci` or `/swb issue` with a GitHub reference.
 
 ### Model
 
@@ -116,7 +116,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 ### 네트워크
 
-자체 요청은 없습니다. `/swb live`는 `127.0.0.1`에서만 듣는 로컬 웹 서버(기본 포트 4317)를 띄우며, Host가 `127.0.0.1` 또는 `localhost`인 요청에만 응답하고 밖으로 나가는 요청은 없습니다. `gh`가 GitHub에 접속하는 것은 `/swb ci` 또는 GitHub 이슈 번호로 `/swb issue`를 실행할 때뿐입니다.
+자체 요청은 없습니다. `/swb live`는 `127.0.0.1`에서만 듣는 로컬 웹 서버(기본 포트 4317)를 띄우며, Host가 `127.0.0.1`, `localhost`, `claude.j2w2.org` 또는 `SWB_LIVE_HOSTS`(쉼표 구분)에 적은 이름인 요청에만 응답하고 밖으로 나가는 요청은 없습니다. `gh`가 GitHub에 접속하는 것은 `/swb ci` 또는 GitHub 이슈 번호로 `/swb issue`를 실행할 때뿐입니다.
 
 ### 모델
 
