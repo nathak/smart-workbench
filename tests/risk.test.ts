@@ -98,6 +98,9 @@ describe('risk rules', () => {
       'git commit -m "x" && git push -f',
       "git commit -m \"$(cat <<'EOF'\nm\nEOF\nrm -rf x\nEOF\n)\"",
       'git commit -m "a\nb git push -f"',
+      // A search option that runs a program, and a -m that is not a message flag of git or gh, keep their quotes read.
+      'rg --pre "git push -f" x',
+      'tool -m "rm -rf x"',
     ]) {
       expect(policyOf(command)).toBe('block')
     }

@@ -101,6 +101,9 @@ const BASH_RULES: readonly Rule[] = [
 const QUOTED = /\\[\s\S]|'[^']*'|"(?:[^"\\]|\\[\s\S])*"/g
 const DATA_FLAG = /(?:^|\s)(?:-[a-zA-Z]*m|--(?:message|title|body|notes|subject|grep))=?$/
 const SEARCH = /^\s*(?:\S*\/)?(?:[ef]?grep|rg|ag|ack)\s|^\s*git\b.*\sgrep\s/
+// A message flag is read as data only for git and gh; a search that can run a program (rg --pre) keeps its quotes read.
+const GIT_OR_GH = /^\s*(?:\S*\/)?(?:git|gh)\b/
+const EXEC_OPTION = /\s(?:--pre\b|--hostname-bin\b|--pager\b|--open-files-in-pager\b|-O\b)/
 const RUNNER = /\b(?:(?:ba|z|da|k)?sh|su|eval|ssh)\b/
 
 // "$(cat <<'EOF' ... EOF ... )": only the heredoc body, with nothing but the closing ")" after it.
@@ -120,8 +123,9 @@ function maskData(command: string): string {
     if (!isPlain && !(match[0] === '"' && isCatHeredoc(inner))) return match
     const before = command.slice(Math.max(0, offset - 256), offset)
     const segment = before.slice(Math.max(...[';', '&', '|', '\n'].map(one => before.lastIndexOf(one))) + 1)
-    if (RUNNER.test(segment)) return match
-    return DATA_FLAG.test(before.trimEnd()) || SEARCH.test(segment) ? match[0] + match[0] : match
+    if (RUNNER.test(segment) || EXEC_OPTION.test(segment)) return match
+    const isMessage = GIT_OR_GH.test(segment) && DATA_FLAG.test(before.trimEnd())
+    return isMessage || SEARCH.test(segment) ? match[0] + match[0] : match
   })
 }
 
