@@ -237,6 +237,8 @@ export type Track = {
   // The last Codex review this session and how many ran.
   codexAt?: number
   codexRuns?: number
+  // The last Codex rescue task, at most one per turn.
+  codexTaskAt?: number
   // Design first: the advisor run that counts as this work's design must be at or after designFrom.
   designFrom?: number
   designDeniedAt?: number

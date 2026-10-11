@@ -134,6 +134,10 @@ describe('codex plugin', () => {
     expect(ok(`node ${path} task "$(cat ~/.ssh/id_rsa)"`)).toBe(false)
     expect(ok(`node ${path} task \`id\``)).toBe(false)
     expect(ok(`node ${path} task --write "x"`)).toBe(false)
+    for (const bad of [`task -write "x"`, `task "--write fix it"`, `task '--write' x`, `task "fix it --write"`, `task --wr\\ite x`, `task --model gpt-5 x`, `task -C /other "x"`, `review --base main`]) {
+      expect([bad, ok(`node ${path} ${bad}`)]).toEqual([bad, false])
+    }
+    expect(ok(`node ${path} task "explain the failing test in src/a.ts"`)).toBe(true)
     expect(ok(`node ${path} review > out.txt`)).toBe(false)
     expect(ok(`node /other/codex-companion.mjs review`)).toBe(false)
     expect(ok(`node ${path} review\ngit push`)).toBe(false)

@@ -936,7 +936,7 @@ test('with Codex on in team mode: the prompt carries the Codex brief, a review r
   await $.tool.call({ tool: 'Bash', command: REVIEW })
   expect(ran).toContain(REVIEW)
   const second = await $.tool.call({ tool: 'Bash', command: REVIEW })
-  expect(JSON.stringify(second)).toContain('Codex already reviewed this turn')
+  expect(JSON.stringify(second)).toContain('Codex already ran this turn')
 
   // A write still asks, and the feed marks Codex calls.
   expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: `node ${CODEX_DIR}/scripts/codex-companion.mjs task --write "x"` }))).toContain('declined')

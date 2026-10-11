@@ -206,7 +206,7 @@ export function matchRule(rules: readonly ProjectRule[], tool: string, input: un
 }
 
 // Built-in checks a checked-in file may tighten but never relax.
-const UNRELAXABLE = new Set(['secret-output', 'secret-file', 'guard-policy'])
+const UNRELAXABLE = new Set(['secret-output', 'secret-file', 'guard-policy', 'codex-send', 'codex-write', 'codex-transfer'])
 
 // A project rule may tighten anything, but cannot loosen a built-in block or a protected check.
 export function applyRule(builtIn: Verdict, rule: ProjectRule | undefined): Verdict {

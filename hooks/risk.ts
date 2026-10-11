@@ -116,7 +116,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'medium',
     policy: 'ask',
     raw: true,
-    pattern: /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+task\b[\s\S]*?\s--write\b/,
+    pattern: /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+task\b[\s\S]*?(?:^|[\s"'])--?w\\?r\\?i\\?t\\?e\b/,
     reason: 'lets Codex edit files outside the guard',
   },
   {

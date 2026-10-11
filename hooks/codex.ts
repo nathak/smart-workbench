@@ -30,7 +30,7 @@ export function codexCall(command: string): CodexCall | undefined {
   const hit = /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+([\w-]+)/.exec(command)
   if (!hit || !OPS.includes(hit[1] ?? '')) return undefined
 
-  return { op: hit[1] as CodexOp, write: /\s--write\b/.test(command), background: /\s--background\b/.test(command) }
+  return { op: hit[1] as CodexOp, write: /(?:^|[\s"'])--?w\\?r\\?i\\?t\\?e\b/.test(command), background: /\s--background\b/.test(command) }
 }
 
 // The one shape the team setting may allow unasked: node <the detected script> <op> with plain flags and quoted text only.
@@ -44,7 +44,20 @@ export function isPlainInvocation(command: string, path: string): boolean {
   const head = new RegExp(`^node[ \\t]+(?:"${escaped}"|${escaped})[ \\t]+(?:review|adversarial-review|task)(?=[ \\t]|$)`).exec(body)
   if (!head) return false
 
-  return /^(?:[ \t]+(?:--(?!write\b)[a-z][a-z-]*|"[^"$`\\]*"|'[^']*'))*$/.test(body.slice(head[0].length))
+  // Only --wait and --background may stand as flags. The plugin re-splits a lone quoted argument and reads dash words in it
+  // as options (`task "--write fix"`), so quoted text must hold no word that starts with a dash.
+  const quoted = (text: string) => !/(^|\s)-/.test(text)
+  const words = body.slice(head[0].length).match(/[ \t]+(?:--[a-z-]+|"[^"]*"|'[^']*'|\S+)/g) ?? []
+
+  return (
+    words.join('') === body.slice(head[0].length) &&
+    words.every(word => {
+      const w = word.trim()
+      if (w === '--wait' || w === '--background') return true
+      if (/^"[^"$`\\]*"$/.test(w) || /^'[^']*'$/.test(w)) return quoted(w.slice(1, -1))
+      return false
+    })
+  )
 }
 
 // Reviews and tasks send code out; the rest only read local job state.
@@ -84,6 +97,14 @@ export function codexContext(path: string, config: CodexConfig): string {
 // One Codex review per turn, so a loop of reviews cannot run on the person's account.
 export function hasReviewedThisTurn(track: Track): boolean {
   return (track.codexAt ?? -1) >= (track.turnStartedAt ?? 0)
+}
+
+export function hasTaskedThisTurn(track: Track): boolean {
+  return (track.codexTaskAt ?? -1) >= (track.turnStartedAt ?? 0)
+}
+
+export function codexTasked(track: Track, at: number): Track {
+  return { ...track, codexTaskAt: at }
 }
 
 export function codexRan(track: Track, at: number): Track {
