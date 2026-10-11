@@ -103,7 +103,18 @@ const DATA_FLAG = /(?:^|\s)(?:-[a-zA-Z]*m|--(?:message|title|body|notes|subject|
 const SEARCH = /^\s*(?:\S*\/)?(?:[ef]?grep|rg|ag|ack)\s|^\s*git\b.*\sgrep\s/
 // A message flag is read as data only for git and gh; a search that can run a program (rg --pre) keeps its quotes read.
 const GIT_OR_GH = /^\s*(?:\S*\/)?(?:git|gh)\b/
-const EXEC_OPTION = /\s(?:--pre\b|--hostname-bin\b|--pager\b|--open-files-in-pager\b|-O\b)/
+// A search keeps a quoted pattern as data only when every option on its command is a known harmless one, so an option that
+// runs a program (rg --pre, git grep -O) or an abbreviation of one keeps the quotes read. Options after the quote count too.
+const SAFE_SHORT = /^-[inwFEPelrRHhcvsqxogtABC]+$/
+const SAFE_LONG = /^--(?:$|(?:regexp|ignore-case|recursive|line-number|word-regexp|fixed-strings|extended-regexp|perl-regexp|count|files-with-matches|include|exclude|exclude-dir|glob|type|hidden|no-ignore|context|after-context|before-context|only-matching|invert-match|with-filename|no-filename)(?:=\S*)?$)/
+
+function hasOnlySafeOptions(words: string): boolean {
+  return words
+    .replace(QUOTED, ' ')
+    .split(/\s+/)
+    .filter(word => word.startsWith('-') && word !== '-')
+    .every(word => SAFE_SHORT.test(word) || SAFE_LONG.test(word))
+}
 const RUNNER = /\b(?:(?:ba|z|da|k)?sh|su|eval|ssh)\b/
 
 // "$(cat <<'EOF' ... EOF ... )": only the heredoc body, with nothing but the closing ")" after it.
@@ -123,9 +134,12 @@ function maskData(command: string): string {
     if (!isPlain && !(match[0] === '"' && isCatHeredoc(inner))) return match
     const before = command.slice(Math.max(0, offset - 256), offset)
     const segment = before.slice(Math.max(...[';', '&', '|', '\n'].map(one => before.lastIndexOf(one))) + 1)
-    if (RUNNER.test(segment) || EXEC_OPTION.test(segment)) return match
+    if (RUNNER.test(segment)) return match
     const isMessage = GIT_OR_GH.test(segment) && DATA_FLAG.test(before.trimEnd())
-    return isMessage || SEARCH.test(segment) ? match[0] + match[0] : match
+    if (isMessage) return match[0] + match[0]
+    // Only a bounded stretch after the quote is checked; a longer one is treated as unsafe, not skipped.
+    const after = command.slice(offset + match.length, offset + match.length + 257).split(/[;&|\n]/)[0] ?? ''
+    return after.length <= 256 && SEARCH.test(segment) && hasOnlySafeOptions(segment + ' ' + after) ? match[0] + match[0] : match
   })
 }
 

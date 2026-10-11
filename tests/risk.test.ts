@@ -101,6 +101,11 @@ describe('risk rules', () => {
       // A search option that runs a program, and a -m that is not a message flag of git or gh, keep their quotes read.
       'rg --pre "git push -f" x',
       'tool -m "rm -rf x"',
+      // Only a short list of harmless search options keeps the pattern data; unknown ones, and options after the quote, do not.
+      'git grep -O "git push -f"',
+      'rg --pr "git push -f" x',
+      'grep "git push -f" file --exec=x',
+      'grep "git push -f" ' + ' '.repeat(300) + '--exec=x',
     ]) {
       expect(policyOf(command)).toBe('block')
     }
