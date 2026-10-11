@@ -89,12 +89,28 @@ section.panel>h4{margin:0;padding:7px 13px 0;font-size:.74rem;font-weight:400;co
 .cmd{margin-top:14px;color:var(--dim);font-size:.78rem;overflow-wrap:anywhere}
 .cmd b{color:var(--guard);font-weight:400}
 .cmd .r{float:right;margin-left:12px}
+#tools{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;padding-bottom:12px;margin:-4px 0 12px;font-size:.74rem}
+#tools button,#tools select{min-height:32px}
+#tools select{font:inherit;font-size:.72rem;background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:3px}
+button.on,button[aria-pressed=true]{color:var(--fg);border-color:var(--fg)}
+.box{cursor:pointer}.box.dim{opacity:.4}#flow .edge.dim{opacity:.2}
+.row.off{display:none}
+#tip{position:fixed;z-index:20;max-width:250px;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:4px 8px;font-size:.72rem;pointer-events:none;overflow-wrap:anywhere}
+#drawer{position:fixed;z-index:15;right:12px;top:12px;bottom:12px;width:340px;max-width:calc(100vw - 24px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+#drawer h3{margin:0 24px 6px 0;font-size:.9rem}
+#dw-close{position:absolute;right:10px;top:10px}
+#dw-stats{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:.74rem;color:var(--dim);margin-bottom:8px;align-items:center}
+#dw-links{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+button.pkt{display:grid;grid-template-columns:54px 58px minmax(0,1fr) auto;gap:8px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:5px 2px;color:var(--fg);align-items:baseline}
+button.pkt .tm{color:var(--faint)}button.pkt .m{overflow-wrap:anywhere}button.pkt .w{color:var(--dim)}
+dl.detail{margin:0;padding:4px 6px 8px;font-size:.72rem;display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+dl.detail dt{color:var(--dim)}dl.detail dd{margin:0;overflow-wrap:anywhere}
 button{font:inherit;font-size:.72rem;background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:3px;padding:1px 9px;cursor:pointer}
 button:hover{color:var(--fg)}
 :focus-visible{outline:2px solid var(--haiku);outline-offset:2px}
 @keyframes in{from{opacity:0}to{opacity:1}}
 .row.new,.flag.new{animation:in .3s}
-@media (max-width:820px){.grid{grid-template-columns:1fr}.rows{grid-template-columns:1fr}.row{grid-template-columns:56px 80px 1fr 60px}}
+@media (max-width:820px){#drawer{left:8px;right:8px;top:auto;bottom:8px;width:auto;max-width:none;max-height:55vh}.grid{grid-template-columns:1fr}.rows{grid-template-columns:1fr}.row{grid-template-columns:56px 80px 1fr 60px}}
 @media (prefers-reduced-motion:reduce){#flow .pk.wait{animation:none}.row.new,.flag.new{animation:none}body.ready .box,body.ready .fill{transition:none}}
 </style>
 </head>
@@ -114,6 +130,13 @@ button:hover{color:var(--fg)}
       <span style="margin-left:auto"><button id="lang" aria-label="language"></button> <button id="clear" data-i="clear"></button></span>
     </div>
 
+    <div class="tools" id="tools">
+      <button id="pause"></button>
+      <button id="replay"></button><select id="replay-n" aria-label="replay"><option>20</option><option>50</option><option>200</option></select>
+      <button id="speed"></button><button id="motion"></button>
+      <button id="chip-allow">allow</button><button id="chip-ask">ask</button><button id="chip-block">block</button><button id="chip-hold">hold</button><button id="chip-loop">loop</button>
+      <button id="focus" hidden></button>
+    </div>
     <div class="grid" id="grid">
       <svg id="flow" aria-hidden="true"></svg>
       <aside class="box opus" id="b-opus">
@@ -173,6 +196,11 @@ button:hover{color:var(--fg)}
       </div>
     </div>
 
+    <aside id="drawer" role="dialog" aria-modal="false" hidden>
+      <button id="dw-close" aria-label="close">✕</button>
+      <h3 id="dw-title"></h3><div id="dw-stats"></div><div id="dw-links"></div><div id="dw-list"></div>
+    </aside>
+    <div id="tip" hidden></div>
     <section class="panel"><h4>── flags · ask · block · hold ──</h4><div class="flags" id="flags"></div></section>
     <section class="panel"><h4>── session log ──</h4><div class="log" id="log"></div></section>
     <div class="cmd"><span class="r" id="count">0 events</span><b id="cwd">~/project $</b> swb live &nbsp;<span id="status-line" data-i="tagline"></span></div>
@@ -342,13 +370,14 @@ function send(route, meta){
   var rec = { seq: ++packetSeq, at: meta.at, kind: cut(meta.kind, 40), path: route.path.slice(), cls: cls, tool: meta.tool, summary: meta.summary, outcome: meta.outcome, ms: meta.ms, session: meta.session, id: meta.id, ev: meta.ev };
   P.push(rec);
   if (P.length > MAX_PACKETS) P.shift();
+  var animate = canAnimate() && passes(cls, route.path);
   hops.forEach(function(h){
     var s = E[h.id];
     s.n++; s.by[cls] = (s.by[cls] || 0) + 1; s.last = rec;
     countEl[h.id].textContent = s.n;
-    if (!canAnimate()) heat(h.id);
+    if (!animate && passes(cls, route.path)) heat(h.id);
   });
-  if (!hops.length || !canAnimate()) return rec;
+  if (!hops.length || !animate) return rec;
   queue.push({ hops: hops, cls: cls, i: 0, t0: 0, el: null, park: route.park ? meta.id : null, rec: rec });
   while (queue.length > MAX_QUEUE) queue.shift();
   kick();
@@ -513,6 +542,7 @@ function render(){
   $('b-loop').classList.toggle('busy', !!S.pass);
   $('count').textContent = S.events + L(' events', '개 이벤트');
   queueLayout();
+  if (!$('drawer').hidden && !$('dw-list').querySelector('.detail:not([hidden])')) drawRefresh();
 }
 
 var HOLD = {
@@ -603,6 +633,203 @@ function handle(ev){
   render();
 }
 
+// ---- ui: pause, replay, speed, filters, and the detail drawer ----
+var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null;
+var FIELDS = ['kind', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id'];
+function store(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+function stored(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function nodeName(n){ return NODE_NAME[n] ? NODE_NAME[n][lang === 'ko' ? 1 : 0] : n; }
+function filtering(){ for (var k in filters) if (filters[k]) return true; return false; }
+function involves(path){
+  if (!focus) return true;
+  return focus.type === 'node' ? path.indexOf(focus.id) >= 0 : crosses(path, focus.id);
+}
+function passes(cls, path){ return (!filtering() || filters[cls]) && involves(path); }
+
+function take(ev){ events.push(ev); if (events.length > 2000) events.shift(); handle(ev); }
+function quiet(list){ replaying = true; list.forEach(take); replaying = false; render(); applyFilter(); }
+function holdBack(ev){ pending.push(ev); if (pending.length > 2000) pending.shift(); syncTools(); }
+
+function setPaused(on){
+  paused = on;
+  if (!on && !playback) quiet(pending.splice(0));
+  syncTools();
+}
+function startPlayback(n){
+  endPlayback(true);
+  var all = events.slice();
+  playback = { tail: all.slice(Math.max(0, all.length - n)), i: 0, timer: 0 };
+  replaying = true; reset(); all.slice(0, Math.max(0, all.length - n)).forEach(handle); replaying = false;
+  render(); syncTools(); stepPlayback();
+}
+function stepPlayback(){
+  var pb = playback;
+  if (!pb) return;
+  if (pb.i >= pb.tail.length) { endPlayback(false); return; }
+  var ev = pb.tail[pb.i++], next = pb.tail[pb.i];
+  handle(ev);
+  var gap = next && next.at && ev.at ? Math.min(1500, Math.max(100, next.at - ev.at)) : 150;
+  pb.timer = setTimeout(stepPlayback, gap / speed);
+}
+// Stopping early applies what is left without animation, so the page ends in the state the feed describes.
+function endPlayback(restart){
+  var pb = playback;
+  if (!pb) return;
+  clearTimeout(pb.timer);
+  playback = null;
+  if (!restart) {
+    replaying = true; pb.tail.slice(pb.i).forEach(handle); replaying = false;
+    render();
+    if (!paused) quiet(pending.splice(0));
+  }
+  syncTools();
+}
+
+var SPEEDS = [0.5, 1, 2, 4];
+function syncTools(){
+  $('pause').textContent = paused ? L('▶ resume', '▶ 재개') + (pending.length ? ' +' + pending.length : '') : L('⏸ pause', '⏸ 일시정지');
+  $('pause').setAttribute('aria-pressed', paused ? 'true' : 'false');
+  $('replay').textContent = playback ? L('■ stop replay', '■ 다시보기 중지') : L('↺ replay last', '↺ 최근 다시보기');
+  $('speed').textContent = L('speed ', '속도 ') + speed + '×';
+  $('motion').textContent = motion ? L('motion on', '모션 켬') : L('motion off', '모션 끔');
+  $('motion').setAttribute('aria-pressed', motion ? 'true' : 'false');
+  $('focus').hidden = !focus;
+  if (focus) $('focus').textContent = (focus.type === 'node' ? nodeName(focus.id) : edgeLabel(focus.id)) + ' ×';
+  ['allow', 'ask', 'block', 'hold', 'loop'].forEach(function(c){
+    var b = $('chip-' + c);
+    b.setAttribute('aria-pressed', filters[c] ? 'true' : 'false');
+    b.classList.toggle('on', !!filters[c]);
+  });
+}
+function edgeLabel(id){ var e = EDGES[id]; return nodeName(e[0]) + ' → ' + nodeName(e[1]); }
+
+function applyFilter(){
+  var rows = $('log').children, i;
+  for (i = 0; i < rows.length; i++) {
+    var tag = rows[i].querySelector('.tag'), c = tag ? tag.className.split(' ')[1] || 'info' : 'info';
+    rows[i].classList.toggle('off', filtering() && !filters[c]);
+  }
+  Object.keys(boxes).forEach(function(n){ boxes[n].classList.toggle('dim', !!focus && focus.type === 'node' && focus.id !== n); });
+  Object.keys(edgeEl).forEach(function(id){
+    var d = !!focus && (focus.type === 'edge' ? focus.id !== id : EDGES[id][0] !== focus.id && EDGES[id][1] !== focus.id);
+    edgeEl[id].classList.toggle('dim', d);
+  });
+}
+
+// ---- drawer: what moved through a box or a link, newest first. Every value goes in with textContent. ----
+function crosses(path, id){
+  for (var i = 0; i + 1 < path.length; i++) { var h = hopOf(path[i], path[i + 1]); if (h && h.id === id) return true; }
+  return false;
+}
+function packetsOf(f){
+  return P.filter(function(r){ return f.type === 'node' ? r.path.indexOf(f.id) >= 0 : crosses(r.path, f.id); });
+}
+function openDrawer(f, trigger){
+  focus = f;
+  lastTrigger = trigger || lastTrigger;
+  drawRefresh();
+  $('drawer').hidden = false;
+  $('dw-close').focus();
+  applyFilter(); syncTools();
+}
+function closeDrawer(){
+  focus = null;
+  $('drawer').hidden = true;
+  applyFilter(); syncTools();
+  if (lastTrigger && lastTrigger.focus) lastTrigger.focus();
+}
+function drawRefresh(){
+  if (!focus) return;
+  var f = focus, list = packetsOf(f).slice(-30).reverse(), by = {}, ms = 0, msN = 0;
+  list.forEach(function(r){ by[r.cls] = (by[r.cls] || 0) + 1; if (typeof r.ms === 'number') { ms += r.ms; msN++; } });
+  $('dw-title').textContent = f.type === 'node' ? nodeName(f.id) : edgeLabel(f.id);
+  var stats = $('dw-stats');
+  stats.textContent = '';
+  var total = f.type === 'edge' ? E[f.id].n : packetsOf(f).length;
+  stats.appendChild(el('span', null, L('moves ', '이동 ') + total));
+  ['allow', 'ask', 'block', 'hold', 'loop'].forEach(function(c){ if (by[c]) stats.appendChild(el('span', 'tag ' + c, c + ' ' + by[c])); });
+  if (msN) stats.appendChild(el('span', null, L('avg ', '평균 ') + Math.round(ms / msN) + 'ms'));
+  var links = $('dw-links');
+  links.textContent = '';
+  if (f.type === 'node') Object.keys(EDGES).forEach(function(id){
+    if (EDGES[id][0] !== f.id && EDGES[id][1] !== f.id) return;
+    var b = el('button', null, edgeLabel(id) + ' (' + E[id].n + ')');
+    b.onclick = function(){ openDrawer({ type: 'edge', id: id }, lastTrigger); };
+    links.appendChild(b);
+  });
+  var out = $('dw-list');
+  out.textContent = '';
+  if (!list.length) out.appendChild(el('div', 'empty', L('nothing moved here yet', '아직 이동한 것이 없습니다')));
+  list.forEach(function(r){
+    var row = el('button', 'pkt');
+    row.appendChild(el('span', 'tm', clock(r.at)));
+    row.appendChild(el('span', 'tag ' + r.cls, r.cls));
+    row.appendChild(el('span', 'm', (r.tool ? r.tool + ' ' : '') + (r.summary || r.kind)));
+    row.appendChild(el('span', 'w', r.ms != null ? r.ms + 'ms' : (r.outcome || '')));
+    var detail = el('dl', 'detail');
+    detail.hidden = true;
+    FIELDS.forEach(function(k){
+      var v = r.ev && r.ev[k];
+      if (v == null || v === '') return;
+      detail.appendChild(el('dt', null, k));
+      detail.appendChild(el('dd', null, cut(v, 400)));
+    });
+    row.onclick = function(){ detail.hidden = !detail.hidden; };
+    out.appendChild(row);
+    out.appendChild(detail);
+  });
+}
+
+var tip = null;
+function tipText(target){
+  var id = target.getAttribute && target.getAttribute('data-edge');
+  var label, last;
+  if (id) { label = edgeLabel(id); last = E[id].last; if (last) label += ' · ' + E[id].n; }
+  else { var n = boxOf(target); if (!n) return ''; label = nodeName(n); last = packetsOf({ type: 'node', id: n }).slice(-1)[0]; }
+  return label + (last ? ' · ' + (last.tool || last.kind) + ' ' + cut(last.summary, 50) : '');
+}
+function boxOf(target){
+  var box = target.closest && target.closest('.box');
+  if (!box) return null;
+  for (var n in NODES) if (NODES[n] === box.id) return n;
+  return null;
+}
+function uiBuild(){
+  var grid = $('grid');
+  grid.addEventListener('click', function(e){
+    var id = e.target.getAttribute && e.target.getAttribute('data-edge');
+    var n = id ? null : boxOf(e.target);
+    if (id) openDrawer({ type: 'edge', id: id }, null);
+    else if (n) openDrawer({ type: 'node', id: n }, boxes[n]);
+  });
+  Object.keys(boxes).forEach(function(n){
+    boxes[n].tabIndex = 0;
+    boxes[n].setAttribute('role', 'button');
+    boxes[n].addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDrawer({ type: 'node', id: n }, boxes[n]); } });
+  });
+  tip = $('tip');
+  grid.addEventListener('pointermove', function(e){
+    if (e.pointerType === 'touch') return;
+    var t = tipText(e.target);
+    tip.hidden = !t;
+    if (t) { tip.textContent = t; tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 260) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; }
+  });
+  grid.addEventListener('pointerleave', function(){ tip.hidden = true; });
+  $('dw-close').onclick = closeDrawer;
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !$('drawer').hidden) closeDrawer(); });
+  $('pause').onclick = function(){ setPaused(!paused); };
+  $('replay').onclick = function(){ if (playback) endPlayback(false); else startPlayback(Number($('replay-n').value) || 20); };
+  $('speed').onclick = function(){ speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; store('swb-speed', String(speed)); syncTools(); };
+  $('motion').onclick = function(){ motion = !motion; store('swb-motion', motion ? '1' : '0'); if (!motion) { queue = []; live.forEach(function(pk){ if (pk.el.parentNode) pk.el.parentNode.removeChild(pk.el); }); live = []; } syncTools(); };
+  $('focus').onclick = closeDrawer;
+  ['allow', 'ask', 'block', 'hold', 'loop'].forEach(function(c){
+    $('chip-' + c).onclick = function(){ filters[c] = !filters[c]; applyFilter(); syncTools(); };
+  });
+  var sp = Number(stored('swb-speed'));
+  if (SPEEDS.indexOf(sp) >= 0) speed = sp;
+  if (stored('swb-motion') === '0') motion = false;
+}
+
 function translate(){
   document.documentElement.lang = lang;
   var nodes = document.querySelectorAll('[data-i]');
@@ -610,31 +837,35 @@ function translate(){
   $('lang').textContent = lang === 'ko' ? 'EN' : '한국어';
   $('lang').title = lang === 'ko' ? 'Switch to English' : '한글로 보기';
   $('title').textContent = connected ? 'swb live — ' + location.host : L('swb live — connecting', 'swb live — 연결 중');
+  syncTools();
   $('state').textContent = connected ? '● LIVE' : (everOpened ? L('● disconnected', '● 끊김') : L('● waiting', '● 대기'));
 }
 function replay(){
+  endPlayback(true);
   replaying = true;
   reset();
   events.forEach(handle);
   replaying = false;
   translate();
   render();
+  applyFilter();
 }
 $('lang').onclick = function(){
   lang = lang === 'ko' ? 'en' : 'ko';
   try { localStorage.setItem('swb-lang', lang); } catch (e) {}
   replay();
 };
-$('clear').onclick = function(){ events = []; replay(); };
+$('clear').onclick = function(){ events = []; pending = []; replay(); };
 
 var connected = false, everOpened = false;
 var es = new EventSource('/events');
-es.onopen = function(){ if (everOpened) { events = []; replay(); } connected = true; everOpened = true; $('state').className = 'live'; translate(); };
+es.onopen = function(){ if (everOpened) { events = []; pending = []; replay(); } connected = true; everOpened = true; $('state').className = 'live'; translate(); };
 es.onerror = function(){ connected = false; $('state').className = 'live off'; translate(); };
 es.onmessage = function(m){
-  try { var ev = JSON.parse(m.data); events.push(ev); if (events.length > 2000) events.shift(); handle(ev); } catch (e) {}
+  try { var ev = JSON.parse(m.data); if (paused || playback) holdBack(ev); else take(ev); } catch (e) {}
 };
 flowBuild();
+uiBuild();
 reset();
 translate();
 render();
