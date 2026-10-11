@@ -153,13 +153,18 @@ describe('risk rules', () => {
       // a continuation, even with an even run of backslashes or a CR, is not trusted for pairing
       "grep x \\\\\n'rm' -r /tmp/x",
       "grep x \\\r\n'rm' -r /tmp/x",
+      // a substitution in the segment can hold another command whose quoted arguments are not ours
+      `grep $(awk 'BEGIN{system("rm -rf /tmp/x")}' f) g`,
+      'grep <(sh -c "rm -rf /tmp/x") f',
+      // a command word cut off by the 256-character window is not trusted
+      'git commit ' + 'a '.repeat(150) + '-m "rm -rf x"',
       // operands before the flags, and a "(" that is not a substitution
       "rm 'a(' -rf /tmp/x",
       'rm "f (1)" -r d',
     ]) {
       expect(policyOf(command)).toBe('block')
     }
-    for (const command of ['grep -rn "rm -rf" scripts/*.sh', 'git add a.sh && git commit -m "drop rm -rf"', 'rm -f $(ls -tr | head -1)', 'git commit -m "fix #12 rm -rf step"']) {
+    for (const command of ['git commit -m "script update" -m "never git push --force"', 'grep -rn "rm -rf" scripts/*.sh', 'git add a.sh && git commit -m "drop rm -rf"', 'rm -f $(ls -tr | head -1)', 'git commit -m "fix #12 rm -rf step"']) {
       expect(policyOf(command)).toBe('allow')
     }
   })

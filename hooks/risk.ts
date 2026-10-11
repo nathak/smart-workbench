@@ -178,8 +178,17 @@ function maskData(command: string, hadContinuation = false): string {
     const from = Math.max(0, offset - 256)
     const before = command.slice(from, offset)
     const separator = Math.max(...[';', '&', '|', '\n'].map(one => filled.lastIndexOf(one, offset - 1)))
-    const segment = command.slice(Math.max(separator + 1, from), offset)
-    if (RUNNER.test(segment)) return match
+    // The command word must be in view: a segment cut by the 256-character window starts mid-command, so it is not trusted.
+    if (separator + 1 < from) return match
+    const segment = command.slice(separator + 1, offset)
+    const bare = filled.slice(separator + 1, offset)
+    // A subshell, process substitution or command substitution outside quotes can hold another command whose quoted
+    // arguments would be mistaken for ours; any "(" in the segment (or just after the quote) turns blanking off here.
+    const tail = filled.slice(offset + match.length, offset + match.length + 257).search(/[;&|\n]/)
+    const bareAfter = filled.slice(offset + match.length, tail < 0 ? offset + match.length + 257 : offset + match.length + tail)
+    if (bare.includes('(') || bareAfter.includes('(')) return match
+    // The segment starts with git or a search, so a runner word is only a risk outside quotes (a "script" in a title is not one).
+    if (RUNNER.test(bare)) return match
     if (MESSAGE_COMMAND.test(segment) && DATA_FLAG.test(before.trimEnd())) return match[0] + match[0]
     // A pattern is a word of its own: one that starts with a dash, or is glued to the word before or after it, is not blanked.
     const end = offset + match.length
