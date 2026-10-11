@@ -104,6 +104,30 @@ const BASH_RULES: readonly Rule[] = [
     reason: 'may print secrets',
   },
   {
+    category: 'codex-transfer',
+    risk: 'medium',
+    policy: 'ask',
+    raw: true,
+    pattern: /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+transfer\b/,
+    reason: 'sends this Claude session transcript to OpenAI Codex',
+  },
+  {
+    category: 'codex-write',
+    risk: 'medium',
+    policy: 'ask',
+    raw: true,
+    pattern: /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+task\b[\s\S]*?\s--write\b/,
+    reason: 'lets Codex edit files outside the guard',
+  },
+  {
+    category: 'codex-send',
+    risk: 'medium',
+    policy: 'ask',
+    raw: true,
+    pattern: /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+(?:review|adversarial-review|task)\b/,
+    reason: "sends this repository's code to OpenAI Codex",
+  },
+  {
     category: 'external-send',
     risk: 'medium',
     policy: 'ask',
@@ -288,7 +312,7 @@ export function classify(tool: string, input: unknown): Verdict {
 }
 
 // Asked even under the permissive profile.
-const ALWAYS_ASK = new Set(['secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec'])
+const ALWAYS_ASK = new Set(['secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec', 'codex-send', 'codex-write', 'codex-transfer'])
 
 // Applies the profile and the pause switch on top of the default (balanced) rule set.
 export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolean): Policy {
@@ -353,7 +377,8 @@ export type SessionScope = { key: string; label: string }
 // The guard file's own protection is never allowed for a session.
 export function sessionScope(tool: string, input: unknown, verdict: Verdict): SessionScope | undefined {
   // remote-exec is asked every time, so allowing one script for the session never covers the next.
-  if (verdict.category === 'guard-policy' || verdict.category === 'remote-exec' || verdict.policy === 'block') {
+  // The same goes for Codex: the key stops at the script, so one allowed review would cover a write or a transcript transfer.
+  if (verdict.category === 'guard-policy' || verdict.category === 'remote-exec' || verdict.category.startsWith('codex-') || verdict.policy === 'block') {
     return undefined
   }
   const args = (input ?? {}) as Record<string, unknown>
