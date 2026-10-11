@@ -20,10 +20,24 @@ const ARGS = String.raw`(?:[^;&|\n]*\s)?`
 const FLAT_ARGS = String.raw`(?:[^;&|\n(\`]*\s)?`
 const WORD_END = String.raw`(?=$|[\s;&|)])`
 // A lone "." (the whole tree) or the repository root, with or without quotes.
-const WHOLE_TREE = String.raw`(?:["']?\.["']?|:\/)`
+const WHOLE_TREE = String.raw`(?:["']?\.(?:\/+\.?)*\/*["']?|["']?:\/["']?)`
+// Where a command word can stand: at the start, after a separator, or after a wrapper such as sudo; with or without a path.
+const CMD = String.raw`(?:^|[;&|(\`]\s*|\b(?:sudo|exec|nohup|time|env)\s+(?:-\S+\s+)*)(?:\S*\/)?`
 const SECRET_NAME = String.raw`(?:\w*(?:TOKEN|SECRET|PASSWORD|PASSWD)|(?:\w*_)?(?:API_?)?KEY)`
 
-type Rule = { category: string; risk: Risk; policy: Policy; pattern: RegExp; reason: string; raw?: true }
+// stripped: also read the command with its command substitutions removed, so "rm $(x) -rf d" is seen while the flags
+// inside "rm -f $(ls -tr)" are not taken for rm's own.
+type Rule = { category: string; risk: Risk; policy: Policy; pattern: RegExp; reason: string; raw?: true; stripped?: true }
+
+function withoutSubstitutions(text: string): string {
+  let out = text
+  for (let i = 0; i < 4; i++) {
+    const next = out.replace(/\$\([^()]*\)|`[^`]*`/g, ' ')
+    if (next === out) break
+    out = next
+  }
+  return out
+}
 
 // Checked in order; the first match decides. Regexes are a workflow guard, not a sandbox.
 // A rule marked raw reads the command as typed; the others read it with message and search text blanked (see maskData).
@@ -48,6 +62,7 @@ const BASH_RULES: readonly Rule[] = [
     category: 'broad-delete',
     risk: 'high',
     policy: 'block',
+    stripped: true,
     pattern: re(String.raw`${AT}rm\s+${FLAT_ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
     reason: 'recursive delete',
   },
@@ -56,7 +71,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     pattern: re(
-      String.raw`${AT}dd\s[^;&|\n]*\bof=\/dev\/(?!null\b|zero\b|stdout\b|stderr\b|tty\b|fd\/|shm\/)|${AT}mkfs(?:\.\w+)?\s+${ARGS}\/dev\/|>\s*\/dev\/(?:sd[a-z]|hd[a-z]|vd[a-z]|xvd[a-z]|nvme\d|mmcblk\d|disk\d)`,
+      String.raw`${AT}dd\s[^;&|\n]*\bof=\/dev\/(?!null\b|zero\b|stdout\b|stderr\b|tty\b|fd\/|shm\/)|${CMD}mkfs(?:\.\w+)?\s+(?!(?:-h|--help|-V|--version)(?:\s|$))(?![^;&|\n]*\.(?:img|raw|iso|bin|qcow2)(?:\s|$))[^\s;&|]|>\s*\/dev\/(?:sd[a-z]|hd[a-z]|vd[a-z]|xvd[a-z]|nvme\d|mmcblk\d|disk\d)`,
     ),
     reason: 'overwrites a disk or device',
   },
@@ -212,7 +227,11 @@ export function classify(tool: string, input: unknown): Verdict {
     // A backslash before a newline continues the command, as in bash; join it so a rule still reads one line.
     const command = String(args.command ?? '').replace(/\\\r?\n/g, ' ')
     const data = maskData(command)
-    const rule = BASH_RULES.find(one => one.pattern.test(one.raw ? command : data))
+    const plain = withoutSubstitutions(data)
+    const rule = BASH_RULES.find(one => {
+      const text = one.raw ? command : data
+      return one.pattern.test(text) || (one.stripped === true && one.pattern.test(plain))
+    })
 
     return rule
       ? { category: rule.category, risk: rule.risk, policy: rule.policy, reason: rule.reason }
