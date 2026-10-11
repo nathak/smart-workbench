@@ -938,21 +938,20 @@ test('with Codex on in team mode: the prompt carries the Codex brief, a review r
   const second = await $.tool.call({ tool: 'Bash', command: REVIEW })
   expect(JSON.stringify(second)).toContain('Codex already ran this turn')
 
-  // Image generation needs no question: one plain task with an output file under an asset folder, four per turn.
+  // Image generation needs no question: one plain task with an output file under an asset folder, as many as asked.
   const bin = `node ${CODEX_DIR}/scripts/codex-companion.mjs`
   const img = (name: string) => `${bin} task --write "draw a blue gear icon; save it as assets/${name}.png and write nothing else"`
-  for (const name of ['a', 'b', 'c', 'd']) {
+  for (const name of ['a', 'b', 'c', 'd', 'e', 'f']) {
     ran.length = 0
     await $.tool.call({ tool: 'Bash', command: img(name) })
     expect(ran).toContain(img(name))
   }
-  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: img('e') }))).toContain('images already this turn')
   // Other writes still ask: no image word, a path outside the asset folders, a parent path, a chain.
   for (const bad of [
     `${bin} task --write "refactor auth; save notes as assets/n.png"`,
     `${bin} task --write "draw an icon; save it as src/app.png"`,
     `${bin} task --write "draw an icon; save it as assets/../src/x.png"`,
-    `${img('f')}; git push origin main`,
+    `${img('g')}; git push origin main`,
   ]) {
     expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: bad }))).toContain('declined')
   }

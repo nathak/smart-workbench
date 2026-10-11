@@ -60,7 +60,7 @@ None of its own. `/swb live` starts a local web server that listens on `127.0.0.
 
 ### Codex (optional, off by default)
 
-With the Codex plugin installed and `/swb team codex on` consented to, SmartWorkbench lets the lead run `node <codex plugin>/scripts/codex-companion.mjs review` (and `task` for rescue) as ordinary Bash calls; those go through the Guard like any other. That plugin sends the repository's diff and the files it reads to OpenAI under your Codex account. SmartWorkbench itself makes no request. At session start it only reads Claude Code's `installed_plugins.json` to find the script; `/swb team codex check` runs the plugin's `setup --json`. `--write` tasks and `transfer` always ask, except image generation: a plain `task --write` whose brief names an image and one output file under `assets/`, `images/`, `public/` or `static/` runs unasked, up to 4 per turn. Codex's own writes do not pass the Guard, so that path is only as binding as the brief.
+With the Codex plugin installed and `/swb team codex on` consented to, SmartWorkbench lets the lead run `node <codex plugin>/scripts/codex-companion.mjs review` (and `task` for rescue) as ordinary Bash calls; those go through the Guard like any other. That plugin sends the repository's diff and the files it reads to OpenAI under your Codex account. SmartWorkbench itself makes no request. At session start it only reads Claude Code's `installed_plugins.json` to find the script; `/swb team codex check` runs the plugin's `setup --json`. `--write` tasks and `transfer` always ask, except image generation: a plain `task --write` whose brief names an image and one output file under `assets/`, `images/`, `public/` or `static/` runs unasked. Codex's own writes do not pass the Guard, so that path is only as binding as the brief.
 
 ### Model
 
@@ -124,7 +124,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 ### Codex(선택, 기본 꺼짐)
 
-Codex 플러그인이 설치되어 있고 `/swb team codex on`에 동의하면, 리드가 `node <codex 플러그인>/scripts/codex-companion.mjs review`(구조용 `task` 포함)를 일반 Bash 호출로 실행할 수 있게 합니다. 이 호출도 다른 호출처럼 Guard를 거칩니다. 그 플러그인은 저장소의 diff와 읽은 파일을 사용자의 Codex 계정으로 OpenAI에 보냅니다. SmartWorkbench 자체는 요청을 보내지 않으며, 세션 시작 때 스크립트 위치를 찾으려고 Claude Code의 `installed_plugins.json`만 읽습니다. `/swb team codex check`는 플러그인의 `setup --json`을 실행합니다. `--write` 작업과 `transfer`는 항상 묻되, 이미지 생성은 예외입니다. 그림 설명과 `assets/`·`images/`·`public/`·`static/` 아래 출력 파일 하나를 적은 단순 `task --write`는 묻지 않고 턴당 4장까지 실행됩니다. Codex가 직접 쓰는 파일은 Guard를 거치지 않으므로 그 경로는 지시문만큼만 지켜집니다.
+Codex 플러그인이 설치되어 있고 `/swb team codex on`에 동의하면, 리드가 `node <codex 플러그인>/scripts/codex-companion.mjs review`(구조용 `task` 포함)를 일반 Bash 호출로 실행할 수 있게 합니다. 이 호출도 다른 호출처럼 Guard를 거칩니다. 그 플러그인은 저장소의 diff와 읽은 파일을 사용자의 Codex 계정으로 OpenAI에 보냅니다. SmartWorkbench 자체는 요청을 보내지 않으며, 세션 시작 때 스크립트 위치를 찾으려고 Claude Code의 `installed_plugins.json`만 읽습니다. `/swb team codex check`는 플러그인의 `setup --json`을 실행합니다. `--write` 작업과 `transfer`는 항상 묻되, 이미지 생성은 예외입니다. 그림 설명과 `assets/`·`images/`·`public/`·`static/` 아래 출력 파일 하나를 적은 단순 `task --write`는 묻지 않고 실행됩니다. Codex가 직접 쓰는 파일은 Guard를 거치지 않으므로 그 경로는 지시문만큼만 지켜집니다.
 
 ### 모델
 

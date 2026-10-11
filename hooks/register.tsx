@@ -1814,11 +1814,6 @@ export const register: Register = on => {
       typeof live.codexPath === 'string' &&
       e.tool === 'Bash' &&
       codex.isImageTask(e.command, live.codexPath)
-    if (isImage && codex.imagesThisTurn(heldTrack) >= codex.IMAGES_PER_TURN) {
-      await audit($, 'team.codex-repeat')
-
-      return { deny: `SmartWorkbench team mode: ${codex.IMAGES_PER_TURN} Codex images already this turn; ask the user before making more.` }
-    }
     const isCodexAllowed =
       isImage ||
       (isCodexUse &&
@@ -1949,7 +1944,7 @@ export const register: Register = on => {
 
     if (isTeam && codexRun?.op === 'task' && ran.deny === undefined) {
       const isImageRun = codexRun.write && typeof live.codexPath === 'string' && codex.isImageTask(e.command, live.codexPath)
-      await updateTrack($, track => (isImageRun ? codex.codexImaged(track) : codex.codexTasked(track, endedAt)))
+      await updateTrack($, track => (isImageRun ? track : codex.codexTasked(track, endedAt)))
     }
     if (isTeam && isOk && codexRun && (codexRun.op === 'review' || codexRun.op === 'adversarial-review')) {
       await updateTrack($, track => codex.codexRan(track, endedAt))
