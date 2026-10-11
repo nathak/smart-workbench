@@ -11,7 +11,7 @@ import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseD
 import { checkOutcome, completionOf, evidenceKindsOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
-import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy } from './policy'
+import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
 import { classify, decide, sessionScope, summarize } from './risk'
@@ -1736,7 +1736,7 @@ export const register: Register = on => {
       } else if (running) {
         await setLive($, current => ({ ...current, loop: undefined }))
         await audit($, 'loop.cancel', { done: running.done })
-        $.ui.toast('SmartWorkbench: loop ended because you sent a prompt.')
+        $.ui.toast('SmartWorkbench: Loop ended because you sent a prompt.')
       }
     }
     const carriesDesign = (e.origin.kind === 'plugin' && (await read($, liveAtom)).loop !== undefined) || crew.planWasApproved((await read($, liveAtom)).track ?? crew.EMPTY_TRACK)
@@ -1780,7 +1780,7 @@ export const register: Register = on => {
       const input = e as unknown as Record<string, unknown>
       const target = input.file_path ?? input.notebook_path
       const file = typeof target === 'string' ? target : undefined
-      const inside = file?.startsWith(`${cwd}/`) ? file.slice(cwd.length + 1) : undefined
+      const inside = file === undefined ? undefined : repoPath(file, cwd)
       const track = (await read($, liveAtom)).track ?? crew.EMPTY_TRACK
 
       if (inside !== undefined && crew.needsDesign(track, crew.isSmallEdit(track, inside, crew.editSize(e.tool, e as unknown as Record<string, unknown>)))) {
@@ -1910,17 +1910,19 @@ export const register: Register = on => {
     const notebookPath = (e as unknown as Record<string, unknown>).notebook_path
     const rawPath =
       'file_path' in e && typeof e.file_path === 'string' ? e.file_path : typeof notebookPath === 'string' ? notebookPath : undefined
-    const path = rawPath?.startsWith(`${cwd}/`) ? rawPath.slice(cwd.length + 1) : rawPath
+    const inRepo = rawPath === undefined ? undefined : repoPath(rawPath, cwd)
+    const path = inRepo ?? rawPath
+    // A Bash run that was interrupted or sent to the background has no known outcome: it neither counts as a failure nor clears one.
+    const bashResult = e.tool === 'Bash' && !ran.isError ? (ran.result as { interrupted?: boolean; backgroundTaskId?: string } | undefined) : undefined
+    const isUnsettled = bashResult?.interrupted === true || bashResult?.backgroundTaskId !== undefined
 
     await mutate($, current => {
       let updated = model.recordCall(current, { ...call, outcome, durationMs: endedAt - startedAt })
 
       if (kinds.length > 0 && e.tool === 'Bash' && ran.deny === undefined) {
-        const result = (ran.isError ? undefined : ran.result) as { interrupted?: boolean; backgroundTaskId?: string } | undefined
-        const isUnknown = result?.interrupted === true || result?.backgroundTaskId !== undefined
         // One record per kind a command runs; the first keeps the call id, which the badge and the counts look up.
         kinds.forEach((kind, i) => {
-          const ok = isUnknown ? null : checkOutcome(e.command, kind, isOk)
+          const ok = isUnsettled ? null : checkOutcome(e.command, kind, isOk)
           const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt }
           updated = model.addEvidence(updated, record)
         })
@@ -1929,10 +1931,9 @@ export const register: Register = on => {
       return path && isOk ? model.observe(updated, e.tool, path, endedAt) : updated
     })
 
-    const editedFile = rawPath
-    if (isTeam && isOk && e.agentId === undefined && editedFile?.startsWith(`${cwd}/`) && model.isEditTool(e.tool)) {
+    if (isTeam && isOk && e.agentId === undefined && inRepo !== undefined && model.isEditTool(e.tool)) {
       const lines = crew.editSize(e.tool, e as unknown as Record<string, unknown>).lines
-      await updateTrack($, track => crew.noteEdit(track, editedFile.slice(cwd.length + 1), lines))
+      await updateTrack($, track => crew.noteEdit(track, inRepo, lines))
     }
     if (isTeam && isOk && e.tool === 'ExitPlanMode') {
       await updateTrack($, track => ({ ...track, planApprovedAt: endedAt }))
@@ -1954,7 +1955,7 @@ export const register: Register = on => {
     if (e.tool === 'Agent' && e.subagent_type === crew.ADVISOR && isOk) {
       await updateTrack($, track => crew.advisorRan(track, endedAt))
       await audit($, 'team.advisor', { id: call.id, description: e.description })
-    } else if (isTeam && ran.deny === undefined && e.tool !== 'Agent') {
+    } else if (isTeam && ran.deny === undefined && !isUnsettled && e.tool !== 'Agent') {
       const key = crew.failureKey(e.tool, e as unknown as Record<string, unknown>)
       let nudge = false
       const track = await updateTrack($, current => {
@@ -2007,12 +2008,13 @@ export const register: Register = on => {
       })
     }
 
-    // Esc takes the session back: a loop already running ends here, since an aborted turn sends no Stop.
+    // Esc takes the session back: a loop running (or set and waiting for pass 1) ends here, since an aborted turn sends no Stop.
     if (e.isAborted) {
       const running = (await read($, liveAtom)).loop
-      if (running && !running.pending) {
+      if (running) {
         await setLive($, current => ({ ...current, loop: undefined }))
         await audit($, 'loop.stop', { done: running.done, by: 'abort' }).catch(() => undefined)
+        if (running.pending) $.ui.toast('SmartWorkbench: Loop cancelled before pass 1 because the turn was interrupted.')
       }
     }
 
@@ -2076,7 +2078,13 @@ export const register: Register = on => {
 
     const lastEdit = lastAnyEdit(wb.changed)
     const step = loop.advance(running, lastEdit !== undefined && lastEdit >= (running.passAt ?? 0), await $.clock.now())
-    await setLive($, current => ({ ...current, loop: step.loop }))
+    // A /swb loop stop that came in while this hook awaited must stay stopped.
+    let isGone = false
+    await setLive($, current => {
+      isGone = current.loop?.startedAt !== running.startedAt
+      return isGone ? current : { ...current, loop: step.loop }
+    })
+    if (isGone) return result
     await updateTrack($, ({ turnEdits: _passEdits, ...track }) => track)
     await audit($, step.loop ? 'loop.pass' : 'loop.done', { done: running.done + 1 }).catch(() => undefined)
     if (step.text) $.ui.toast(`SmartWorkbench: ${step.text}`)

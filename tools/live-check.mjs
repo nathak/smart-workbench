@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Smoke test for tools/live.mjs using only node built-ins: node tools/live-check.mjs
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { get } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -92,6 +92,18 @@ try {
   await sleep(500)
   check(watcher.lines.length === before + 1 && watcher.lines.at(-1) === 'data: {"kind":"c"}', 'a connected page gets a new line exactly once')
   watcher.close()
+
+  // Past the cap the file is emptied once read, and a later line still arrives exactly once.
+  appendFileSync(feed, '{"kind":"pad"}\n'.repeat(600000))
+  await sleep(900)
+  check(statSync(feed).size === 0, 'empties the feed once it passes the cap')
+  const afterCap = follow()
+  await sleep(300)
+  const seen = afterCap.lines.length
+  appendFileSync(feed, '{"kind":"d"}\n')
+  await sleep(500)
+  check(afterCap.lines.length === seen + 1 && afterCap.lines.at(-1) === 'data: {"kind":"d"}', 'a line after the cap arrives exactly once')
+  afterCap.close()
 
   rmSync(feed)
   await sleep(400)

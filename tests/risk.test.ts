@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { classify, decide, sessionScope } from '../hooks/risk'
+import { classify, commandPrefix, decide, normalisePath, sessionScope } from '../hooks/risk'
 
 describe('risk rules', () => {
   test('destructive git and recursive delete are blocked', async () => {
@@ -283,5 +283,23 @@ describe('risk rules', () => {
       expect(decide(run(command), 'permissive', false)).toBe('ask')
       expect(sessionScope('Bash', { command }, run(command))).toBeUndefined()
     }
+  })
+})
+
+describe('paths and command wrappers', () => {
+  test('dot segments and doubled slashes do not dodge the guard-file and secrets rules', async () => {
+    expect(normalisePath('/w/.claude/./smartworkbench.json')).toBe('/w/.claude/smartworkbench.json')
+    expect(normalisePath('src/../secrets//k')).toBe('secrets/k')
+    expect(normalisePath('../x/./y')).toBe('../x/y')
+    expect(classify('Edit', { file_path: '/w/.claude/./smartworkbench.json' }).category).toBe('guard-policy')
+    expect(classify('Edit', { file_path: '/w/.claude//smartworkbench.json' }).category).toBe('guard-policy')
+    expect(classify('Read', { file_path: '/w/a/../.env' }).category).toBe('secret-output')
+  })
+
+  test('timeout and nice do not hide the command from its prefix or from Allow for session', async () => {
+    expect(commandPrefix('timeout 60 pytest -x')).toBe('pytest')
+    expect(commandPrefix('timeout -s KILL 5m npm test')).toBe('npm test')
+    expect(commandPrefix('nice -n 10 make build')).toBe('make build')
+    expect(commandPrefix('timeout 60 npm test')).not.toBe(commandPrefix('timeout 60 pytest'))
   })
 })

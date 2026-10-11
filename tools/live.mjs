@@ -3,7 +3,7 @@
 // Usage: node live.mjs [projectDir] [--port 4317]
 // The plugin writes the feed only while this file exists, so stopping the server (which removes it) stops the writes.
 import { createServer } from 'node:http'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,6 +26,8 @@ const clients = new Set()
 // The newest lines are kept in memory and replayed to a new connection, so the file can grow without every page load re-reading it.
 const RECENT_MAX = 2000
 const recent = []
+// The feed file is emptied in place (tee appends, so a rename would drop lines) once it is read to the end past this size.
+const FEED_CAP = 8 * 1024 * 1024
 let offset = 0
 let rest = ''
 
@@ -52,6 +54,11 @@ function pump() {
       recent.push(line)
       if (recent.length > RECENT_MAX) recent.shift()
       for (const res of clients) res.write(`data: ${line}\n\n`)
+    }
+    // Everything is read and no line is half written: a line the plugin appends in these few instructions is lost, which the live view tolerates.
+    if (offset > FEED_CAP && rest === '' && statSync(feed).size === offset) {
+      truncateSync(feed, 0)
+      offset = 0
     }
   } catch {
     // The file vanished or is mid-write; the next tick tries again.

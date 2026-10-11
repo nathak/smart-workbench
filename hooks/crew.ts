@@ -80,18 +80,40 @@ export const ADVISOR_SPEC = {
   maxTurns: 25,
 } as const
 
+// An edit this small needs no design; the limits also cap many small edits adding up to a big one.
+export const SMALL_EDIT_LINES = 6
+export const SMALL_EDIT_CHARS = 400
+export const SMALL_TURN_LINES = 15
+
+// What counts as not small, in words the lead and the advisor gate share.
+const BIG_EDIT = `more than ${SMALL_EDIT_LINES} lines or ${SMALL_EDIT_CHARS} characters in one edit, a second file, or more than ${SMALL_TURN_LINES} lines in this turn`
+
 // Added to every prompt while team mode is on; fixed text, so the prompt cache keeps it.
 export const TEAM_CONTEXT = [
   '<smartworkbench_team>',
   `  You lead this session and write the code. Delegate exploration (finding files, reading code, searching docs) to ${EXPLORER}, several in parallel when the questions are independent.`,
-  `  ${ADVISOR} (Opus) designs; you implement. Before any non-trivial edit (more than a few lines or more than one file), ask it for a DESIGN with a focused brief (goal, constraints, known paths) and follow it. If reality contradicts the design, go back to it instead of improvising. Also consult it when an error keeps repeating and for a final check before finishing.`,
+  `  ${ADVISOR} (Opus) designs; you implement. Before any non-trivial edit (${BIG_EDIT}), ask it for a DESIGN with a focused brief (goal, constraints, known paths) and follow it. If reality contradicts the design, go back to it instead of improvising. Also consult it when an error keeps repeating and for a final check before finishing.`,
   '</smartworkbench_team>',
 ].join('\n')
+
+// `npm run lint` and `npm run test` are different commands, so a script runner keeps the script name in the key.
+const RUNNER = /^(?:npm|pnpm|yarn|bun) (?:run|run-script)$/
+
+function failurePrefix(segment: string): string | undefined {
+  const prefix = commandPrefix(segment)
+  if (prefix === undefined || !RUNNER.test(prefix)) return prefix
+
+  const words = segment.trim().split(/\s+/)
+  const at = words.findIndex(word => word === 'run' || word === 'run-script')
+  const script = words.slice(at + 1).find(word => !word.startsWith('-'))
+
+  return script ? `${prefix} ${script}` : prefix
+}
 
 // Failures are counted per command (by command and subcommand) or per tool and target.
 export function failureKey(tool: string, input: Record<string, unknown>): string {
   if (tool === 'Bash') {
-    const prefixes = splitCommand(String(input.command ?? '')).map(commandPrefix).filter(Boolean)
+    const prefixes = splitCommand(String(input.command ?? '')).map(failurePrefix).filter(Boolean)
     return `bash:${[...new Set(prefixes)].sort().join(' && ')}`
   }
   const target = input.file_path ?? input.notebook_path ?? input.url ?? input.pattern ?? ''
@@ -161,11 +183,6 @@ export function advisePrompt(topic: string): string {
 
 // ---- design first: the lead implements, the advisor designs
 
-// An edit this small needs no design; the limits also cap many small edits adding up to a big one.
-export const SMALL_EDIT_LINES = 6
-export const SMALL_EDIT_CHARS = 400
-export const SMALL_TURN_LINES = 15
-
 export type EditSize = { lines: number; chars: number; isBulk: boolean }
 
 const lineCount = (text: unknown): number => (typeof text === 'string' && text !== '' ? text.split('\n').length : 0)
@@ -224,4 +241,4 @@ export function planWasApproved(track: Track): boolean {
 }
 
 export const DESIGN_FIRST =
-  `SmartWorkbench team mode: this edit is not small (more than a few lines or a second file), and no design from ${ADVISOR} exists for this work. Ask it for a DESIGN: send the goal, constraints and the paths you know. Then implement that design step by step. If the code does not match it, stop and go back to the advisor with what differed. (Asked once per turn.)`
+  `SmartWorkbench team mode: this edit is not small (${BIG_EDIT}), and no design from ${ADVISOR} exists for this work. Ask it for a DESIGN: send the goal, constraints and the paths you know. Then implement that design step by step. If the code does not match it, stop and go back to the advisor with what differed. (Asked once per turn.)`

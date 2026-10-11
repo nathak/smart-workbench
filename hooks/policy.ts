@@ -1,5 +1,5 @@
 import type { AuditConfig, EvidenceKind, GuardProfile, Policy, ProjectPolicy, ProjectRule, TeamTemplate } from '../types'
-import type { Verdict } from './risk'
+import { normalisePath, type Verdict } from './risk'
 
 export const POLICY_PATH = '.claude/smartworkbench.json'
 export const AUDIT_PATH = '.claude/smartworkbench-audit.jsonl'
@@ -186,8 +186,18 @@ function parseAudit(raw: unknown, errors: string[]): AuditConfig | undefined {
   return { path: path.trim() }
 }
 
+// The path inside the repository once `.` and `..` are folded, or undefined for a path outside it.
+export function repoPath(path: string, cwd: string): string | undefined {
+  if (/^[A-Za-z]:[\\/]/.test(path)) return undefined
+  const full = normalisePath(path.startsWith('/') ? path : `${cwd}/${path}`)
+  const root = normalisePath(cwd)
+  const prefix = root === '/' ? '/' : `${root}/`
+
+  return full.startsWith(prefix) ? full.slice(prefix.length) : undefined
+}
+
 function relative(path: string, cwd: string): string {
-  return path.startsWith(`${cwd}/`) ? path.slice(cwd.length + 1) : path.replace(/^\.\//, '')
+  return repoPath(path, cwd) ?? path
 }
 
 export function matchRule(rules: readonly ProjectRule[], tool: string, input: unknown, cwd: string): ProjectRule | undefined {

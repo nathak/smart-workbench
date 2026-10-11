@@ -60,3 +60,11 @@ describe('loop decisions', () => {
     expect(loop.iterationPrompt(state)).toContain('1. a\n2. b')
   })
 })
+
+describe('loop wording', () => {
+  test('the prompt says how a loop ends, and a loop not yet started says so', async () => {
+    expect(loop.iterationPrompt(loop.begin(['a'], 3, 0))).toContain('3 passes in all')
+    expect(loop.iterationPrompt(loop.begin(['a'], null, 0))).toContain('in a row')
+    expect(loop.describe(loop.begin(['a'], 2, 0))).toContain('not started')
+  })
+})

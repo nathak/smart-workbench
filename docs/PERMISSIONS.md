@@ -37,7 +37,7 @@ A mod runs with your own user rights and is not sandboxed. This page lists every
 | `.claude/smartworkbench-task.json` (or your path) | `/swb share` |
 | `.claude/smartworkbench.json` | `/swb policy init`, only when absent |
 | `.claude/smartworkbench-audit.jsonl` (+ `.1`) | only when the guard file sets `audit` |
-| `.claude/smartworkbench-live.jsonl` | `/swb live` creates it once the server is listening and removes it when the server ends; while it exists the mod appends one JSON line per event (prompt start, tool name and summary, guard decision, loop, turn). Do not commit it; one live view per project |
+| `.claude/smartworkbench-live.jsonl` | `/swb live` creates it once the server is listening and removes it when the server ends; while it exists the mod appends one JSON line per event (prompt start, tool name and summary, guard decision, loop, turn). The server empties it in place once it has read past 8 MB. Do not commit it; one live view per project |
 | Its own store under `~/.claude/plugins/store/` | state per project, templates, context sets |
 
 It never reads environment variables and never stores the conversation or Live pin contents. The one exception is the live feed below: while you run `/swb live`, the start of each prompt (120 characters) and a summary of each tool call are appended to a file inside the project.
@@ -101,7 +101,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 | `.claude/smartworkbench-task.json`(또는 지정 경로) | `/swb share` |
 | `.claude/smartworkbench.json` | `/swb policy init`, 파일이 없을 때만 |
 | `.claude/smartworkbench-audit.jsonl`(+ `.1`) | Guard 파일에서 `audit`을 켰을 때만 |
-| `.claude/smartworkbench-live.jsonl` | `/swb live`의 서버가 포트를 연 뒤 만들고 종료할 때 지웁니다. 파일이 있는 동안 Mod가 이벤트(프롬프트 앞부분, 툴 이름·요약, Guard 판정, 루프, 턴)마다 JSON 한 줄을 덧붙입니다. 커밋하지 마세요. 프로젝트당 실시간 보기는 하나만 |
+| `.claude/smartworkbench-live.jsonl` | `/swb live`의 서버가 포트를 연 뒤 만들고 종료할 때 지웁니다. 파일이 있는 동안 Mod가 이벤트(프롬프트 앞부분, 툴 이름·요약, Guard 판정, 루프, 턴)마다 JSON 한 줄을 덧붙입니다. 서버는 8MB를 넘게 읽으면 파일을 제자리에서 비웁니다. 커밋하지 마세요. 프로젝트당 실시간 보기는 하나만 |
 | `~/.claude/plugins/store/` 아래 자기 저장소 | 프로젝트별 상태, 템플릿, Context set |
 
 환경 변수는 읽지 않고, 대화 내용과 Live Pin 파일 내용은 저장하지 않습니다. 예외는 아래의 실시간 피드뿐입니다. `/swb live`를 실행하는 동안에는 프롬프트 앞부분(120자)과 툴 호출 요약이 프로젝트 안의 파일에 덧붙습니다.
