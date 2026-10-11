@@ -138,7 +138,7 @@ describe('risk rules', () => {
 
   test('mkfs is blocked only on a device; whole-tree restores are blocked in any quoting; a root file restore is not', async () => {
     // mkfs is blocked in command position unless it only asks for help or targets a plain image file.
-    for (const command of ['mkfs -t ext4 /dev/sdb', 'mkfs.ext4 $DEV', 'mkfs.ext4 "/dev/sdb1"', 'sudo mkfs.xfs -f sda', 'cd /dev && mkfs sdb']) {
+    for (const command of ['mkfs -t ext4 /dev/sdb', 'mkfs.ext4 $DEV', 'mkfs.ext4 "/dev/sdb1"', 'sudo mkfs.xfs -f sda', 'cd /dev && mkfs sdb', 'mkfs.ext4 /dev/sda x.img', 'mkfs.ext4 $DEV x.img', 'mkfs.ext4 x.img /dev/sdb']) {
       expect(policyOf(command)).toBe('block')
     }
     for (const command of ['man mkfs | less', 'mkfs.ext4 --help', 'mkfs.ext4 disk.img', 'mkfs -t ext4 build/disk.raw', 'grep -n mkfs README.md']) {
