@@ -39,7 +39,7 @@ then restart Claude Code or run `/reload-plugins`.
 6. **Check the result**: when the turn ends a completion summary is posted. Open the Evidence tab (`/swb verify`) to see which conditions passed, which files have a check behind them, and use `Verify`, `Waive`, `Ask Claude to finish` or `Export handoff`.
 7. **Pick it up later**: state is restored when you reopen the project, and sessions open on the same project share it. On another machine, `/swb share` here and `/swb pickup` there. Save a setup you reuse with `/swb save <name>`.
 
-To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Hotkeys: `1`–`4` tabs, `l` Lock/Unlock, `p` Preview, `r` Pause risky calls, `f` Ask Claude to finish, `c` Check CI, `x` Export handoff.
+To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Hotkeys: `1`–`5` tabs, `l` Lock/Unlock, `p` Preview, `r` Pause risky calls, `f` Ask Claude to finish, `c` Check CI, `x` Export handoff.
 
 ### Commands
 
@@ -208,6 +208,8 @@ Watch a request flow in a browser: prompts, tool calls and guard decisions, suba
 - The page is in English by default. The `한국어` / `EN` button in the top right switches it (remembered in the browser); `http://127.0.0.1:4317/?lang=ko` opens it in Korean.
 - Panels: Opus advisor, user prompt, Sonnet lead, guard decisions (allow / ask / block bars), Haiku dispatcher, worker / explorer / loop, flags and the session log.
 
+![Live view](docs/live-view.png)
+
 ### Project guard file
 
 Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `/smartworkbench policy init` writes an example.
@@ -241,7 +243,7 @@ Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `
 
 ### Audit log
 
-With `"audit": true` (or `{ "path": "logs/agent-audit.jsonl" }`, a path inside the repository) every session appends one JSON line per event to `.claude/smartworkbench-audit.jsonl`: `session.start`, `guard.block`, `guard.ask` (allowed, allowed for session or declined), `guard.session-revoke`, `contract.lock` / `contract.unlock`, `condition.verified` / `condition.waived` / `condition.unmark`, `task.complete`, `task.new` / `task.load` / `task.clear`, `task.share` / `task.pickup`. Each line carries the time, the git `user.name`, the session id and the details (tool, input summary, reason, note). Past 1 MB the log moves to `.1` and a new one starts. Read it with `/swb audit [n]`; commit it if the team wants a shared record, or ignore it to keep it local. A failed write never lets a guarded call through.
+With `"audit": true` (or `{ "path": "logs/agent-audit.jsonl" }`, a path inside the repository) every session appends one JSON line per event to `.claude/smartworkbench-audit.jsonl`: `session.start`, `guard.block`, `guard.ask` (allowed, allowed for session or declined), `guard.session-revoke`, `contract.lock` / `contract.unlock`, `condition.verified` / `condition.waived` / `condition.unmark`, `task.complete`, `task.new` / `task.load` / `task.clear`, `task.share` / `task.pickup`, `team.*` (`team.on`, `team.off`, `team.role`, `team.design-required`, `team.plan-review-required`, `team.repeat-error`, `team.final-check-required`, `team.advisor`) and `loop.*`. Each line carries the time, the git `user.name`, the session id and the details (tool, input summary, reason, note). Past 1 MB the log moves to `.1` and a new one starts. Read it with `/swb audit [n]`; commit it if the team wants a shared record, or ignore it to keep it local. A failed write never lets a guarded call through.
 
 ### How completion is judged
 
@@ -277,10 +279,14 @@ hooks/policy.ts      project guard file parsing, globs, rule application
 hooks/files.ts       file classification, suggestions
 hooks/diff.ts        git diff region parsing, per-file evidence links
 hooks/team.ts        audit lines, CI results, issue refs, shared task file
+hooks/crew.ts        team mode decisions (design first, plan review, repeated error, final check)
+hooks/loop.ts        /swb loop decisions (count, items, stop)
+tools/live.mjs       live view server (SSE); tools/live.html is the page
+tools/live-check.mjs  smoke test for the live server: node tools/live-check.mjs
 types/index.d.ts     state type contract
 tests/               claude plugin test
 examples/            sample project with a guard file
-docs/                permissions
+docs/                permissions, live view screenshot
 ```
 
 ```bash
@@ -333,7 +339,7 @@ claude plugin update smartworkbench
 6. **결과 확인**: 턴이 끝나면 완료 요약이 대화에 남습니다. Evidence 탭(`/swb verify`)에서 어떤 조건이 통과했는지, 어떤 파일 변경 뒤에 검증이 있었는지 보고 `Verify`, `Waive`, `Ask Claude to finish`, `Export handoff`를 씁니다.
 7. **다음에 이어 하기**: 프로젝트를 다시 열면 상태가 복원되고, 같은 프로젝트를 연 다른 세션과도 상태가 공유됩니다. 다른 컴퓨터에서는 여기서 `/swb share`, 거기서 `/swb pickup`. 자주 쓰는 설정은 `/swb save <이름>`으로 저장해 둡니다.
 
-키보드로 패널을 쓰려면 `ctrl+x tab`(또는 클릭)으로 패널에 포커스를 옮깁니다. 단축키: `1`–`4` 탭 전환, `l` 잠금/해제, `p` Preview, `r` 위험 호출 일시정지, `f` Ask Claude to finish, `c` Check CI, `x` Export handoff.
+키보드로 패널을 쓰려면 `ctrl+x tab`(또는 클릭)으로 패널에 포커스를 옮깁니다. 단축키: `1`–`5` 탭 전환, `l` 잠금/해제, `p` Preview, `r` 위험 호출 일시정지, `f` Ask Claude to finish, `c` Check CI, `x` Export handoff.
 
 ### 명령어
 
@@ -344,7 +350,7 @@ claude plugin update smartworkbench
 | `/swb` | 패널 열기 |
 | `/swb new` | 새 작업 계약 시작 |
 | `/swb lock` · `/swb unlock` | 계약 잠금·해제 |
-| `/swb team [on\|off]` | 팀 모드: Sonnet 구축, Haiku 탐색, Opus 검토. Team 탭 열기 |
+| `/swb team [on\|off]` | 팀 모드: Opus 설계·검토, Sonnet 구축, Haiku 탐색. Team 탭 열기 |
 | `/swb live [포트\|stop]` | 요청 흐름 실시간 웹 화면 시작·종료 |
 | `/swb team <role> <model> [effort]` | 역할별 모델·effort 지정(`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Opus 조언자에게 바로 묻기 |
@@ -439,13 +445,14 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 
 ### 팀 모드
 
-**Sonnet이 구축하고, Haiku가 탐색하고, Opus가 검토합니다.** Opus의 컨텍스트는 꼭 필요한 결정에만 씁니다.
+**Opus가 설계하고, Sonnet이 구축하고, Haiku가 탐색하고, Opus가 검토합니다.** Opus의 컨텍스트는 꼭 필요한 결정에만 씁니다.
 
 - 세션 시작 시 읽기 전용 에이전트 둘을 등록합니다.
   - `smartworkbench:explorer`(Haiku): 파일 찾기, 코드 읽기, 문서 검색. Claude가 여러 개를 동시에 띄울 수 있습니다.
   - `smartworkbench:advisor`(Opus): Claude가 쓴 핵심 요약(목표, 계획이나 오류, 시도한 것, 경로)만 받아 검토하고 `VERDICT / BLOCKERS / RISKS / MISSING` 형식으로 답합니다. 대화 전체를 받지 않고, 파일을 고치지 않습니다.
 - `/swb team on`은 세션 모델을 Sonnet으로 바꾸고(`/model`과 같은 설정. `/swb team off`가 이전 모델로 되돌림), 매 프롬프트에 짧은 역할 안내를 붙입니다. 그다음 Opus가 스스로 개입합니다.
-  - **계획 검토**: 이번 턴에 advisor가 계획을 검토하기 전까지 `ExitPlanMode`를 돌려보냅니다.
+  - **설계 먼저**: 큰 수정(6줄 또는 400자 초과, 두 번째 파일, 일괄 치환, 한 턴에 작은 수정이 15줄 초과) 전에 advisor가 이번 턴에 `DESIGN`(`APPROACH / FILES / STEPS / RISKS / DONE`)을 내놓기 전까지 수정을 한 번 돌려보냅니다. 작은 수정과 프로젝트 밖 파일은 통과합니다. 루프 회차와 계획 승인 직후의 턴은 이미 가진 설계를 그대로 쓰고, 그 밖의 턴은 다시 요구합니다. 턴마다 한 번만 요구하므로 무시해도 막히지 않고, 감사 로그에 `team.design-required`가 남습니다.
+  - **설계에서 계획으로**: 이번 턴에 advisor가 계획을 다루기 전까지 `ExitPlanMode`를 돌려보냅니다. 제시하는 계획이 곧 그 설계입니다.
   - **반복 오류**: 같은 명령이 연속 2번 실패하면, 그 결과에 오류 출력과 시도한 내용을 들고 advisor와 상의하라는 안내를 붙입니다(명령마다 상의할 때까지 한 번).
   - **마무리 점검**: 코드를 고친 턴은 advisor가 본 뒤에 끝나도록 마지막에 한 번 붙잡습니다. 그래도 끝내면 다음 종료는 통과합니다.
 - `/swb advise [주제]`로 언제든 물을 수 있습니다. Run 탭에 팀 모드와 Opus 검토 횟수가, 밴드에 `Team`이, 감사 로그에 `team.*` 사건이 남습니다.
@@ -501,6 +508,8 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - 화면은 기본이 영어입니다. 오른쪽 위의 `한국어` / `EN` 버튼으로 바꾸고(브라우저에 기억됨), `http://127.0.0.1:4317/?lang=ko` 로 열면 처음부터 한글입니다.
 - 패널은 Opus 조언자, 사용자 프롬프트, Sonnet 리드, 가드 판정(allow / ask / block 막대), Haiku 디스패처, worker / explorer / loop, flags, session log 입니다.
 
+![실시간 보기](docs/live-view.png)
+
 ### 프로젝트 Guard 파일
 
 저장소에 `.claude/smartworkbench.json`을 커밋하면 팀이 같은 규칙을 씁니다. `/smartworkbench policy init`이 예시를 만들어 줍니다.
@@ -534,7 +543,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 
 ### 감사 로그
 
-`"audit": true`(또는 저장소 안 경로를 지정한 `{ "path": "logs/agent-audit.jsonl" }`)이면 모든 세션이 사건마다 JSON 한 줄을 `.claude/smartworkbench-audit.jsonl`에 덧붙입니다. 기록하는 사건은 `session.start`, `guard.block`, `guard.ask`(허용·세션 허용·거절), `guard.session-revoke`, `contract.lock` / `contract.unlock`, `condition.verified` / `condition.waived` / `condition.unmark`, `task.complete`, `task.new` / `task.load` / `task.clear`, `task.share` / `task.pickup`입니다. 줄마다 시각, git `user.name`, 세션 ID, 세부 내용(툴, 입력 요약, 이유, 메모)이 들어갑니다. 1MB를 넘으면 기존 로그를 `.1`로 옮기고 새로 시작합니다. `/swb audit [n]`으로 봅니다. 팀이 함께 보려면 커밋하고, 로컬에만 두려면 `.gitignore`에 넣습니다. 기록에 실패해도 Guard가 막은 호출이 통과되는 일은 없습니다.
+`"audit": true`(또는 저장소 안 경로를 지정한 `{ "path": "logs/agent-audit.jsonl" }`)이면 모든 세션이 사건마다 JSON 한 줄을 `.claude/smartworkbench-audit.jsonl`에 덧붙입니다. 기록하는 사건은 `session.start`, `guard.block`, `guard.ask`(허용·세션 허용·거절), `guard.session-revoke`, `contract.lock` / `contract.unlock`, `condition.verified` / `condition.waived` / `condition.unmark`, `task.complete`, `task.new` / `task.load` / `task.clear`, `task.share` / `task.pickup`, `team.*`(`team.on`, `team.off`, `team.role`, `team.design-required`, `team.plan-review-required`, `team.repeat-error`, `team.final-check-required`, `team.advisor`), `loop.*`입니다. 줄마다 시각, git `user.name`, 세션 ID, 세부 내용(툴, 입력 요약, 이유, 메모)이 들어갑니다. 1MB를 넘으면 기존 로그를 `.1`로 옮기고 새로 시작합니다. `/swb audit [n]`으로 봅니다. 팀이 함께 보려면 커밋하고, 로컬에만 두려면 `.gitignore`에 넣습니다. 기록에 실패해도 Guard가 막은 호출이 통과되는 일은 없습니다.
 
 ### 완료 판정
 
@@ -570,10 +579,14 @@ hooks/policy.ts      프로젝트 Guard 파일 파싱, glob, 규칙 적용
 hooks/files.ts       파일 분류, Suggested 선정
 hooks/diff.ts        git diff 구간 파싱, 파일별 증거 연결
 hooks/team.ts        감사 로그, CI 결과, 이슈 참조, 공유 작업 파일
+hooks/crew.ts        팀 모드 판단 (설계 먼저, 계획 검토, 반복 오류, 마무리 점검)
+hooks/loop.ts        /swb loop 판단 (횟수, 항목, 중단)
+tools/live.mjs       실시간 보기 서버 (SSE), tools/live.html 은 화면
+tools/live-check.mjs  실시간 서버 스모크 테스트: node tools/live-check.mjs
 types/index.d.ts     상태 타입 계약
 tests/               claude plugin test
 examples/            Guard 파일이 있는 샘플 프로젝트
-docs/                권한 문서
+docs/                권한 문서, 실시간 보기 스크린샷
 ```
 
 ```bash

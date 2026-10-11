@@ -34,6 +34,8 @@ type WorldOptions = {
   ask?: (labels: string[]) => string
   // Collects the commands (or tool names) that actually ran.
   ran?: string[]
+  // Collects every process.run call with its stdin.
+  processed?: Array<{ argv: string[]; stdin?: string }>
   // Makes these commands fail as a non-zero exit would.
   fail?: (command: string) => boolean
 }
@@ -74,6 +76,7 @@ function world(on: On, options: WorldOptions = {}) {
     return { value: undefined }
   })
   on('process.run', ($, e) => {
+    options.processed?.push({ argv: e.argv, stdin: e.init?.stdin })
     const run = commands[e.argv.join(' ')] ?? { exitCode: 1, stdout: '', stderr: `unexpected: ${e.argv.join(' ')}` }
     return { value: { exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -802,4 +805,27 @@ test('/swb live reports why the server did not start', async ($, on) => {
   })
 
   expect((await $.command.run({ command: 'swb', args: 'live', ...COMMAND })).text).toContain('EADDRINUSE')
+})
+
+test('the live feed appends through tee with the line on stdin, and only while the feed file exists', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: { '.claude/smartworkbench-live.jsonl': '' }, commands: { [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } }, processed: writes })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the login', ...COMPOSER })
+
+  const append = writes.find(one => one.argv[0] === 'tee')
+  expect(append?.argv).toEqual(['tee', '-a', `${CWD}/.claude/smartworkbench-live.jsonl`])
+  expect(append?.stdin?.endsWith('\n')).toBe(true)
+  expect(JSON.parse(append?.stdin ?? '{}')).toMatchObject({ kind: 'prompt', session: 'session-a', text: 'fix the login' })
+  expect(writes.some(one => one.argv[0] === 'sh')).toBe(false)
+})
+
+test('the live feed stays untouched when no server keeps the feed file', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { processed: writes })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the login', ...COMPOSER })
+  expect(writes.some(one => one.argv[0] === 'tee')).toBe(false)
 })

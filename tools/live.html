@@ -216,7 +216,7 @@ function addLog(at, who, whoClass, html, kind, tag, tagClass){
   var row = document.createElement('div');
   row.className = 'row ' + (kind || '') + fresh();
   row.innerHTML = '<span class="tm">' + clock(at) + '</span><span class="' + whoClass + '">' + esc(who) + '</span><span class="m">' + html + '</span><span>' +
-    (tag ? '<span class="tag ' + tagClass + '">' + tag + '</span>' : '') + '</span>';
+    (tag ? '<span class="tag ' + (/^[a-z]+$/.test(tagClass) ? tagClass : '') + '">' + esc(tag) + '</span>' : '') + '</span>';
   log.insertBefore(row, log.firstChild);
   while (log.children.length > 120) log.removeChild(log.lastChild);
   return row;
@@ -292,7 +292,7 @@ function handle(ev){
       if (ev.policy === 'allow') S.allow++;
       inflight[ev.id] = { lane: lane, tool: ev.tool, summary: ev.summary };
       var kind = ev.policy === 'ask' ? 'ask' : ev.policy === 'block' ? 'block' : '';
-      var row = addLog(at, who, whoClass, esc(ev.tool) + ' <i>' + esc(cut(ev.summary, 80)) + '</i>', kind, String(ev.policy).toUpperCase(), ev.policy);
+      var row = addLog(at, who, whoClass, esc(ev.tool) + ' <i>' + esc(cut(ev.summary, 80)) + '</i>', kind, String(ev.policy).toUpperCase(), { allow: 'allow', ask: 'ask', block: 'block' }[ev.policy] || 'info');
       inflight[ev.id].row = row;
       if (ev.policy === 'block') delete inflight[ev.id];
       break;
@@ -376,7 +376,7 @@ $('clear').onclick = function(){ events = []; replay(); };
 
 var connected = false, everOpened = false;
 var es = new EventSource('/events');
-es.onopen = function(){ connected = true; everOpened = true; $('state').className = 'live'; translate(); };
+es.onopen = function(){ if (everOpened) { events = []; replay(); } connected = true; everOpened = true; $('state').className = 'live'; translate(); };
 es.onerror = function(){ connected = false; $('state').className = 'live off'; translate(); };
 es.onmessage = function(m){
   try { var ev = JSON.parse(m.data); events.push(ev); if (events.length > 2000) events.shift(); handle(ev); } catch (e) {}

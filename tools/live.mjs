@@ -19,30 +19,42 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(1)
 }
 
-mkdirSync(dirname(feed), { recursive: true })
-writeFileSync(feed, '')
+// Set once this process owns the feed; only the owner removes it, so a failed second start never deletes a running one's file.
+let created = false
 
 const clients = new Set()
+// The newest lines are kept in memory and replayed to a new connection, so the file can grow without every page load re-reading it.
+const RECENT_MAX = 2000
+const recent = []
 let offset = 0
 let rest = ''
 
 function pump() {
-  if (!existsSync(feed)) return
-  const size = statSync(feed).size
-  if (size < offset) {
-    offset = 0
-    rest = ''
-  }
-  if (size === offset) return
-  const fd = openSync(feed, 'r')
-  const buffer = Buffer.alloc(size - offset)
-  readSync(fd, buffer, 0, buffer.length, offset)
-  closeSync(fd)
-  offset = size
-  const lines = (rest + buffer.toString('utf8')).split('\n')
-  rest = lines.pop() ?? ''
-  for (const line of lines.filter(Boolean)) {
-    for (const res of clients) res.write(`data: ${line}\n\n`)
+  try {
+    if (!existsSync(feed)) return
+    const size = statSync(feed).size
+    if (size < offset) {
+      offset = 0
+      rest = ''
+    }
+    if (size === offset) return
+    const fd = openSync(feed, 'r')
+    const buffer = Buffer.alloc(size - offset)
+    try {
+      readSync(fd, buffer, 0, buffer.length, offset)
+    } finally {
+      closeSync(fd)
+    }
+    offset = size
+    const lines = (rest + buffer.toString('utf8')).split('\n')
+    rest = lines.pop() ?? ''
+    for (const line of lines.filter(Boolean)) {
+      recent.push(line)
+      if (recent.length > RECENT_MAX) recent.shift()
+      for (const res of clients) res.write(`data: ${line}\n\n`)
+    }
+  } catch {
+    // The file vanished or is mid-write; the next tick tries again.
   }
 }
 const timer = setInterval(pump, 150)
@@ -59,14 +71,20 @@ const server = createServer((req, res) => {
   if (req.url === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
     res.write(': connected\n\n')
-    for (const line of readFileSync(feed, 'utf8').split('\n').filter(Boolean)) res.write(`data: ${line}\n\n`)
+    pump()
+    for (const line of recent) res.write(`data: ${line}\n\n`)
     clients.add(res)
-    req.on('close', () => clients.delete(res))
+    res.on('close', () => clients.delete(res))
     return
   }
   if (req.url === '/' || req.url?.startsWith('/?')) {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    res.end(readFileSync(page))
+    try {
+      const html = readFileSync(page)
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(html)
+    } catch {
+      res.writeHead(500).end()
+    }
     return
   }
   res.writeHead(404).end()
@@ -74,15 +92,32 @@ const server = createServer((req, res) => {
 
 function stop() {
   clearInterval(timer)
-  rmSync(feed, { force: true })
   server.close()
   process.exit(0)
 }
 process.on('SIGINT', stop)
 process.on('SIGTERM', stop)
+process.on('SIGHUP', stop)
+process.on('exit', () => {
+  if (created) rmSync(feed, { force: true })
+})
+
+// Not "SmartWorkbench live:" — the plugin reads that prefix as a successful start.
+server.on('error', err => {
+  console.error(`Cannot listen on 127.0.0.1:${port}: ${err.code ?? err.message}`)
+  process.exit(1)
+})
 
 // Local only: the feed holds prompts and commands.
 server.listen(port, '127.0.0.1', () => {
+  try {
+    mkdirSync(dirname(feed), { recursive: true })
+    writeFileSync(feed, '')
+    created = true
+  } catch (err) {
+    console.error(`Cannot create ${feed}: ${err.code ?? err.message}`)
+    process.exit(1)
+  }
   console.log(`SmartWorkbench live: http://127.0.0.1:${port}  (project ${project})`)
   console.log('Ctrl+C stops the view and the feed.')
 })
