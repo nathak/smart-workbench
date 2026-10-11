@@ -17,7 +17,7 @@ const AT = String.raw`(?:^|[\s;&|(\`"'/\\])`
 // Any arguments before the one we look for, within the same simple command.
 const ARGS = String.raw`(?:[^;&|\n]*\s)?`
 // Like ARGS, but it stops at a command substitution, whose own flags are not the outer command's.
-const FLAT_ARGS = String.raw`(?:[^;&|\n(\`]*\s)?`
+const FLAT_ARGS = String.raw`(?:(?:[^;&|\n(\`]|(?<!\$)\()*\s)?`
 const WORD_END = String.raw`(?=$|[\s;&|)])`
 // A lone "." (the whole tree) or the repository root, with or without quotes.
 const WHOLE_TREE = String.raw`(?:["']?\.(?:\/+\.?)*\/*["']?|["']?:\/["']?)`
@@ -63,7 +63,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     stripped: true,
-    pattern: re(String.raw`${AT}rm\s+${FLAT_ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
+    pattern: re(String.raw`${AT}rm["']?\s+${FLAT_ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
     reason: 'recursive delete',
   },
   {
@@ -114,14 +114,14 @@ const BASH_RULES: readonly Rule[] = [
   },
 ]
 
-// Quoted text that is data, not a command, is blanked before the rules read it: the value of a message flag
-// (git commit -m "..."), the pattern of a search (grep "rm -rf") and the body of a cat heredoc commit message.
-// Every other quote keeps its content, so bash -c "...", eval, ssh host "..." and the like are still read.
+// Quoted text that is data, not a command, is blanked before the rules read it. Only two shapes count as data, each on a
+// command that cannot be redefined by an alias (builtin subcommands, no global options): the value of a message flag
+// (git commit -m "...", gh pr create --body "...") and the pattern of a search (grep "rm -rf", git grep "..."). Every
+// other quote keeps its content, so bash -c "...", eval, ssh host "..." and the like are still read.
 const QUOTED = /\\[\s\S]|'[^']*'|"(?:[^"\\]|\\[\s\S])*"/g
-const DATA_FLAG = /(?:^|\s)(?:-[a-zA-Z]*m|--(?:message|title|body|notes|subject|grep))=?$/
-const SEARCH = /^\s*(?:\S*\/)?(?:[ef]?grep|rg|ag|ack)\s|^\s*git\b.*\sgrep\s/
-// A message flag is read as data only for git and gh; a search that can run a program (rg --pre) keeps its quotes read.
-const GIT_OR_GH = /^\s*(?:\S*\/)?(?:git|gh)\b/
+const DATA_FLAG = /(?:^|\s)(?:-[a-zA-Z]*m|--(?:message|title|body|notes|subject))=?$/
+const MESSAGE_COMMAND = /^\s*(?:git\s+(?:commit|tag|merge|revert|notes\s+\w+|stash\s+(?:push|save))|gh\s+(?:pr|issue|release)\s+\w+)\b/
+const SEARCH_COMMAND = /^\s*(?:[ef]?grep|rg|ag|ack|git\s+grep)\s/
 // A search keeps a quoted pattern as data only when every option on its command is a known harmless one, so an option that
 // runs a program (rg --pre, git grep -O) or an abbreviation of one keeps the quotes read. Options after the quote count too.
 const SAFE_SHORT = /^-[inwFEPelrRHhcvsqxogtABC]+$/
@@ -137,7 +137,10 @@ function hasOnlySafeOptions(words: string): boolean {
     .filter(word => word.startsWith('-') && word !== '-')
     .every(word => SAFE_SHORT.test(word) || SAFE_LONG.test(word))
 }
-const RUNNER = /\b(?:(?:ba|z|da|k)?sh|su|eval|ssh)\b/
+
+// Words that run text they are given: shells, eval, ssh, su, other shells, and an interpreter's inline-code flag. A name
+// inside a longer word (build.sh, ~/.ssh, --type sh) is not one.
+const RUNNER = /(?<![\w.\/-])(?:(?:ba|z|da|k|c|tc|a|mk|fi)?sh|su|eval|ssh|(?:python|node|perl|ruby|php)[\d.]*\s+-[a-zA-Z]*[ce]\b|watch|flock|script)(?![\w.-])/
 
 // "$(cat <<'EOF' ... EOF ... )": only the heredoc body, with nothing but the closing ")" after it.
 function isCatHeredoc(inner: string): boolean {
@@ -149,34 +152,42 @@ function isCatHeredoc(inner: string): boolean {
   return end >= 0 && lines.slice(end + 1).join('\n').trim() === ')'
 }
 
-// Quote pairing here is flat, so any construct that makes bash pair quotes differently makes the pairing untrustworthy:
-// comments, heredocs, $'...', backticks, a quote left unpaired, or a command substitution inside double quotes (other than
-// the cat heredoc commit message). The whole command is then read as typed. A shell word that runs its arguments
-// (eval, ssh, sh -c) anywhere outside quotes does the same.
-function isPairingSafe(command: string): boolean {
+// Quote pairing here is flat, so any construct that makes bash pair quotes differently, or run text as code, makes the
+// pairing untrustworthy: a comment (a # that starts a word, also after a bracket), a heredoc, $'...', a backtick, a quote
+// left unpaired, a line continuation, a function definition, a command substitution inside double quotes (other than the
+// cat heredoc commit message), or a RUNNER word outside quotes. The whole command is then read as typed.
+function isPairingSafe(command: string, hadContinuation: boolean): boolean {
+  if (hadContinuation) return false
   const outside = command.replace(QUOTED, ' ')
-  if (/(^|[\s;&|(])#|<<|`|['"]/.test(outside) || command.includes("$'") || RUNNER.test(outside)) return false
+  if (/(^|[\s;&|()<>])#|<<|`|['"]/.test(outside) || command.includes("$'") || RUNNER.test(outside)) return false
+  if (/[\w.-]+\s*\(\s*\)|\bfunction\s/.test(outside)) return false
   const doubles = command.match(/"(?:[^"\\]|\\[\s\S])*"/g) ?? []
   return doubles.every(one => !/\$\(|\$\{|`/.test(one) || isCatHeredoc(one.slice(1, -1)))
 }
 
-function maskData(command: string): string {
-  if (!isPairingSafe(command)) return command
+function maskData(command: string, hadContinuation = false): string {
+  if (!isPairingSafe(command, hadContinuation)) return command
+  // Same text with every quoted stretch overwritten by spaces: separators are found here, so a ; or | inside quotes
+  // never starts a new command.
+  const filled = command.replace(QUOTED, one => ' '.repeat(one.length))
   return command.replace(QUOTED, (match: string, offset: number) => {
     if (match[0] === '\\') return match
     const inner = match.slice(1, -1)
     const isPlain = !inner.includes('\n') && !(match[0] === '"' && /\$\(|`/.test(inner))
     if (!isPlain && !(match[0] === '"' && isCatHeredoc(inner))) return match
-    const before = command.slice(Math.max(0, offset - 256), offset)
-    const segment = before.slice(Math.max(...[';', '&', '|', '\n'].map(one => before.lastIndexOf(one))) + 1)
+    const from = Math.max(0, offset - 256)
+    const before = command.slice(from, offset)
+    const separator = Math.max(...[';', '&', '|', '\n'].map(one => filled.lastIndexOf(one, offset - 1)))
+    const segment = command.slice(Math.max(separator + 1, from), offset)
     if (RUNNER.test(segment)) return match
-    const isMessage = GIT_OR_GH.test(segment) && DATA_FLAG.test(before.trimEnd())
-    if (isMessage) return match[0] + match[0]
-    // Only a bounded stretch after the quote is checked; a longer one is treated as unsafe, not skipped.
-    const after = command.slice(offset + match.length, offset + match.length + 257).split(/[;&|\n]/)[0] ?? ''
+    if (MESSAGE_COMMAND.test(segment) && DATA_FLAG.test(before.trimEnd())) return match[0] + match[0]
     // A pattern is a word of its own: one that starts with a dash, or is glued to the word before or after it, is not blanked.
-    if (inner.trimStart().startsWith('-') || /\S$/.test(before) || /^[^\s;&|)]/.test(command.slice(offset + match.length, offset + match.length + 1))) return match
-    return after.length <= 256 && SEARCH.test(segment) && hasOnlySafeOptions(segment + ' ' + after) ? match[0] + match[0] : match
+    const end = offset + match.length
+    if (inner.trimStart().startsWith('-') || /\S$/.test(before) || /^[^\s;&|)]/.test(command.slice(end, end + 1))) return match
+    // Only a bounded stretch after the quote is checked; a longer one is treated as unsafe, not skipped.
+    const stop = filled.slice(end, end + 257).search(/[;&|\n]/)
+    const after = command.slice(end, stop < 0 ? end + 257 : end + stop)
+    return after.length <= 256 && SEARCH_COMMAND.test(segment) && hasOnlySafeOptions(`${segment} ${after}`) ? match[0] + match[0] : match
   })
 }
 
@@ -225,8 +236,10 @@ export function classify(tool: string, input: unknown): Verdict {
 
   if (tool === 'Bash') {
     // A backslash before a newline continues the command, as in bash; join it so a rule still reads one line.
-    const command = String(args.command ?? '').replace(/\\\r?\n/g, ' ')
-    const data = maskData(command)
+    const typed = String(args.command ?? '')
+    const command = typed.replace(/\\\r?\n/g, ' ')
+    // Bash joins a line only at an odd run of backslashes and never across \r, so a continuation is not trusted for pairing.
+    const data = maskData(command, /\\\r?\n/.test(typed))
     const plain = withoutSubstitutions(data)
     const rule = BASH_RULES.find(one => {
       const text = one.raw ? command : data

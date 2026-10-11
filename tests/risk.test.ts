@@ -136,7 +136,35 @@ describe('risk rules', () => {
     expect(policyOf("git commit -m \"$(cat <<'EOF'\nm\nEOF\nrm -rf x\n)\"")).toBe('block')
   })
 
-  test('mkfs is blocked only on a device; whole-tree restores are blocked in any quoting; a root file restore is not', async () => {
+  test('data quotes survive only on a fixed command shape; comments, functions, aliases and continuations turn masking off', async () => {
+    for (const command of [
+      // a comment that starts after a bracket
+      "(:)#'\n'; grep '; rm -rf /tmp/x; ';'\n(:)#'",
+      // a ; inside an earlier quote does not start a new command
+      "python3 -c 'import os,sys;os.system(sys.argv[1]); grep ' 'rm -rf /tmp/x'",
+      // an alias or a function can make a "message" or a "search" run the text
+      "git -c alias.x='!$2 #' x -m 'rm -rf /tmp/x'",
+      "git -c alias.x='!$2 #' x grep 'rm -rf /tmp/x'",
+      "grep(){ $1; }; grep 'rm -rf /tmp/x'",
+      "cat(){ python3; }; git commit -m \"$(cat <<'EOF'\nimport os;os.system('rm -rf /tmp/x')\nEOF\n)\"",
+      // -m is a message flag of commit, not of checkout or restore
+      "git checkout -m '.'",
+      "git restore -m '.'",
+      // a continuation, even with an even run of backslashes or a CR, is not trusted for pairing
+      "grep x \\\\\n'rm' -r /tmp/x",
+      "grep x \\\r\n'rm' -r /tmp/x",
+      // operands before the flags, and a "(" that is not a substitution
+      "rm 'a(' -rf /tmp/x",
+      'rm "f (1)" -r d',
+    ]) {
+      expect(policyOf(command)).toBe('block')
+    }
+    for (const command of ['grep -rn "rm -rf" scripts/*.sh', 'git add a.sh && git commit -m "drop rm -rf"', 'rm -f $(ls -tr | head -1)', 'git commit -m "fix #12 rm -rf step"']) {
+      expect(policyOf(command)).toBe('allow')
+    }
+  })
+
+  test('mkfs is blocked in command position; whole-tree restores are blocked in any quoting; a root file restore is not', async () => {
     // mkfs is blocked in command position unless it only asks for help; a path cannot be proven to be a plain file from text,
     // so an image file is blocked too (run it yourself).
     for (const command of ['mkfs.ext4 disk.img', 'mkfs -t ext4 build/disk.raw', 'mkfs -t ext4 /dev/sdb', 'mkfs.ext4 $DEV', 'mkfs.ext4 "/dev/sdb1"', 'sudo mkfs.xfs -f sda', 'cd /dev && mkfs sdb', 'mkfs.ext4 /dev/sda x.img', 'mkfs.ext4 $DEV x.img', 'mkfs.ext4 x.img /dev/sdb']) {
