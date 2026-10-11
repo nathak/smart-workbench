@@ -164,5 +164,7 @@ describe('repository paths', () => {
     expect(repoPath('/w2/a', '/w')).toBe(undefined)
     const rules = parsePolicy(JSON.stringify({ rules: [{ tool: 'Edit', path: 'secrets/**', policy: 'block' }] })).rules
     expect(matchRule(rules, 'Edit', { file_path: '/w/src/../secrets/k' }, '/w')?.policy).toBe('block')
+    const outside = parsePolicy(JSON.stringify({ rules: [{ tool: 'Write', path: '/etc/**', policy: 'block' }] })).rules
+    expect(matchRule(outside, 'Write', { file_path: '/w/../etc/hosts' }, '/w')?.policy).toBe('block')
   })
 })

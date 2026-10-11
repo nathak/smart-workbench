@@ -347,8 +347,7 @@ export function summarize(tool: string, input: unknown): string {
 
 // Commands whose meaning sits in two subcommand words (gh pr create, kubectl rollout restart).
 const TWO_WORDS = new Set(['gh', 'kubectl', 'docker', 'aws', 'gcloud', 'az', 'helm', 'fly', 'vercel', 'firebase'])
-const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'exec'])
-const ARGUMENT_WRAPPERS = new Set(['timeout', 'nice'])
+const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'exec', 'timeout', 'nice'])
 
 // Folds `.`, empty segments and `..` out of a path as text, so `.claude/./x` and `src/../secrets/k` cannot dodge a path rule.
 // No file system access: symlinks are not followed.
@@ -365,27 +364,35 @@ export function normalisePath(path: string): string {
   return (absolute ? '/' : '') + out.join('/')
 }
 
-// timeout and nice take their own arguments before the command they run.
-const FLAG_VALUE = /^(?:-[skn]|--(?:signal|kill-after|adjustment))$/
+// Wrappers take flags (some with a value) and sometimes a duration before the command they run.
+const FLAG_VALUE: Record<string, RegExp> = {
+  timeout: /^(?:-[sk]|--(?:signal|kill-after))$/,
+  nice: /^(?:-n|--adjustment)$/,
+  sudo: /^(?:-[ughCDprRtT]|--(?:user|group|host|chdir|prompt|role|type|chroot))$/,
+  env: /^(?:-[uCS]|--(?:unset|chdir|split-string))$/,
+  exec: /^-a$/,
+  time: /^(?:-[fo]|--(?:format|output))$/,
+}
 
 function dropWrapper(words: string[]): void {
-  const wrapper = words.shift()
+  const wrapper = words.shift() ?? ''
   while (words.length > 0 && (words[0] ?? '').startsWith('-')) {
     const flag = words.shift() ?? ''
-    if (FLAG_VALUE.test(flag)) words.shift()
+    if (FLAG_VALUE[wrapper]?.test(flag)) words.shift()
   }
-  if (wrapper === 'timeout' && /^\d+(?:\.\d+)?[smhd]?$/.test(words[0] ?? '')) words.shift()
+  if (wrapper === 'timeout' && /^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[smhd]?$/.test(words[0] ?? '')) words.shift()
 }
 
 // "FOO=1 sudo git push origin main" → "git push"; flags and later arguments are dropped.
 export function commandPrefix(segment: string): string | undefined {
   const words = segment.trim().split(/\s+/).filter(Boolean)
-  while (words.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? '') || WRAPPERS.has(words[0] ?? '') || ARGUMENT_WRAPPERS.has(words[0] ?? ''))) {
-    if (ARGUMENT_WRAPPERS.has(words[0] ?? '')) dropWrapper(words)
+  while (words.length > 0 && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0] ?? '') || WRAPPERS.has(words[0] ?? ''))) {
+    if (WRAPPERS.has(words[0] ?? '')) dropWrapper(words)
     else words.shift()
   }
   const [command, ...rest] = words
-  if (!command) return undefined
+  // A flag where the command should be means a wrapper option this code does not know: no prefix, so nothing is remembered for it.
+  if (!command || command.startsWith('-')) return undefined
 
   const subcommands = rest.filter(word => !word.startsWith('-')).slice(0, TWO_WORDS.has(command) ? 2 : 1)
 
@@ -420,7 +427,8 @@ export function sessionScope(tool: string, input: unknown, verdict: Verdict): Se
     return { key: `bash:${unique.join(' && ')}`, label: unique.join(' && ') }
   }
 
-  const path = args.file_path ?? args.notebook_path
+  const rawPath = args.file_path ?? args.notebook_path
+  const path = typeof rawPath === 'string' ? normalisePath(rawPath) : rawPath
   if (typeof path === 'string' && path !== '') {
     const kind = EDIT_TOOLS.has(tool) ? 'edit' : tool.toLowerCase()
     return { key: `${kind}:${path}`, label: `${EDIT_TOOLS.has(tool) ? 'edits of' : tool} ${path}` }

@@ -196,8 +196,11 @@ export function repoPath(path: string, cwd: string): string | undefined {
   return full.startsWith(prefix) ? full.slice(prefix.length) : undefined
 }
 
+// A path outside the repository still has its dots folded, so a rule on /etc/** is not dodged by /repo/../etc/hosts.
 function relative(path: string, cwd: string): string {
-  return repoPath(path, cwd) ?? path
+  if (/^[A-Za-z]:[\\/]/.test(path)) return path
+
+  return repoPath(path, cwd) ?? normalisePath(path.startsWith('/') ? path : `${cwd}/${path}`)
 }
 
 export function matchRule(rules: readonly ProjectRule[], tool: string, input: unknown, cwd: string): ProjectRule | undefined {
