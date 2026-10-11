@@ -142,4 +142,29 @@ describe('which command counts as a check', () => {
     expect(checkOutcome('npm test; npm run lint', 'lint', false)).toBe(false)
     expect(checkOutcome('npm ci && npm test', 'test', false)).toBe(false)
   })
+  test('comments, escapes and flags that skip the check do not make a pass', () => {
+    expect(checkOutcome("npm test  # see what's broken\necho 'done'", 'test', true)).toBe(null)
+    expect(checkOutcome('ls  # ; npm test', 'test', true)).toBe(null)
+    expect(evidenceKindsOf('ls # ; npm test')).toEqual([])
+    for (const command of ['npx tsc --version', 'tsc --init', 'mypy --version', 'ruff format .', 'cargo test --no-run', 'pytest --collect-only', 'jest --listTests', 'make -n test', './gradlew test --dry-run', 'mvn verify -DskipTests']) {
+      expect([command, evidenceKindsOf(command)]).toEqual([command, []])
+    }
+    expect(evidenceKindsOf('pytest -n 4')).toEqual(['test'])
+  })
+
+  test('background after a digit, substitutions, late pipefail and negated pipelines are unknown', () => {
+    expect(checkOutcome('npm run build > b.log 2>&1&', 'build', true)).toBe(null)
+    expect(checkOutcome('echo $(cd a; npm test)', 'test', true)).toBe(null)
+    expect(checkOutcome('npm test | tail && set -o pipefail', 'test', true)).toBe(null)
+    expect(checkOutcome('echo "set -o pipefail"; npm test | tail', 'test', true)).toBe(null)
+    expect(checkOutcome('! a | npm test', 'test', true)).toBe(null)
+  })
+
+  test('long runs of flags classify in linear time', () => {
+    const start = performance.now()
+    evidenceKindsOf(`npm ${'--a '.repeat(60)}x`)
+    evidenceKindsOf(`npm ${'-w '.repeat(60)}x`)
+    evidenceKindsOf(`make ${'-C '.repeat(60)}x`)
+    expect(performance.now() - start).toBeLessThan(250)
+  })
 })

@@ -6,7 +6,7 @@ const PREFIX = /^(?:(?:time|exec|command|env|nice|timeout\s+\d+\w*)\s+|[A-Za-z_]
 const LAUNCHER = String.raw`(?:(?:npx|bunx|pnpx|pnpm\s+(?:exec|dlx)|yarn(?:\s+exec)?|npm\s+exec|uv\s+run|poetry\s+run|pipenv\s+run)\s+(?:-\S+\s+)*|(?:\S*\/)?node_modules\/\.bin\/|\S*\.venv\/bin\/)?`
 // npm-style script runners; -w pkg / --filter x / -C dir take a value, other flags do not.
 const SCRIPT = (names: string) =>
-  String.raw`(?:npm|pnpm|yarn|bun)\s+(?:(?:-w|--workspace|--filter|-F|-C|--prefix|--cwd|--dir)(?:=\S+|\s+\S+)\s+|-{1,2}[\w-]+\s+)*(?:run(?:-script)?\s+)?(?:${names})(?:[:-][\w:.-]*)?(?=\s|$)`
+  String.raw`(?:npm|pnpm|yarn|bun)\s+(?:(?:-w|--workspace|--filter|-F|-C|--prefix|--cwd|--dir)(?:=\S+|\s+[^\s-]\S*)\s+|--?\w[\w-]*\s+)*(?:run(?:-script)?\s+)?(?:${names})(?:[:-][\w:.-]*)?(?=\s|$)`
 // Goals of a build tool come after any options: `mvn -q clean test`, `./gradlew :app:test`.
 const GOAL = (tool: string, goals: string) => String.raw`(?:${tool})(?:\s+\S+)*?\s+(?:\S*:)?(?:${goals})(?=\s|$)`
 
@@ -26,24 +26,32 @@ const KINDS: readonly { kind: EvidenceKind; pattern: RegExp }[] = [
   {
     kind: 'test',
     pattern: new RegExp(
-      `^(?:${LAUNCHER}(?:jest|vitest|mocha|pytest|phpunit|rspec|playwright\\s+test)|${SCRIPT('test')}|(?:npm|pnpm|yarn)\\s+t|python3?\\s+-m\\s+(?:pytest|unittest)|(?:go|deno|dotnet)\\s+test|cargo(?:\\s+\\+\\S+)?\\s+(?:test|t|nextest\\s+run)|claude\\s+plugin\\s+test|bun\\s+test|${GOAL('mvn|\\.?/?mvnw', 'test|verify')}|${GOAL('gradle|\\.?/?gradlew', 'test|check')}|make\\s+(?:(?:-C\\s+\\S+|-\\S+)\\s+)*(?:test|tests|check))(?=\\s|$)`,
+      `^(?:${LAUNCHER}(?:jest|vitest|mocha|pytest|phpunit|rspec|playwright\\s+test)|${SCRIPT('test')}|(?:npm|pnpm|yarn)\\s+t|python3?\\s+-m\\s+(?:pytest|unittest)|(?:go|deno|dotnet)\\s+test|cargo(?:\\s+\\+\\S+)?\\s+(?:test|t|nextest\\s+run)|claude\\s+plugin\\s+test|bun\\s+test|${GOAL('mvn|\\.?/?mvnw', 'test|verify')}|${GOAL('gradle|\\.?/?gradlew', 'test|check')}|make\\s+(?:(?:-C\\s+[^\\s-]\\S*|-\\S+)\\s+)*(?:test|tests|check))(?=\\s|$)`,
     ),
   },
   {
     kind: 'build',
     pattern: new RegExp(
-      `^(?:${SCRIPT('build')}|(?:${LAUNCHER}(?:vite|next|webpack|esbuild|rollup))\\s+build|${LAUNCHER}tsc\\s+(?:\\S+\\s+)*?(?:--build|-b)|(?:go|dotnet)\\s+build|cargo(?:\\s+\\+\\S+)?\\s+(?:build|b)|${GOAL('mvn|\\.?/?mvnw', 'package|install|compile')}|${GOAL('gradle|\\.?/?gradlew', 'build|assemble')}|make\\s*$|make\\s+(?:(?:-C\\s+\\S+|-\\S+)\\s+)*(?:build|all)|claude\\s+plugin\\s+validate)(?=\\s|$)`,
+      `^(?:${SCRIPT('build')}|(?:${LAUNCHER}(?:vite|next|webpack|esbuild|rollup))\\s+build|${LAUNCHER}tsc\\s+(?:\\S+\\s+)*?(?:--build|-b)|(?:go|dotnet)\\s+build|cargo(?:\\s+\\+\\S+)?\\s+(?:build|b)|${GOAL('mvn|\\.?/?mvnw', 'package|install|compile')}|${GOAL('gradle|\\.?/?gradlew', 'build|assemble')}|make\\s*$|make\\s+(?:(?:-C\\s+[^\\s-]\\S*|-\\S+)\\s+)*(?:build|all)|claude\\s+plugin\\s+validate)(?=\\s|$)`,
     ),
   },
 ]
+
+// Quoted stretches, escaped characters and comments overwritten, so operators inside them split nothing.
+function maskText(command: string): string {
+  return command.replace(/\\[\s\S]|'[^']*'|"(?:[^"\\]|\\[\s\S])*"|(?<=^|[\s;&|()])#[^\n]*/g, one => 'x'.repeat(one.length))
+}
+
+// Flags that make a tool exit 0 without running its check (version, dry run, list only, format only, skipped tests).
+const NO_CHECK = /(?:^|\s)(?:--version|--help|--init|--showConfig|--no-run|--collect-only|--co|--listTests|--dry-run|--just-print|-DskipTests|-Dmaven\.test\.skip(?:=true)?)(?=\s|=|$)|^ruff\s+format\b|^make\s+(?:\S+\s+)*-[a-zA-Z]*n\b/
 
 type Segment = { text: string; op: string | undefined }
 
 // Splits at ; & && | || |& and newlines, outside quotes. A lone & (background) is its own operator; 2>&1 and &> are not.
 function segmentsOf(command: string): Segment[] {
-  const masked = command.replace(/'[^']*'|"(?:[^"\\]|\\[\s\S])*"/g, quoted => 'x'.repeat(quoted.length))
+  const masked = maskText(command)
   const result: Segment[] = []
-  const operator = /\|\||&&|\|&|\||;|\n|(?<![>&\d])&(?![>&])/g
+  const operator = /\|\||&&|\|&|\||;|\n|(?<![<>&])&(?![>&])/g
   let from = 0
 
   for (let hit = operator.exec(masked); hit; hit = operator.exec(masked)) {
@@ -58,7 +66,7 @@ function segmentsOf(command: string): Segment[] {
 function kindOfSegment(text: string): EvidenceKind | undefined {
   const body = text.trim().replace(/^[({]\s*/, '').replace(/[)}\s]+$/, '').replace(PREFIX, '')
 
-  return KINDS.find(one => one.pattern.test(body))?.kind
+  return NO_CHECK.test(body) ? undefined : KINDS.find(one => one.pattern.test(body))?.kind
 }
 
 export function evidenceKindsOf(command: string): EvidenceKind[] {
@@ -160,10 +168,15 @@ export function turnSummary(task: Task, evidence: readonly EvidenceRecord[], las
 export function checkOutcome(command: string, kind: EvidenceKind, isOk: boolean): boolean | null {
   const segments = segmentsOf(command)
   const at = segments.findIndex(one => kindOfSegment(one.text) === kind)
-  const hasPipefail = /set\s+-[a-z]*o\s+pipefail|set\s+-o\s+pipefail/.test(command)
-
   if (at < 0) return null
-  if (/^\s*!/.test(segments[at]?.text ?? '')) return null
+  // A check inside $( ), <( ) or backticks reports through another command's exit code.
+  if (/\$\(|[<>]\(|`/.test(maskText(command))) return null
+  // `!` negates a whole pipeline, so look back to its first segment.
+  for (let i = at; i >= 0; i -= 1) {
+    if (/^\s*!/.test(segments[i]?.text ?? '')) return null
+    if (i > 0 && segments[i - 1]?.op !== '|') break
+  }
+  const hasPipefail = segments.slice(0, at).some(one => /^\s*set\s+(?:-[a-z]*o\s+pipefail|-o\s+pipefail)\b/.test(one.text))
 
   for (let i = at - 1; i >= 0; i -= 1) {
     const op = segments[i]?.op
