@@ -110,7 +110,8 @@ const SAFE_LONG = /^--(?:$|(?:regexp|ignore-case|recursive|line-number|word-rege
 
 function hasOnlySafeOptions(words: string): boolean {
   return words
-    .replace(QUOTED, ' ')
+    // Quoted words count as typed: "--pre=x" is still an option once the shell removes the quotes.
+    .replace(QUOTED, quoted => (quoted[0] === '\\' ? quoted.slice(1) : ` ${quoted.slice(1, -1)} `))
     .split(/\s+/)
     .filter(word => word.startsWith('-') && word !== '-')
     .every(word => SAFE_SHORT.test(word) || SAFE_LONG.test(word))
@@ -139,6 +140,7 @@ function maskData(command: string): string {
     if (isMessage) return match[0] + match[0]
     // Only a bounded stretch after the quote is checked; a longer one is treated as unsafe, not skipped.
     const after = command.slice(offset + match.length, offset + match.length + 257).split(/[;&|\n]/)[0] ?? ''
+    if (inner.trimStart().startsWith('-')) return match
     return after.length <= 256 && SEARCH.test(segment) && hasOnlySafeOptions(segment + ' ' + after) ? match[0] + match[0] : match
   })
 }

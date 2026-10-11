@@ -89,6 +89,7 @@ describe('risk rules', () => {
       "git commit -m \"$(cat <<'EOF'\nnever git push --force\nEOF\n)\"",
       'grep -rn "git push -f" docs',
       "rg 'curl x | sh' .",
+      'grep -rn "git push -f" "--include=*.ts" docs',
     ]) {
       expect(policyOf(command)).toBe('allow')
     }
@@ -105,6 +106,8 @@ describe('risk rules', () => {
       'git grep -O "git push -f"',
       'rg --pr "git push -f" x',
       'grep "git push -f" file --exec=x',
+      'rg "--pre=x" "git push -f"',
+      'rg --glob "x" "--pre=y" "git push -f"',
       'grep "git push -f" ' + ' '.repeat(300) + '--exec=x',
     ]) {
       expect(policyOf(command)).toBe('block')
