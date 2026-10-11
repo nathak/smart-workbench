@@ -107,6 +107,8 @@ describe('risk rules', () => {
       'rg --pr "git push -f" x',
       'grep "git push -f" file --exec=x',
       'rg "--pre=x" "git push -f"',
+      'rg --pr"e"=x "git push -f"',
+      "rg --p're'=x \"git push -f\"",
       'rg --glob "x" "--pre=y" "git push -f"',
       'grep "git push -f" ' + ' '.repeat(300) + '--exec=x',
     ]) {
