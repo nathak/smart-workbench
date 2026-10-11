@@ -37,12 +37,14 @@ export function codexCall(command: string): CodexCall | undefined {
 // Anything chained, redirected or expanded ($(...), backticks, a variable) is left to the Guard, whose first matching rule
 // would otherwise hide a later one (`... review; git push`) behind this allowance.
 export function isPlainInvocation(command: string, path: string): boolean {
+  // A newline or any control character is a command separator or hides one; only plain spaces and tabs may separate words.
+  if (/[\x00-\x08\x0a-\x1f\x7f]/.test(command)) return false
   const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const head = new RegExp(`^node\\s+(?:"${escaped}"|${escaped})\\s+(?:review|adversarial-review|task)(?=\\s|$)`).exec(command.trim())
+  const body = command.trim()
+  const head = new RegExp(`^node[ \\t]+(?:"${escaped}"|${escaped})[ \\t]+(?:review|adversarial-review|task)(?=[ \\t]|$)`).exec(body)
   if (!head) return false
-  const rest = command.trim().slice(head[0].length)
 
-  return /^(?:\s+(?:--(?!write\b)[a-z][a-z-]*|"[^"$`\\\n]*"|'[^'\n]*'))*$/.test(rest)
+  return /^(?:[ \t]+(?:--(?!write\b)[a-z][a-z-]*|"[^"$`\\]*"|'[^']*'))*$/.test(body.slice(head[0].length))
 }
 
 // Reviews and tasks send code out; the rest only read local job state.
