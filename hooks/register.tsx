@@ -361,10 +361,9 @@ async function modelRow($: $): Promise<{ value: string; options: string[] } | un
   return { value: String(row.value ?? ''), options: Array.isArray(row.options) ? row.options.map(String) : [] }
 }
 
-// Team on: the automatic reviews start, the lead's model and effort become the session's,
-// and the previous model is kept to put back when team mode goes off.
 // Where the Codex plugin's companion script is, from Claude Code's own plugin list; null when it cannot be found.
-// Nothing is run: a missing or unreadable list just means Codex is unknown, and the feature stays off.
+// Only the list is read (and HOME asked for when the plugin root does not show the plugins folder): a missing or
+// unreadable list just means Codex is unknown, and the feature stays off.
 async function detectCodex($: $): Promise<string | null> {
   try {
     const root = String($.plugin.root)
@@ -431,6 +430,8 @@ async function codexCommand($: $, words: string[]): Promise<string> {
   return `${state} ${path ? 'Plugin found.' : 'Plugin not found.'}\n/swb team codex on|off|check · /swb team codex review|rescue on|off`
 }
 
+// Team on: the automatic reviews start, the lead's model and effort become the session's,
+// and the previous model is kept to put back when team mode goes off.
 async function setTeam($: $, enabled: boolean, isFromCommand = false): Promise<string> {
   const wb = await mutate($, current => ({ ...current, team: { ...current.team, enabled } }))
   await audit($, enabled ? 'team.on' : 'team.off')
@@ -1592,7 +1593,7 @@ async function teamTab($: $, { els, wb, live, width }: View): Promise<RenderElem
             )}
             <Text dimColor wrap="wrap">
               {isOn ? 'Cross-review: one read-only Codex review per turn before the advisor\'s final check. Rescue: one Codex task after a repeated error. ' : 'Acts only while team mode is on. '}
-              --write and transfer always ask. Runs this session: {track.codexRuns ?? 0}
+              Known --write and transfer forms ask. Runs this session: {track.codexRuns ?? 0}
             </Text>
           </Box>
         )
@@ -1798,10 +1799,11 @@ export const register: Register = on => {
     const codexRun = e.tool === 'Bash' ? codex.codexCall(e.command) : undefined
     const codexConfig = codex.codexOf(wb.team)
     const isCodexUse = isTeam && codexConfig.enabled && codexRun !== undefined
-    if (isCodexUse && codexRun.op !== 'task' && codexRun.op !== 'status' && verdict.category === 'codex-send' && codex.hasReviewedThisTurn((live.track ?? crew.EMPTY_TRACK))) {
+    const heldTrack = live.track ?? crew.EMPTY_TRACK
+    if (isCodexUse && verdict.category === 'codex-send' && (codexRun.op === 'task' ? codex.hasTaskedThisTurn(heldTrack) : codex.hasReviewedThisTurn(heldTrack))) {
       await audit($, 'team.codex-repeat')
 
-      return { deny: 'SmartWorkbench team mode: Codex already reviewed this turn; use its findings instead of running it again.' }
+      return { deny: 'SmartWorkbench team mode: Codex already ran this turn; use its findings instead of running it again.' }
     }
     const isCodexAllowed =
       isCodexUse &&
@@ -1930,6 +1932,9 @@ export const register: Register = on => {
       await loadPolicy($)
     }
 
+    if (isTeam && codexRun?.op === 'task' && ran.deny === undefined) {
+      await updateTrack($, track => codex.codexTasked(track, endedAt))
+    }
     if (isTeam && isOk && codexRun && (codexRun.op === 'review' || codexRun.op === 'adversarial-review')) {
       await updateTrack($, track => codex.codexRan(track, endedAt))
       await audit($, 'team.codex-review', { id: call.id })

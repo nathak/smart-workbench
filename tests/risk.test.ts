@@ -273,6 +273,9 @@ describe('risk rules', () => {
     expect(run(`node "\${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "why does it fail; look at src"`).category).toBe('codex-send')
     expect(run(`node ${script} task --write "fix it"`).category).toBe('codex-write')
     expect(run(`node ${script} task "a | b ; c" --write`).category).toBe('codex-write')
+    for (const form of ['task -write "x"', 'task "--write fix it"', "task '--write' x", 'task "fix --write"', 'task --wr\\ite x']) {
+      expect([form, run(`node ${script} ${form}`).category]).toEqual([form, 'codex-write'])
+    }
     expect(run(`node ${script} transfer`).category).toBe('codex-transfer')
     expect(run(`node ${script} status --json`).category).not.toMatch(/^codex-/)
     expect(run(`node ${script} result`).policy).toBe('allow')
