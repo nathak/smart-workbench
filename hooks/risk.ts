@@ -7,35 +7,69 @@ export type Verdict = {
   reason: string
 }
 
-type Rule = { category: string; risk: Risk; policy: Policy; pattern: RegExp; reason: string }
+const re = (source: string, flags = ''): RegExp => new RegExp(source, flags)
+
+// git with its global options skipped (git -C dir push, git -c k=v reset). A value never starts with "-" and every dash
+// word has one reading, so the pattern cannot backtrack exponentially.
+const GIT = String.raw`\bgit(?:\s+(?:-[Cc]\s+[^\s-]\S*|--(?:git-dir|work-tree|namespace|exec-path|super-prefix|config-env)\s+[^\s-]\S*|-[\w-]*(?:=\S*)?))*\s+`
+// Where a command can start: after whitespace, a separator, a quote or a path (/bin/rm, \rm).
+const AT = String.raw`(?:^|[\s;&|(\`"'/\\])`
+// Any arguments before the one we look for, within the same simple command.
+const ARGS = String.raw`(?:[^;&|\n]*\s)?`
+const WORD_END = String.raw`(?=$|[\s;&|)])`
+const SECRET_NAME = String.raw`(?:\w*(?:TOKEN|SECRET|PASSWORD|PASSWD)|(?:\w*_)?(?:API_?)?KEY)`
+
+type Rule = { category: string; risk: Risk; policy: Policy; pattern: RegExp; reason: string; raw?: true }
 
 // Checked in order; the first match decides. Regexes are a workflow guard, not a sandbox.
+// A rule marked raw reads the command as typed; the others read it with message and search text blanked (see maskData).
 const BASH_RULES: readonly Rule[] = [
   {
     category: 'destructive-git',
     risk: 'high',
     policy: 'block',
-    pattern: /\bgit\s+push\b[^;&|\n]*(\s--force\b|\s-f\b|\s--force-with-lease\b|\s\+\S)/,
+    pattern: re(String.raw`${GIT}push\b[^;&|\n]*(\s--force\b|\s-[a-zA-Z]*f|\s--force-with-lease\b|\s\+\S)`),
     reason: 'force push rewrites remote history',
   },
   {
     category: 'destructive-git',
     risk: 'high',
     policy: 'block',
-    pattern: /\bgit\s+(reset\s+[^;&|\n]*--hard|clean\s+[^;&|\n]*-[a-z]*f|checkout\s+[^;&|\n]*--\s+\.|branch\s+[^;&|\n]*-D\b)/,
+    pattern: re(
+      String.raw`${GIT}(?:reset\s+[^;&|\n]*--hard|clean\s+[^;&|\n]*-[a-z]*f|checkout\s+[^;&|\n]*--\s+\.|checkout\s+${ARGS}(?:\.|:\/)${WORD_END}|restore\s+(?!${ARGS}(?:--staged\b|-[a-zA-Z]*S))${ARGS}(?:\.|:\/)${WORD_END}|stash\s+clear\b|branch\s+(?:${ARGS}-[a-zA-Z]*D|(?=${ARGS}(?:--delete\b|-[a-zA-Z]*d))(?=${ARGS}(?:--force\b|-[a-zA-Z]*f))))`,
+    ),
     reason: 'destructive git command discards work',
   },
   {
     category: 'broad-delete',
     risk: 'high',
     policy: 'block',
-    pattern: /(^|[;&|(]\s*|\s)(sudo\s+)?rm\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b|\bfind\b[^;&|\n]*\s-delete\b/,
+    pattern: re(String.raw`${AT}rm\s+${ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
     reason: 'recursive delete',
+  },
+  {
+    category: 'device-write',
+    risk: 'high',
+    policy: 'block',
+    pattern: re(
+      String.raw`${AT}dd\s[^;&|\n]*\bof=\/dev\/(?!null\b|zero\b|stdout\b|stderr\b|tty\b|fd\/|shm\/)|${AT}mkfs(?:\.\w+)?\s+\S|>\s*\/dev\/(?:sd[a-z]|hd[a-z]|vd[a-z]|xvd[a-z]|nvme\d|mmcblk\d|disk\d)`,
+    ),
+    reason: 'overwrites a disk or device',
+  },
+  {
+    category: 'remote-exec',
+    risk: 'high',
+    policy: 'ask',
+    pattern: re(
+      String.raw`\b(?:curl|wget)\b[^;&\n]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:ba|z|da|k)?sh\b|\b(?:(?:ba|z|da|k)?sh\s+(?:-\S+\s+)*|eval\s+)["']?(?:\$\(|<\()\s*(?:curl|wget)\b|(?:\bsource|${AT}\.)\s+<\(\s*(?:curl|wget)\b`,
+    ),
+    reason: 'runs a script downloaded from the network',
   },
   {
     category: 'guard-policy',
     risk: 'medium',
     policy: 'ask',
+    raw: true,
     pattern: /\.claude\/smartworkbench\.json[^;&|\n]*(>|\|\s*tee\b)|(\btee\b|\bsed\s+-i\b|\brm\b|\bmv\b|\bcp\b|>)[^;&|\n]*\.claude\/smartworkbench\.json/,
     reason: 'changes the project guard policy',
   },
@@ -43,17 +77,53 @@ const BASH_RULES: readonly Rule[] = [
     category: 'secret-output',
     risk: 'medium',
     policy: 'ask',
-    pattern: /(^|[;&|]\s*)(env|printenv|set)\s*($|[;&|])|\b(cat|less|head|tail|grep)\b[^;&|\n]*((^|[^\w.])\.env(?!\.(example|sample|template)\b)(\.[\w-]+)?(?=$|[^\w-])|credentials|\.npmrc|\.netrc|id_rsa|\.pem\b)|\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD)\w*|\bgh\s+auth\s+token\b/i,
+    raw: true,
+    pattern: re(
+      String.raw`(^|[;&|]\s*)(env|printenv|set)\s*($|[;&|])|\b(cat|less|head|tail|grep)\b[^;&|\n]*((^|[^\w.])\.env(?!\.(example|sample|template)\b)(\.[\w-]+)?(?=$|[^\w-])|credentials|\.npmrc|\.netrc|id_rsa|\.pem\b)|\$\{?${SECRET_NAME}|\bprintenv\s+(?:-\S+\s+)*${SECRET_NAME}|\bgh\s+auth\s+token\b`,
+      'i',
+    ),
     reason: 'may print secrets',
   },
   {
     category: 'external-send',
     risk: 'medium',
     policy: 'ask',
-    pattern: /\bgit\s+push\b|\bgh\s+(pr\s+(create|merge)|release|issue\s+(create|comment)|api\s+[^;&|\n]*-X\s*(POST|PUT|PATCH|DELETE))|\b(npm|pnpm|yarn|cargo)\s+publish\b|\bcurl\b[^;&|\n]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s(-d|--data|-F|--form)\b)|\b(scp|sftp)\b|\brsync\b[^;&|\n]*\S+:|\bkubectl\s+(apply|delete)|\b(vercel|netlify|fly|firebase)\s+deploy|(^|[;&|(`]\s*|\$\()((sudo|env|time|exec|xargs|nohup|bash|sh|zsh|node|python3?|ruby|npx|make|(npm|pnpm|yarn|bun)(\s+run)?)\s+)*[\w./-]*deploy[\w.-]*(\s|$)/,
+    pattern: re(
+      String.raw`${GIT}push\b|\bgh\s+(pr\s+(create|merge)|release|issue\s+(create|comment)|api\s+[^;&|\n]*-X\s*(POST|PUT|PATCH|DELETE))|\b(npm|pnpm|yarn|cargo)\s+publish\b|\bcurl\b[^;&|\n]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s(-d|--data|-F|--form)\b)|\b(scp|sftp)\b|\brsync\b[^;&|\n]*\S+:|\bkubectl\s+(apply|delete)|\b(vercel|netlify|fly|firebase)\s+deploy|\b(?:docker|podman)\s+(?:image\s+)?push\b|\bdocker\s+buildx\s+build\b[^;&|\n]*\s--push\b|\b(?:terraform|tofu)(?:\s+-\S+)*\s+(?:apply|destroy)\b|\bpulumi\s+(?:up|destroy)\b|(^|[;&|(\`]\s*|\$\()((sudo|env|time|exec|xargs|nohup|bash|sh|zsh|node|python3?|ruby|npx|make|(npm|pnpm|yarn|bun)(\s+run)?)\s+)*[\w./-]*deploy[\w.-]*(\s|$)`,
+    ),
     reason: 'sends to an external system',
   },
 ]
+
+// Quoted text that is data, not a command, is blanked before the rules read it: the value of a message flag
+// (git commit -m "..."), the pattern of a search (grep "rm -rf") and the body of a cat heredoc commit message.
+// Every other quote keeps its content, so bash -c "...", eval, ssh host "..." and the like are still read.
+const QUOTED = /\\[\s\S]|'[^']*'|"(?:[^"\\]|\\[\s\S])*"/g
+const DATA_FLAG = /(?:^|\s)(?:-[a-zA-Z]*m|--(?:message|title|body|notes|subject|grep))=?$/
+const SEARCH = /^\s*(?:\S*\/)?(?:[ef]?grep|rg|ag|ack)\s|^\s*git\b.*\sgrep\s/
+const RUNNER = /\b(?:(?:ba|z|da|k)?sh|su|eval|ssh)\b/
+
+// "$(cat <<'EOF' ... EOF ... )": only the heredoc body, with nothing but the closing ")" after it.
+function isCatHeredoc(inner: string): boolean {
+  const head = /^\$\(\s*cat\s+<<-?[ \t]*(['"])(\w+)\1[ \t]*\n/.exec(inner)
+  if (!head) return false
+  const lines = inner.slice(head[0].length).split('\n')
+  const end = lines.findIndex(line => line.trim() === head[2])
+  return end >= 0 && lines.slice(end + 1).join('\n').trim() === ')'
+}
+
+function maskData(command: string): string {
+  return command.replace(QUOTED, (match: string, offset: number) => {
+    if (match[0] === '\\') return match
+    const inner = match.slice(1, -1)
+    const isPlain = !inner.includes('\n') && !(match[0] === '"' && /\$\(|`/.test(inner))
+    if (!isPlain && !(match[0] === '"' && isCatHeredoc(inner))) return match
+    const before = command.slice(Math.max(0, offset - 256), offset)
+    const segment = before.slice(Math.max(...[';', '&', '|', '\n'].map(one => before.lastIndexOf(one))) + 1)
+    if (RUNNER.test(segment)) return match
+    return DATA_FLAG.test(before.trimEnd()) || SEARCH.test(segment) ? match[0] + match[0] : match
+  })
+}
 
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'WebSearch', 'WebFetch', 'ToolSearch', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'])
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
@@ -101,7 +171,8 @@ export function classify(tool: string, input: unknown): Verdict {
   if (tool === 'Bash') {
     // A backslash before a newline continues the command, as in bash; join it so a rule still reads one line.
     const command = String(args.command ?? '').replace(/\\\r?\n/g, ' ')
-    const rule = BASH_RULES.find(one => one.pattern.test(command))
+    const data = maskData(command)
+    const rule = BASH_RULES.find(one => one.pattern.test(one.raw ? command : data))
 
     return rule
       ? { category: rule.category, risk: rule.risk, policy: rule.policy, reason: rule.reason }
@@ -136,7 +207,7 @@ export function classify(tool: string, input: unknown): Verdict {
 }
 
 // Asked even under the permissive profile.
-const ALWAYS_ASK = new Set(['secret-output', 'secret-file', 'guard-policy', 'mcp-deploy'])
+const ALWAYS_ASK = new Set(['secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec'])
 
 // Applies the profile and the pause switch on top of the default (balanced) rule set.
 export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolean): Policy {

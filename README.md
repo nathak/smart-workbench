@@ -184,10 +184,12 @@ Choices are kept per project. The tab also shows the session's current model set
 |---|---|---|
 | Read | Read, Grep, search | Allow |
 | Workspace edit | Edit, Write | Allow (Ask under Strict) |
-| External send | `git push`, `gh pr create`, `npm publish`, `curl -X POST`, deploys | Ask |
+| External send | `git push`, `gh pr create`, `npm publish`, `curl -X POST`, `docker push`, `terraform apply`, deploys | Ask |
 | Possible secrets | `printenv`, `cat .env`, `$..._TOKEN`, editing `.env` | Ask |
-| Destructive git | `push --force`, `reset --hard`, `clean -f`, `branch -D` | Block |
+| Destructive git | `push --force`, `reset --hard`, `clean -f`, `branch -D`, `restore .`, `checkout .`, `stash clear` | Block |
 | Broad delete | `rm -r`, `find -delete` | Block |
+| Disk overwrite | `dd of=/dev/sda`, `mkfs` | Block |
+| Remote script | `curl … \| sh`, `bash <(curl …)` | Ask (even under Permissive) |
 | MCP deploy/release | `mcp__vercel__deploy_project` | Ask (even under Permissive) |
 | MCP issue/alert changes | `mcp__linear__create_issue`, `mcp__pagerduty__acknowledge_incident` | Ask |
 | MCP issue/observability reads | `mcp__linear__list_issues`, `mcp__sentry__search_events` | Allow |
@@ -196,6 +198,7 @@ Choices are kept per project. The tab also shows the session's current model set
 - **Allow for session** stops asking for the same thing until the session ends: a shell command by its command and subcommand (`git push`, `npm publish`, `gh pr create`), a file edit by its path, an MCP tool by its name. A chain counts only as the same set of commands, so `git push && curl -X POST …` is asked again after allowing `git push`. It never lifts a Block, is not offered for editing the guard file, and is ignored while `Pause risky calls` is on. The Run tab lists these under ALLOWED FOR THIS SESSION, each with `×` to revoke; such calls show `SESSION` there.
 - Block does not run the tool and tells Claude why.
 - If the guard itself fails, only high-risk calls are refused (fail closed); everything else falls back to the normal flow.
+- `git -C dir push -f`, `/bin/rm -rf`, `rm -f -r` and `git push -fu` are read like their plain forms. Quoted text that is data (a commit message after `-m`, the pattern of `grep`/`rg`) is not read as a command; every other quote, such as `bash -c "..."`, still is.
 - This is a regex-based workflow control, not a security sandbox.
 
 ### Live view
@@ -484,10 +487,12 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 |---|---|---|
 | 읽기 | Read, Grep, 검색 | Allow |
 | 워크스페이스 편집 | Edit, Write | Allow (Strict에서는 Ask) |
-| 외부 전송 | `git push`, `gh pr create`, `npm publish`, `curl -X POST`, 배포 | Ask |
+| 외부 전송 | `git push`, `gh pr create`, `npm publish`, `curl -X POST`, `docker push`, `terraform apply`, 배포 | Ask |
 | 비밀 가능 출력 | `printenv`, `cat .env`, `$..._TOKEN`, `.env` 편집 | Ask |
-| 파괴적 Git | `push --force`, `reset --hard`, `clean -f`, `branch -D` | Block |
+| 파괴적 Git | `push --force`, `reset --hard`, `clean -f`, `branch -D`, `restore .`, `checkout .`, `stash clear` | Block |
 | 광범위 삭제 | `rm -r`, `find -delete` | Block |
+| 디스크 덮어쓰기 | `dd of=/dev/sda`, `mkfs` | Block |
+| 원격 스크립트 실행 | `curl … \| sh`, `bash <(curl …)` | Ask (Permissive에서도) |
 | MCP 배포·릴리스 | `mcp__vercel__deploy_project` | Ask (Permissive에서도) |
 | MCP 이슈·알림 변경 | `mcp__linear__create_issue`, `mcp__pagerduty__acknowledge_incident` | Ask |
 | MCP 이슈·관측 조회 | `mcp__linear__list_issues`, `mcp__sentry__search_events` | Allow |
@@ -496,6 +501,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - **Allow for session**을 고르면 세션이 끝날 때까지 같은 대상은 다시 묻지 않습니다. Bash는 명령과 하위 명령(`git push`, `npm publish`, `gh pr create`), 파일 편집은 경로, MCP 툴은 툴 이름 단위입니다. 연결된 명령은 같은 명령 묶음일 때만 해당하므로, `git push`를 허용했어도 `git push && curl -X POST …`는 다시 묻습니다. Block은 풀리지 않고, Guard 파일 수정에는 이 선택지가 없으며, `Pause risky calls`가 켜져 있으면 무시됩니다. Run 탭의 ALLOWED FOR THIS SESSION에 목록이 나오고 `×`로 취소합니다. 이렇게 통과한 호출은 Run 탭에 `SESSION`으로 표시됩니다.
 - Block은 툴을 실행하지 않고 이유를 Claude에게 돌려줍니다.
 - Guard 내부 오류 시 High-risk 호출만 막고(fail closed) 나머지는 기본 흐름으로 돌아갑니다.
+- `git -C dir push -f`, `/bin/rm -rf`, `rm -f -r`, `git push -fu`는 기본 형태와 똑같이 판정합니다. 데이터인 따옴표 문구(`-m` 뒤의 커밋 메시지, `grep`/`rg`의 검색어)는 명령으로 보지 않고, `bash -c "..."`처럼 그 밖의 따옴표는 계속 검사합니다.
 - 정규식 기반의 작업 흐름 통제 장치이며 보안 샌드박스가 아닙니다.
 
 ### 실시간 보기
