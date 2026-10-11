@@ -196,7 +196,7 @@ button:hover{color:var(--fg)}
       </div>
     </div>
 
-    <aside id="drawer" role="dialog" aria-modal="false" hidden>
+    <aside id="drawer" role="dialog" aria-modal="false" aria-labelledby="dw-title" hidden>
       <button id="dw-close" aria-label="close">✕</button>
       <h3 id="dw-title"></h3><div id="dw-stats"></div><div id="dw-links"></div><div id="dw-list"></div>
     </aside>
@@ -240,7 +240,7 @@ var NODE_NAME = { u: ['user', '사용자'], l: ['Sonnet lead', 'Sonnet 리드'],
 // id: [from, to, shape, fraction of the from box's height, fraction of the to box's height, gutter offset]
 var EDGES = { 'u-l': ['u', 'l', 'v'], 'l-g': ['l', 'g', 'v'], 'g-d': ['g', 'd', 'v'], 'd-e': ['d', 'e', 'v'],
   'g-w': ['g', 'w', 'gl', 0.75, 0.5, 0], 'p-l': ['p', 'l', 'gr', 0.5, 0.5, 0], 'g-o': ['o', 'g', 'h', 0.5, 0.3, 8] };
-var CLS = { allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop', info: 'info' };
+var CLS = Object.assign(Object.create(null), { allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop', info: 'info' });
 var MAX_LIVE = 16, MAX_QUEUE = 50, MAX_PACKETS = 300, HOP_MS = 450;
 var NS = 'http://www.w3.org/2000/svg';
 var motion = true, speed = 1, packetSeq = 0;
@@ -405,7 +405,9 @@ function tick(now){
     place(pk, t);
     if (t < 1) return true;
     if (pk.i + 1 < pk.hops.length) { pk.i++; pk.t0 = now; heat(pk.hops[pk.i].id); return true; }
-    if (pk.park) { pk.el.setAttribute('class', 'pk ask wait'); parked.set(String(pk.park), pk); boxes.g.classList.add('waiting'); return false; }
+    var held = pk.park ? R.get(String(pk.park)) : null;
+    // A packet that arrives after its answer or its end has nothing to wait for.
+    if (held && !held.answered) { pk.el.setAttribute('class', 'pk ask wait'); parked.set(String(pk.park), pk); boxes.g.classList.add('waiting'); return false; }
     $('pk').removeChild(pk.el);
     return false;
   });
@@ -444,7 +446,7 @@ function flow(ev){
   }
   if (ev.kind === 'guard.ask' && ev.answer !== 'declined' && ev.id != null) {
     var held = R.get(String(ev.id));
-    if (held && unpark(ev.id)) send({ path: held.full.slice(1), cls: 'allow' }, metaOf(ev, { tool: held.tool, summary: held.summary }));
+    if (held && held.full) { held.answered = true; unpark(ev.id); send({ path: held.full.slice(1), cls: 'allow' }, metaOf(ev, { tool: held.tool, summary: held.summary })); }
     return;
   }
   if (ev.kind === 'turn') unparkAll();
@@ -455,8 +457,9 @@ function flow(ev){
   });
 }
 
-var EDIT = { Edit: 1, Write: 1, NotebookEdit: 1, MultiEdit: 1 };
-var TAGS = { allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop' };
+var EDIT = Object.assign(Object.create(null), { Edit: 1, Write: 1, NotebookEdit: 1, MultiEdit: 1 });
+function plain(o){ return Object.assign(Object.create(null), o); }
+var TAGS = plain({ allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop' });
 function reset(){
   S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, expCalls: 0, subCalls: 0, leadCalls: 0,
     edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '' };
@@ -494,6 +497,7 @@ function addLog(at, who, whoClass, parts, kind, tag, tagClass){
   var last = el('span');
   if (tag) last.appendChild(el('span', 'tag ' + (TAGS[tagClass] || ''), tag));
   row.appendChild(last);
+  if (filtering() && !filters[TAGS[tagClass] || 'info']) row.classList.add('off');
   log.insertBefore(row, log.firstChild);
   while (log.children.length > 120) log.removeChild(log.lastChild);
   return row;
@@ -542,7 +546,7 @@ function render(){
   $('b-loop').classList.toggle('busy', !!S.pass);
   $('count').textContent = S.events + L(' events', '개 이벤트');
   queueLayout();
-  if (!$('drawer').hidden && !$('dw-list').querySelector('.detail:not([hidden])')) drawRefresh();
+  if (!$('drawer').hidden && !replaying && !$('drawer').contains(document.activeElement) && !$('dw-list').querySelector('.detail:not([hidden])')) drawRefresh();
 }
 
 var HOLD = {
@@ -647,7 +651,7 @@ function involves(path){
 function passes(cls, path){ return (!filtering() || filters[cls]) && involves(path); }
 
 function take(ev){ events.push(ev); if (events.length > 2000) events.shift(); handle(ev); }
-function quiet(list){ replaying = true; list.forEach(take); replaying = false; render(); applyFilter(); }
+function quiet(list){ replaying = true; try { list.forEach(take); } finally { replaying = false; } render(); applyFilter(); }
 function holdBack(ev){ pending.push(ev); if (pending.length > 2000) pending.shift(); syncTools(); }
 
 function setPaused(on){
@@ -659,12 +663,14 @@ function startPlayback(n){
   endPlayback(true);
   var all = events.slice();
   playback = { tail: all.slice(Math.max(0, all.length - n)), i: 0, timer: 0 };
-  replaying = true; reset(); all.slice(0, Math.max(0, all.length - n)).forEach(handle); replaying = false;
+  replaying = true;
+  try { reset(); all.slice(0, Math.max(0, all.length - n)).forEach(handle); } finally { replaying = false; }
   render(); syncTools(); stepPlayback();
 }
 function stepPlayback(){
   var pb = playback;
   if (!pb) return;
+  if (paused) { pb.timer = setTimeout(stepPlayback, 200); return; }
   if (pb.i >= pb.tail.length) { endPlayback(false); return; }
   var ev = pb.tail[pb.i++], next = pb.tail[pb.i];
   handle(ev);
@@ -678,7 +684,8 @@ function endPlayback(restart){
   clearTimeout(pb.timer);
   playback = null;
   if (!restart) {
-    replaying = true; pb.tail.slice(pb.i).forEach(handle); replaying = false;
+    replaying = true;
+    try { pb.tail.slice(pb.i).forEach(handle); } finally { replaying = false; }
     render();
     if (!paused) quiet(pending.splice(0));
   }
@@ -842,10 +849,9 @@ function translate(){
 }
 function replay(){
   endPlayback(true);
+  if (!paused) { pending.splice(0).forEach(function(e){ events.push(e); }); if (events.length > 2000) events.splice(0, events.length - 2000); }
   replaying = true;
-  reset();
-  events.forEach(handle);
-  replaying = false;
+  try { reset(); events.forEach(handle); } finally { replaying = false; }
   translate();
   render();
   applyFilter();
@@ -862,7 +868,7 @@ var es = new EventSource('/events');
 es.onopen = function(){ if (everOpened) { events = []; pending = []; replay(); } connected = true; everOpened = true; $('state').className = 'live'; translate(); };
 es.onerror = function(){ connected = false; $('state').className = 'live off'; translate(); };
 es.onmessage = function(m){
-  try { var ev = JSON.parse(m.data); if (paused || playback) holdBack(ev); else take(ev); } catch (e) {}
+  try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) {}
 };
 flowBuild();
 uiBuild();

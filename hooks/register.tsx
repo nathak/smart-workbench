@@ -1701,13 +1701,16 @@ export const register: Register = on => {
     }
     await mutate($, current => model.recordCall(current, call))
     const sub = (e as unknown as Record<string, unknown>).subagent_type
+    // "Allow for session" answers stand until the session ends, except while risky calls are paused.
+    const scope = policy === 'ask' ? sessionScope(e.tool, e, verdict) : undefined
+    const isSessionAllowed = scope !== undefined && !wb.execution.isPaused && (live.sessionAllows ?? []).some(one => one.key === scope.key)
     await emit($, 'tool.start', {
       id: call.id,
       tool: e.tool,
       summary: call.summary,
       category: verdict.category,
       risk: verdict.risk,
-      policy,
+      policy: isSessionAllowed ? 'allow' : policy,
       ...(e.agentId ? { agent: e.agentId } : {}),
       ...(typeof sub === 'string' ? { subagent: sub } : {}),
     })
@@ -1722,10 +1725,6 @@ export const register: Register = on => {
         deny: `SmartWorkbench blocked this ${e.tool} call: ${verdict.reason}. The user's guard policy forbids it; do not retry it another way. Ask the user if it is really needed.`,
       }
     }
-
-    // "Allow for session" answers stand until the session ends, except while risky calls are paused.
-    const scope = policy === 'ask' ? sessionScope(e.tool, e, verdict) : undefined
-    const isSessionAllowed = scope !== undefined && !wb.execution.isPaused && (live.sessionAllows ?? []).some(one => one.key === scope.key)
 
     if (isSessionAllowed) {
       call = { ...call, policy: 'allow', sessionAllowed: true, reason: `${verdict.reason}; allowed for this session` }
