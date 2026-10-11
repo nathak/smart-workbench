@@ -171,8 +171,12 @@ export type TeamRoleName = 'lead' | 'explorer' | 'advisor'
 // A model alias or id (sonnet, opus[1m], claude-haiku-4-5-20251001) and an effort level.
 export type TeamRole = { model: string; effort: string }
 
+// What team mode may do with the OpenAI Codex plugin. Off by default: Codex sends code to OpenAI.
+export type CodexConfig = { enabled: boolean; review: boolean; rescue: boolean }
+
 export type TeamConfig = {
   enabled: boolean
+  codex?: CodexConfig
   lead?: TeamRole
   explorer?: TeamRole
   advisor?: TeamRole
@@ -191,6 +195,8 @@ export type Live = {
   policy?: ProjectPolicy
   sessionId?: string
   user?: string
+  // The Codex plugin's companion script found at session start (null = looked, not found); session-only.
+  codexPath?: string | null
   // What the person chose "Allow for session" for; gone when the session ends.
   sessionAllows?: SessionAllow[]
   // Text typed into the panel's fields and not yet submitted, by field key.
@@ -228,6 +234,9 @@ export type Track = {
   lastAdvisorAt?: number
   turnStartedAt?: number
   advisorRuns: number
+  // The last Codex review this session and how many ran.
+  codexAt?: number
+  codexRuns?: number
   // Design first: the advisor run that counts as this work's design must be at or after designFrom.
   designFrom?: number
   designDeniedAt?: number
