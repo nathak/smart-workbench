@@ -7,7 +7,7 @@ import * as loop from './loop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
-import { checkOutcome, completionOf, evidenceKindOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
+import { checkOutcome, completionOf, evidenceKindsOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
 import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy } from './policy'
@@ -1765,7 +1765,7 @@ export const register: Register = on => {
     const endedAt = await $.clock.now()
     const isOk = ran.deny === undefined && ran.isError !== true
     const outcome = ran.deny !== undefined ? 'blocked' : isOk ? 'ok' : 'error'
-    const kind = e.tool === 'Bash' ? evidenceKindOf(e.command) : undefined
+    const kinds = e.tool === 'Bash' ? evidenceKindsOf(e.command) : []
     const notebookPath = (e as unknown as Record<string, unknown>).notebook_path
     const rawPath =
       'file_path' in e && typeof e.file_path === 'string' ? e.file_path : typeof notebookPath === 'string' ? notebookPath : undefined
@@ -1774,12 +1774,15 @@ export const register: Register = on => {
     await mutate($, current => {
       let updated = model.recordCall(current, { ...call, outcome, durationMs: endedAt - startedAt })
 
-      if (kind && e.tool === 'Bash' && ran.deny === undefined) {
+      if (kinds.length > 0 && e.tool === 'Bash' && ran.deny === undefined) {
         const result = (ran.isError ? undefined : ran.result) as { interrupted?: boolean; backgroundTaskId?: string } | undefined
         const isUnknown = result?.interrupted === true || result?.backgroundTaskId !== undefined
-        const ok = isUnknown ? null : checkOutcome(e.command, kind, isOk)
-        const record: EvidenceRecord = { id: call.id, kind, command: e.command.slice(0, 200), ok, at: endedAt }
-        updated = model.addEvidence(updated, record)
+        // One record per kind a command runs; the first keeps the call id, which the badge and the counts look up.
+        kinds.forEach((kind, i) => {
+          const ok = isUnknown ? null : checkOutcome(e.command, kind, isOk)
+          const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt }
+          updated = model.addEvidence(updated, record)
+        })
       }
 
       return path && isOk ? model.observe(updated, e.tool, path, endedAt) : updated
