@@ -122,7 +122,7 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
     if (!(await $.fs.exists(path))) return
     const session = (await read($, liveAtom)).sessionId
     const line = JSON.stringify({ at: await $.clock.now(), kind, ...(session ? { session } : {}), ...detail })
-    await $.process.run(['sh', '-c', 'printf "%s\\n" "$1" >> "$2"', 'sh', line, path])
+    await $.process.run(['tee', '-a', path], { stdin: `${line}\n` })
   } catch {
     // The feed is optional.
   }
@@ -389,7 +389,7 @@ async function setTeam($: $, enabled: boolean, isFromCommand = false): Promise<s
   return [
     `Team mode on: lead ${lead.model} (${lead.effort}) builds, explorer ${explorer.model} (${explorer.effort}) explores, advisor ${advisor.model} (${advisor.effort}) reviews.`,
     isSet ? 'The session model is set (team off puts the previous model back).' : `Switch the session model with /model ${lead.model}.`,
-    `The advisor steps in before a plan is presented, after the same command fails ${crew.REPEAT_LIMIT} times in a row, and before finishing a turn that changed code. Change models and effort in the Team tab (/swb team).`,
+    `The advisor designs before a big edit and before a plan is presented, and steps in after the same command fails ${crew.REPEAT_LIMIT} times in a row, and before finishing a turn that changed code. Change models and effort in the Team tab (/swb team).`,
   ].join('\n')
 }
 
@@ -1463,7 +1463,7 @@ async function teamTab($: $, { els, wb, live, width }: View): Promise<RenderElem
         <Button key="team-toggle" variant={isOn ? undefined : 'primary'} label={isOn ? 'Turn off' : 'Turn on'} onPress={() => void setTeam($, !isOn).then(text => toast(text.split('\n')[0] ?? ''))} />
       </Box>
       <Text dimColor wrap="wrap">
-        {isOn ? 'The advisor steps in before a plan, after a repeated error and before finishing.' : 'Turn on for automatic advisor reviews; the agents are available either way.'}
+        {isOn ? 'The advisor designs before big edits, reviews the plan, and steps in after a repeated error and before finishing.' : 'Turn on for automatic advisor reviews; the agents are available either way.'}
       </Text>
       {crew.ROLES.map(role => {
         const now = crew.roleOf(wb.team, role)
