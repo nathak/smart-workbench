@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { classify, decide } from '../hooks/risk'
+import { classify, decide, sessionScope } from '../hooks/risk'
 
 describe('risk rules', () => {
   test('destructive git and recursive delete are blocked', async () => {
@@ -264,5 +264,21 @@ describe('risk rules', () => {
     expect(decide(edit, 'balanced', true)).toBe('ask')
     expect(decide(force, 'permissive', false)).toBe('block')
     expect(decide(push, 'permissive', false)).toBe('allow')
+  })
+  test('Codex commands ask: reviews send code out, a write or a transfer asks even under permissive', async () => {
+    const run = (command: string) => classify('Bash', { command })
+    const script = '/home/u/.claude/plugins/cache/openai-codex/codex/1.0.6/scripts/codex-companion.mjs'
+
+    expect(run(`node ${script} review --wait`).category).toBe('codex-send')
+    expect(run(`node "\${CLAUDE_PLUGIN_ROOT}/scripts/codex-companion.mjs" task "why does it fail; look at src"`).category).toBe('codex-send')
+    expect(run(`node ${script} task --write "fix it"`).category).toBe('codex-write')
+    expect(run(`node ${script} task "a | b ; c" --write`).category).toBe('codex-write')
+    expect(run(`node ${script} transfer`).category).toBe('codex-transfer')
+    expect(run(`node ${script} status --json`).category).not.toMatch(/^codex-/)
+    expect(run(`node ${script} result`).policy).toBe('allow')
+    for (const command of [`node ${script} review`, `node ${script} task --write x`, `node ${script} transfer`]) {
+      expect(decide(run(command), 'permissive', false)).toBe('ask')
+      expect(sessionScope('Bash', { command }, run(command))).toBeUndefined()
+    }
   })
 })
