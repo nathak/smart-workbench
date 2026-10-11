@@ -58,6 +58,10 @@ It never reads environment variables and never stores the conversation or Live p
 
 None of its own. `/swb live` starts a local web server that listens on `127.0.0.1` only (default port 4317) and answers only requests whose Host is `127.0.0.1`, `localhost`, or a name listed in the `SWB_LIVE_HOSTS` environment variable (comma separated, none by default); it makes no outgoing requests. `gh` reaches GitHub only when you run `/swb ci` or `/swb issue` with a GitHub reference.
 
+### Codex (optional, off by default)
+
+With the Codex plugin installed and `/swb team codex on` consented to, SmartWorkbench lets the lead run `node <codex plugin>/scripts/codex-companion.mjs review` (and `task` for rescue) as ordinary Bash calls; those go through the Guard like any other. That plugin sends the repository's diff and the files it reads to OpenAI under your Codex account. SmartWorkbench itself makes no request. At session start it only reads Claude Code's `installed_plugins.json` to find the script; `/swb team codex check` runs the plugin's `setup --json`. `--write` tasks and `transfer` always ask.
+
 ### Model
 
 No extra model calls of its own. Explain, Retry, Fix failures and Ask Claude to finish send a normal prompt in your session, only when you press them. In team mode Claude runs the Haiku explorer and the Opus advisor as subagents; the mod only asks it to.
@@ -117,6 +121,10 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 ### 네트워크
 
 자체 요청은 없습니다. `/swb live`는 `127.0.0.1`에서만 듣는 로컬 웹 서버(기본 포트 4317)를 띄우며, Host가 `127.0.0.1`, `localhost`, 또는 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분, 기본값 없음)에 적은 이름인 요청에만 응답하고 밖으로 나가는 요청은 없습니다. `gh`가 GitHub에 접속하는 것은 `/swb ci` 또는 GitHub 이슈 번호로 `/swb issue`를 실행할 때뿐입니다.
+
+### Codex(선택, 기본 꺼짐)
+
+Codex 플러그인이 설치되어 있고 `/swb team codex on`에 동의하면, 리드가 `node <codex 플러그인>/scripts/codex-companion.mjs review`(구조용 `task` 포함)를 일반 Bash 호출로 실행할 수 있게 합니다. 이 호출도 다른 호출처럼 Guard를 거칩니다. 그 플러그인은 저장소의 diff와 읽은 파일을 사용자의 Codex 계정으로 OpenAI에 보냅니다. SmartWorkbench 자체는 요청을 보내지 않으며, 세션 시작 때 스크립트 위치를 찾으려고 Claude Code의 `installed_plugins.json`만 읽습니다. `/swb team codex check`는 플러그인의 `setup --json`을 실행합니다. `--write` 작업과 `transfer`는 항상 묻습니다.
 
 ### 모델
 
