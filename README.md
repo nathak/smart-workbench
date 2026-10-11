@@ -210,6 +210,9 @@ Watch a request flow in a browser: prompts, tool calls and guard decisions, suba
 - The server listens on `127.0.0.1` only. The feed holds the start of each prompt and command summaries, so do not commit it.
 - The page is in English by default. The `한국어` / `EN` button in the top right switches it (remembered in the browser); `http://127.0.0.1:4317/?lang=ko` opens it in Korean.
 - Panels: Opus advisor, user prompt, Sonnet lead, guard decisions (allow / ask / block bars), Haiku dispatcher, worker / explorer / loop, flags and the session log.
+- Data flow: each event moves as a dot along the links between the boxes (prompt: user → lead; tool call: lead → guard → worker / dispatcher / Opus; an `ask` waits at the guard until you answer; a finished call walks back; a block returns from the guard in red). Every link shows how many dots crossed it. Subagent calls are attributed to Opus or the explorer by a guess, since the feed carries no parent link.
+- Interaction: click or tap a box or a link for a drawer with what moved through it (tap a row for its fields); hover for a one-line tip. Toolbar: pause / resume (events wait and are applied on resume), replay the last 20 / 50 / 200 events at their real pace, speed 0.5×–4×, motion on / off (also off with the system's reduced-motion setting), and outcome filters. Feed text is always shown as text, never as markup.
+- The page serves other Host names only when you list them in the `SWB_LIVE_HOSTS` environment variable (comma separated), for example behind a reverse proxy.
 
 ![Live view](docs/live-view.png)
 
@@ -513,6 +516,9 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - 서버는 `127.0.0.1` 에만 열립니다. 피드에는 프롬프트 앞부분과 명령 요약이 들어 있으므로 커밋하지 마세요.
 - 화면은 기본이 영어입니다. 오른쪽 위의 `한국어` / `EN` 버튼으로 바꾸고(브라우저에 기억됨), `http://127.0.0.1:4317/?lang=ko` 로 열면 처음부터 한글입니다.
 - 패널은 Opus 조언자, 사용자 프롬프트, Sonnet 리드, 가드 판정(allow / ask / block 막대), Haiku 디스패처, worker / explorer / loop, flags, session log 입니다.
+- 데이터 흐름: 이벤트마다 박스 사이 연결선을 따라 점이 움직입니다(프롬프트: 사용자 → 리드, 도구 호출: 리드 → 가드 → worker / 디스패처 / Opus, `ask`는 답할 때까지 가드에서 대기, 끝난 호출은 온 길로 되돌아가고, 차단은 가드에서 빨갛게 돌아옵니다). 연결선마다 지나간 횟수가 표시됩니다. 서브에이전트 호출은 피드에 부모 정보가 없어 Opus인지 explorer인지 추정해서 표시합니다.
+- 상호작용: 박스나 연결선을 클릭(터치)하면 지나간 내용을 담은 서랍이 열리고(행을 누르면 필드 표시), 마우스를 올리면 한 줄 안내가 뜹니다. 툴바: 일시정지/재개(멈춘 동안 온 이벤트는 재개할 때 반영), 최근 20/50/200개를 실제 간격대로 다시보기, 속도 0.5×~4×, 모션 켬/끔(시스템의 동작 줄이기 설정이면 자동으로 꺼짐), 결과별 필터. 피드의 글자는 항상 글자로만 표시되고 마크업으로 해석되지 않습니다.
+- 다른 Host 이름은 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분)에 적은 것만 받습니다. 리버스 프록시 뒤에서 쓸 때 설정하세요.
 
 ![실시간 보기](docs/live-view.png)
 
