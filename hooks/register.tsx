@@ -1800,19 +1800,34 @@ export const register: Register = on => {
     const codexConfig = codex.codexOf(wb.team)
     const isCodexUse = isTeam && codexConfig.enabled && codexRun !== undefined
     const heldTrack = live.track ?? crew.EMPTY_TRACK
-    if (isCodexUse && verdict.category === 'codex-send' && (codexRun.op === 'task' ? codex.hasTaskedThisTurn(heldTrack) : codex.hasReviewedThisTurn(heldTrack))) {
+    if (isCodexUse && verdict.category === 'codex-send' && !codexRun.write && (codexRun.op === 'task' ? codex.hasTaskedThisTurn(heldTrack) : codex.hasReviewedThisTurn(heldTrack))) {
       await audit($, 'team.codex-repeat')
 
       return { deny: 'SmartWorkbench team mode: Codex already ran this turn; use its findings instead of running it again.' }
     }
-    const isCodexAllowed =
+    // Image generation is the one write allowed unasked: a plain task whose brief names one picture file under an asset folder.
+    const isImage =
       isCodexUse &&
-      verdict.category === 'codex-send' &&
+      codexRun.write &&
+      verdict.category === 'codex-write' &&
       !wb.execution.isPaused &&
       typeof live.codexPath === 'string' &&
       e.tool === 'Bash' &&
-      codex.isPlainInvocation(e.command, live.codexPath) &&
-      (codexRun.op === 'task' ? codexConfig.rescue : codexConfig.review)
+      codex.isImageTask(e.command, live.codexPath)
+    if (isImage && codex.imagesThisTurn(heldTrack) >= codex.IMAGES_PER_TURN) {
+      await audit($, 'team.codex-repeat')
+
+      return { deny: `SmartWorkbench team mode: ${codex.IMAGES_PER_TURN} Codex images already this turn; ask the user before making more.` }
+    }
+    const isCodexAllowed =
+      isImage ||
+      (isCodexUse &&
+        verdict.category === 'codex-send' &&
+        !wb.execution.isPaused &&
+        typeof live.codexPath === 'string' &&
+        e.tool === 'Bash' &&
+        codex.isPlainInvocation(e.command, live.codexPath) &&
+        (codexRun.op === 'task' ? codexConfig.rescue : codexConfig.review))
     const policy = isCodexAllowed ? 'allow' : decide(verdict, profileOf(wb, live), wb.execution.isPaused)
     const startedAt = await $.clock.now()
     let call: ToolCallRecord = {
@@ -1933,7 +1948,8 @@ export const register: Register = on => {
     }
 
     if (isTeam && codexRun?.op === 'task' && ran.deny === undefined) {
-      await updateTrack($, track => codex.codexTasked(track, endedAt))
+      const isImageRun = codexRun.write && typeof live.codexPath === 'string' && codex.isImageTask(e.command, live.codexPath)
+      await updateTrack($, track => (isImageRun ? codex.codexImaged(track) : codex.codexTasked(track, endedAt)))
     }
     if (isTeam && isOk && codexRun && (codexRun.op === 'review' || codexRun.op === 'adversarial-review')) {
       await updateTrack($, track => codex.codexRan(track, endedAt))

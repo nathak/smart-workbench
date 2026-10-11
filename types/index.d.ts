@@ -239,6 +239,9 @@ export type Track = {
   codexRuns?: number
   // The last Codex rescue task, at most one per turn.
   codexTaskAt?: number
+  // Image tasks this turn (keyed by the turn start), capped per turn.
+  codexImageTurn?: number
+  codexImages?: number
   // Design first: the advisor run that counts as this work's design must be at or after designFrom.
   designFrom?: number
   designDeniedAt?: number
