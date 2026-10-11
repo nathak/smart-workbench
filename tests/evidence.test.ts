@@ -89,3 +89,57 @@ describe('exit codes the shell hides', () => {
     expect(checkOutcome('set -o pipefail && npm test | tail -5', 'test', true)).toBe(true)
   })
 })
+
+describe('which command counts as a check', () => {
+  const { evidenceKindsOf, checkOutcome } = evidence
+
+  test('words inside other commands prove nothing', () => {
+    for (const command of ['pip install ruff', 'echo "npm test"', 'cat jest.config.js', 'npm install jest', 'grep -r vitest src', 'git commit -m "npm test"', 'make clean', 'echo x > tsc.log', 'npm run testing-data']) {
+      expect(evidenceKindsOf(command)).toEqual([])
+    }
+  })
+
+  test('a command that runs several checks yields each kind once', () => {
+    expect(evidenceKindsOf('npm test && npm run lint')).toEqual(['test', 'lint'])
+    expect(evidenceKindsOf('npm run test -- -t "a && b; npm run build"')).toEqual(['test'])
+    expect(evidenceKindsOf('npm test; npm test')).toEqual(['test'])
+  })
+
+  test('workspace flags, build goals, launchers and env prefixes are read', () => {
+    const cases: Record<string, string> = {
+      'npm -w pkg test': 'test',
+      'pnpm --filter web test:unit': 'test',
+      'mvn clean test': 'test',
+      'mvn -q clean package': 'build',
+      'cargo nextest run': 'test',
+      'cargo +nightly test': 'test',
+      'make -C sub test': 'test',
+      make: 'build',
+      './gradlew clean test --info': 'test',
+      'CI=1 npm test': 'test',
+      'cd app && (npx vitest run)': 'test',
+      'tsc -b': 'build',
+      'tsc --noEmit': 'typecheck',
+      'uv run pytest': 'test',
+      'node_modules/.bin/jest': 'test',
+      'go vet ./...': 'lint',
+    }
+    for (const [command, kind] of Object.entries(cases)) expect([command, evidenceKindsOf(command)[0]]).toEqual([command, kind])
+  })
+
+  test('negation, background and a check that may not have run are unknown', () => {
+    expect(checkOutcome('! npm test', 'test', true)).toBe(null)
+    expect(checkOutcome('npm test &', 'test', true)).toBe(null)
+    expect(checkOutcome('npm test |& tail', 'test', true)).toBe(null)
+    expect(checkOutcome('npm test || npm run lint', 'lint', true)).toBe(null)
+    expect(checkOutcome('npm test 2>&1', 'test', false)).toBe(false)
+    expect(checkOutcome('npm test &> out', 'test', true)).toBe(true)
+  })
+
+  test('a failure in an && chain is not blamed on a later check', () => {
+    expect(checkOutcome('npm test && npm run lint', 'lint', false)).toBe(null)
+    expect(checkOutcome('npm test && npm run lint', 'lint', true)).toBe(true)
+    expect(checkOutcome('npm test; npm run lint', 'lint', false)).toBe(false)
+    expect(checkOutcome('npm ci && npm test', 'test', false)).toBe(false)
+  })
+})
