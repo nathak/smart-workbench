@@ -137,9 +137,16 @@ describe('risk rules', () => {
   })
 
   test('mkfs is blocked only on a device; whole-tree restores are blocked in any quoting; a root file restore is not', async () => {
-    expect(policyOf('mkfs -t ext4 /dev/sdb')).toBe('block')
-    for (const command of ['man mkfs | less', 'mkfs.ext4 --help', 'mkfs.ext4 disk.img', 'grep -n mkfs README.md']) {
+    // mkfs is blocked in command position unless it only asks for help or targets a plain image file.
+    for (const command of ['mkfs -t ext4 /dev/sdb', 'mkfs.ext4 $DEV', 'mkfs.ext4 "/dev/sdb1"', 'sudo mkfs.xfs -f sda', 'cd /dev && mkfs sdb']) {
+      expect(policyOf(command)).toBe('block')
+    }
+    for (const command of ['man mkfs | less', 'mkfs.ext4 --help', 'mkfs.ext4 disk.img', 'mkfs -t ext4 build/disk.raw', 'grep -n mkfs README.md']) {
       expect(policyOf(command)).toBe('allow')
+    }
+    // Other spellings of the whole tree, and a substitution that sits before the flags.
+    for (const command of ['git checkout -- ./', 'git checkout -- .//', 'git checkout -- ./.', 'rm $(echo a) -rf d', 'rm `echo a` -r d', 'echo $(rm -rf x)']) {
+      expect(policyOf(command)).toBe('block')
     }
     for (const command of ['git restore --staged --worktree .', 'git restore -SW .', 'git checkout "."', "git restore '.'"]) {
       expect(policyOf(command)).toBe('block')
