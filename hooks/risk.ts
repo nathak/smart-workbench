@@ -16,7 +16,11 @@ const GIT = String.raw`\bgit(?:\s+(?:-[Cc]\s+[^\s-]\S*|--(?:git-dir|work-tree|na
 const AT = String.raw`(?:^|[\s;&|(\`"'/\\])`
 // Any arguments before the one we look for, within the same simple command.
 const ARGS = String.raw`(?:[^;&|\n]*\s)?`
+// Like ARGS, but it stops at a command substitution, whose own flags are not the outer command's.
+const FLAT_ARGS = String.raw`(?:[^;&|\n(\`]*\s)?`
 const WORD_END = String.raw`(?=$|[\s;&|)])`
+// A lone "." (the whole tree) or the repository root, with or without quotes.
+const WHOLE_TREE = String.raw`(?:["']?\.["']?|:\/)`
 const SECRET_NAME = String.raw`(?:\w*(?:TOKEN|SECRET|PASSWORD|PASSWD)|(?:\w*_)?(?:API_?)?KEY)`
 
 type Rule = { category: string; risk: Risk; policy: Policy; pattern: RegExp; reason: string; raw?: true }
@@ -36,7 +40,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     pattern: re(
-      String.raw`${GIT}(?:reset\s+[^;&|\n]*--hard|clean\s+[^;&|\n]*-[a-z]*f|checkout\s+[^;&|\n]*--\s+\.|checkout\s+${ARGS}(?:\.|:\/)${WORD_END}|restore\s+(?!${ARGS}(?:--staged\b|-[a-zA-Z]*S))${ARGS}(?:\.|:\/)${WORD_END}|stash\s+clear\b|branch\s+(?:${ARGS}-[a-zA-Z]*D|(?=${ARGS}(?:--delete\b|-[a-zA-Z]*d))(?=${ARGS}(?:--force\b|-[a-zA-Z]*f))))`,
+      String.raw`${GIT}(?:reset\s+[^;&|\n]*--hard|clean\s+[^;&|\n]*-[a-z]*f|checkout\s+[^;&|\n]*--\s+${WHOLE_TREE}${WORD_END}|checkout\s+${ARGS}${WHOLE_TREE}${WORD_END}|restore\s+(?!(?=${ARGS}(?:--staged\b|-[a-zA-Z]*S))(?!${ARGS}(?:--worktree\b|-[a-zA-Z]*W)))${ARGS}${WHOLE_TREE}${WORD_END}|stash\s+clear\b|branch\s+(?:${ARGS}-[a-zA-Z]*D|(?=${ARGS}(?:--delete\b|-[a-zA-Z]*d))(?=${ARGS}(?:--force\b|-[a-zA-Z]*f))))`,
     ),
     reason: 'destructive git command discards work',
   },
@@ -44,7 +48,7 @@ const BASH_RULES: readonly Rule[] = [
     category: 'broad-delete',
     risk: 'high',
     policy: 'block',
-    pattern: re(String.raw`${AT}rm\s+${ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
+    pattern: re(String.raw`${AT}rm\s+${FLAT_ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
     reason: 'recursive delete',
   },
   {
@@ -52,7 +56,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     pattern: re(
-      String.raw`${AT}dd\s[^;&|\n]*\bof=\/dev\/(?!null\b|zero\b|stdout\b|stderr\b|tty\b|fd\/|shm\/)|${AT}mkfs(?:\.\w+)?\s+\S|>\s*\/dev\/(?:sd[a-z]|hd[a-z]|vd[a-z]|xvd[a-z]|nvme\d|mmcblk\d|disk\d)`,
+      String.raw`${AT}dd\s[^;&|\n]*\bof=\/dev\/(?!null\b|zero\b|stdout\b|stderr\b|tty\b|fd\/|shm\/)|${AT}mkfs(?:\.\w+)?\s+${ARGS}\/dev\/|>\s*\/dev\/(?:sd[a-z]|hd[a-z]|vd[a-z]|xvd[a-z]|nvme\d|mmcblk\d|disk\d)`,
     ),
     reason: 'overwrites a disk or device',
   },
@@ -61,7 +65,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'ask',
     pattern: re(
-      String.raw`\b(?:curl|wget)\b[^;&\n]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:ba|z|da|k)?sh\b|\b(?:(?:ba|z|da|k)?sh\s+(?:-\S+\s+)*|eval\s+)["']?(?:\$\(|<\()\s*(?:curl|wget)\b|(?:\bsource|${AT}\.)\s+<\(\s*(?:curl|wget)\b`,
+      String.raw`\b(?:curl|wget)\b[^;\n]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:ba|z|da|k)?sh\b|\b(?:(?:ba|z|da|k)?sh\s+(?:-\S+\s+)*|eval\s+)["']?(?:\$\(|<\()\s*(?:curl|wget)\b|(?:\bsource|${AT}\.)\s+<\(\s*(?:curl|wget)\b`,
     ),
     reason: 'runs a script downloaded from the network',
   },
@@ -122,14 +126,27 @@ const RUNNER = /\b(?:(?:ba|z|da|k)?sh|su|eval|ssh)\b/
 
 // "$(cat <<'EOF' ... EOF ... )": only the heredoc body, with nothing but the closing ")" after it.
 function isCatHeredoc(inner: string): boolean {
-  const head = /^\$\(\s*cat\s+<<-?[ \t]*(['"])(\w+)\1[ \t]*\n/.exec(inner)
+  const head = /^\$\(\s*cat\s+<<(-?)[ \t]*(['"])(\w+)\2[ \t]*\n/.exec(inner)
   if (!head) return false
   const lines = inner.slice(head[0].length).split('\n')
-  const end = lines.findIndex(line => line.trim() === head[2])
+  // The delimiter line must match exactly; only <<- lets leading tabs go.
+  const end = lines.findIndex(line => (head[1] === '-' ? line.replace(/^\t+/, '') : line) === head[3])
   return end >= 0 && lines.slice(end + 1).join('\n').trim() === ')'
 }
 
+// Quote pairing here is flat, so any construct that makes bash pair quotes differently makes the pairing untrustworthy:
+// comments, heredocs, $'...', backticks, a quote left unpaired, or a command substitution inside double quotes (other than
+// the cat heredoc commit message). The whole command is then read as typed. A shell word that runs its arguments
+// (eval, ssh, sh -c) anywhere outside quotes does the same.
+function isPairingSafe(command: string): boolean {
+  const outside = command.replace(QUOTED, ' ')
+  if (/(^|[\s;&|(])#|<<|`|['"]/.test(outside) || command.includes("$'") || RUNNER.test(outside)) return false
+  const doubles = command.match(/"(?:[^"\\]|\\[\s\S])*"/g) ?? []
+  return doubles.every(one => !/\$\(|\$\{|`/.test(one) || isCatHeredoc(one.slice(1, -1)))
+}
+
 function maskData(command: string): string {
+  if (!isPairingSafe(command)) return command
   return command.replace(QUOTED, (match: string, offset: number) => {
     if (match[0] === '\\') return match
     const inner = match.slice(1, -1)
@@ -294,7 +311,8 @@ export type SessionScope = { key: string; label: string }
 // commands, so `git push && curl ...` is asked again after allowing `git push`.
 // The guard file's own protection is never allowed for a session.
 export function sessionScope(tool: string, input: unknown, verdict: Verdict): SessionScope | undefined {
-  if (verdict.category === 'guard-policy' || verdict.policy === 'block') {
+  // remote-exec is asked every time, so allowing one script for the session never covers the next.
+  if (verdict.category === 'guard-policy' || verdict.category === 'remote-exec' || verdict.policy === 'block') {
     return undefined
   }
   const args = (input ?? {}) as Record<string, unknown>

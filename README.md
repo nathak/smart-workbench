@@ -188,7 +188,7 @@ Choices are kept per project. The tab also shows the session's current model set
 | Possible secrets | `printenv`, `cat .env`, `$..._TOKEN`, editing `.env` | Ask |
 | Destructive git | `push --force`, `reset --hard`, `clean -f`, `branch -D`, `restore .`, `checkout .`, `stash clear` | Block |
 | Broad delete | `rm -r`, `find -delete` | Block |
-| Disk overwrite | `dd of=/dev/sda`, `mkfs` | Block |
+| Disk overwrite | `dd of=/dev/sda`, `mkfs /dev/…` | Block |
 | Remote script | `curl … \| sh`, `bash <(curl …)` | Ask (even under Permissive) |
 | MCP deploy/release | `mcp__vercel__deploy_project` | Ask (even under Permissive) |
 | MCP issue/alert changes | `mcp__linear__create_issue`, `mcp__pagerduty__acknowledge_incident` | Ask |
@@ -491,7 +491,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 | 비밀 가능 출력 | `printenv`, `cat .env`, `$..._TOKEN`, `.env` 편집 | Ask |
 | 파괴적 Git | `push --force`, `reset --hard`, `clean -f`, `branch -D`, `restore .`, `checkout .`, `stash clear` | Block |
 | 광범위 삭제 | `rm -r`, `find -delete` | Block |
-| 디스크 덮어쓰기 | `dd of=/dev/sda`, `mkfs` | Block |
+| 디스크 덮어쓰기 | `dd of=/dev/sda`, `mkfs /dev/…` | Block |
 | 원격 스크립트 실행 | `curl … \| sh`, `bash <(curl …)` | Ask (Permissive에서도) |
 | MCP 배포·릴리스 | `mcp__vercel__deploy_project` | Ask (Permissive에서도) |
 | MCP 이슈·알림 변경 | `mcp__linear__create_issue`, `mcp__pagerduty__acknowledge_incident` | Ask |

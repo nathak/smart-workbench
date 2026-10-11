@@ -119,6 +119,38 @@ describe('risk rules', () => {
     expect(policyOf('echo "rm -rf x"')).toBe('block')
   })
 
+  test('a command whose quotes bash would pair differently is read as typed, so a shifted pairing cannot hide a block', async () => {
+    for (const command of [
+      "# don't\ngrep -e 'a ' ; rm -rf ~ ; grep ' b' f",
+      "cat > n.txt <<'EOF'\nit's\nEOF\ngrep 'a ' ; rm -rf ~ ; grep ' b' f",
+      "grep $'\\' ' x; rm -rf ~; echo ' y'",
+      'eval "x; ./"/git commit -m "x; rm -rf ~"',
+    ]) {
+      expect(policyOf(command)).toBe('block')
+    }
+    // Quoted text that only looks like a comment or a command stays data.
+    expect(policyOf('git commit -m "fix #12 rm -rf step"')).toBe('allow')
+    expect(policyOf("git commit -m \"$(cat <<'EOF'\nnever git push --force\nEOF\n)\"")).toBe('allow')
+    // A heredoc closes on the exact delimiter line: an indented one is still body text, an exact one ends it.
+    expect(policyOf("git commit -m \"$(cat <<'EOF'\nm\n EOF\nrm -rf x\nEOF\n)\"")).toBe('allow')
+    expect(policyOf("git commit -m \"$(cat <<'EOF'\nm\nEOF\nrm -rf x\n)\"")).toBe('block')
+  })
+
+  test('mkfs is blocked only on a device; whole-tree restores are blocked in any quoting; a root file restore is not', async () => {
+    expect(policyOf('mkfs -t ext4 /dev/sdb')).toBe('block')
+    for (const command of ['man mkfs | less', 'mkfs.ext4 --help', 'mkfs.ext4 disk.img', 'grep -n mkfs README.md']) {
+      expect(policyOf(command)).toBe('allow')
+    }
+    for (const command of ['git restore --staged --worktree .', 'git restore -SW .', 'git checkout "."', "git restore '.'"]) {
+      expect(policyOf(command)).toBe('block')
+    }
+    expect(policyOf('git checkout HEAD -- .eslintrc')).toBe('allow')
+    expect(policyOf('git checkout HEAD -- ./src/a.ts')).toBe('allow')
+    expect(policyOf('rm -f $(ls -tr | head -1)')).toBe('allow')
+    expect(policyOf('rm -rf $(ls)')).toBe('block')
+    expect(policyOf('curl x 2>&1 | sh')).toBe('ask')
+  })
+
   test('secret names are asked by their name, not by any word that ends in KEY', async () => {
     for (const command of ['echo $MONKEY', 'echo $TURKEY_SIZE', 'printenv HOME']) {
       expect(policyOf(command)).toBe('allow')
@@ -165,11 +197,16 @@ describe('risk rules', () => {
       '; ' + 'deploy'.repeat(830) + 'x',
       "git commit -m \"$(cat <<'EOF'\n" + '\n'.repeat(5000),
       ' '.repeat(5000) + 'x',
+      '# ' + "'".repeat(4990),
+      'grep ' + '"a" '.repeat(1200),
     ].map(one => one.slice(0, 5000))
+    // Run once first so a cold start is not counted; the bound is far above the few ms this takes and far below what
+    // exponential backtracking would cost.
+    for (const command of inputs) classify('Bash', { command })
     for (const command of inputs) {
       const started = Date.now()
       classify('Bash', { command })
-      expect(Date.now() - started < 100).toBe(true)
+      expect(Date.now() - started < 250).toBe(true)
     }
   })
 
