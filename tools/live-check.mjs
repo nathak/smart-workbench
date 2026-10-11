@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Smoke test for tools/live.mjs using only node built-ins: node tools/live-check.mjs
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { get } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -115,4 +115,8 @@ try {
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }
+// Feed text must only reach the page through textContent.
+const page = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'live.html'), 'utf8')
+check(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write|\beval\(|new Function/.test(page), 'the page never builds markup or code from feed text')
+
 process.exit(failed === 0 ? 0 : 1)
