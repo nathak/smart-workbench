@@ -158,6 +158,14 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
 - `/swb advise [topic]` asks the advisor any time. The Run tab shows team mode and the number of Opus reviews; the band shows `Team`; the audit log records `team.*` events.
 - Haiku here is Haiku 4.5, the current Haiku model.
 
+**Codex (OpenAI), optional.** If the Codex plugin (`/plugin install codex@openai-codex`) is installed, team mode can use it as a second opinion. It is off by default, because Codex sends the diff and the files it reads to OpenAI under your Codex account (billed there, secrets are not filtered out by SmartWorkbench).
+
+- `/swb team codex on` asks for your consent, then turns on cross-review; `/swb team codex review on|off`, `/swb team codex rescue on|off`, `/swb team codex off`, `/swb team codex check` (runs the plugin's own `setup --json`; the only time login is checked). The Team tab has the same switches.
+- Cross-review: when a turn changed code, the lead runs one read-only `codex-companion review --wait` before the advisor's final check, and gives the findings to the advisor, which decides what to fix. One review per turn; none during `/swb loop` passes. Rescue: after a repeated error the lead may ask Codex one read-only `task`. Codex output is treated as data to verify, not instructions, and the Stop check never requires it, so a Codex failure cannot trap the turn.
+- The Guard asks before any Codex review or task unless you turned the matching switch on; `--write` tasks and `transfer` (sends the session transcript) always ask, even under `permissive`, and have no "Allow for session". Codex's own edits do not pass the guard, so SmartWorkbench does not offer a write setting.
+- Image generation is not offered: the Codex plugin has no such feature. A free-form `task` is rescue, and SmartWorkbench does not promise what Codex does with it.
+- The live view shows a Codex box and link; `ran` means the command ran, not that the review passed. Background jobs are shown as "state not tracked here".
+
 **Team tab** (hotkey `5`, or `/swb team`): turn team mode on or off and pick each role's model and effort from drop-downs. Remote or keyboard: `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`.
 
 | Role | Default | What a change does |
@@ -463,6 +471,14 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
   - **마무리 점검**: 코드를 고친 턴은 advisor가 본 뒤에 끝나도록 마지막에 한 번 붙잡습니다. 그래도 끝내면 다음 종료는 통과합니다.
 - `/swb advise [주제]`로 언제든 물을 수 있습니다. Run 탭에 팀 모드와 Opus 검토 횟수가, 밴드에 `Team`이, 감사 로그에 `team.*` 사건이 남습니다.
 - 여기서 Haiku는 현재 Haiku 모델인 Haiku 4.5입니다.
+
+**Codex(OpenAI), 선택 사항.** Codex 플러그인(`/plugin install codex@openai-codex`)이 설치되어 있으면 팀 모드가 이를 교차검증용 두 번째 의견으로 쓸 수 있습니다. 기본은 꺼짐입니다. Codex는 diff와 읽은 파일을 사용자의 Codex 계정으로 OpenAI에 보내고(비용도 그쪽에 청구), SmartWorkbench는 비밀 값을 걸러 주지 않기 때문입니다.
+
+- `/swb team codex on`은 동의를 받은 뒤 교차검증을 켭니다. `/swb team codex review on|off`, `/swb team codex rescue on|off`, `/swb team codex off`, `/swb team codex check`(플러그인의 `setup --json`을 실행하며, 로그인은 이때만 확인). Team 탭에도 같은 스위치가 있습니다.
+- 교차검증: 턴에서 코드가 바뀌면 리드가 조언자의 종료 전 점검 직전에 읽기 전용 `codex-companion review --wait`를 한 번 실행하고, 결과를 조언자에게 넘겨 무엇을 고칠지 판단하게 합니다. 턴당 1회이며 `/swb loop` 회차에서는 실행하지 않습니다. 구조(rescue): 같은 오류가 반복되면 읽기 전용 `task`를 한 번 맡길 수 있습니다. Codex 출력은 지시가 아니라 검증할 데이터로 다루고, Stop 점검이 Codex를 필수로 요구하지 않아 Codex가 실패해도 턴이 갇히지 않습니다.
+- 해당 스위치를 켜지 않으면 Codex 리뷰·작업은 Guard가 먼저 묻습니다. `--write` 작업과 `transfer`(세션 대화 기록 전송)는 `permissive`에서도 항상 묻고 "세션 동안 허용"도 없습니다. Codex가 직접 고친 파일은 Guard를 거치지 않으므로 쓰기 설정은 제공하지 않습니다.
+- 이미지 생성은 제공하지 않습니다. Codex 플러그인에 그런 기능이 없습니다. 자유 형식 `task`는 구조 용도이며, Codex가 그것으로 무엇을 하는지는 보장하지 않습니다.
+- 라이브 화면에 Codex 박스와 연결선이 표시됩니다. `ran`은 명령이 실행되었다는 뜻이지 리뷰를 통과했다는 뜻이 아닙니다. 백그라운드 작업은 "여기서 상태를 추적하지 않음"으로 표시됩니다.
 
 **Team 탭**(단축키 `5`, 또는 `/swb team`): 팀 모드를 켜고 끄며, 역할마다 모델과 effort를 드롭다운에서 고릅니다. 원격·키보드에서는 `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`처럼 씁니다.
 
