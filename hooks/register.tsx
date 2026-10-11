@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, TeamRoleName, Template, ToolCallRecord, Track, Workbench } from '../types'
+import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
 import { PROPOSE_TOOL } from './intent'
@@ -362,6 +363,74 @@ async function modelRow($: $): Promise<{ value: string; options: string[] } | un
 
 // Team on: the automatic reviews start, the lead's model and effort become the session's,
 // and the previous model is kept to put back when team mode goes off.
+// Where the Codex plugin's companion script is, from Claude Code's own plugin list; null when it cannot be found.
+// Nothing is run: a missing or unreadable list just means Codex is unknown, and the feature stays off.
+async function detectCodex($: $): Promise<string | null> {
+  try {
+    const root = String($.plugin.root)
+    const marker = root.indexOf('/plugins/')
+    let base = marker >= 0 ? root.slice(0, marker + '/plugins/'.length) : undefined
+    if (!base) {
+      const home = await $.process.run(['printenv', 'HOME'])
+      base = home.exitCode === 0 && home.stdout.trim() ? `${home.stdout.trim()}/.claude/plugins/` : undefined
+    }
+    if (!base) return null
+    const path = codex.companionFrom(await $.fs.read(`${base}installed_plugins.json`))
+
+    return path && (await $.fs.exists(path)) ? path : null
+  } catch {
+    return null
+  }
+}
+
+async function codexCommand($: $, words: string[]): Promise<string> {
+  const [first = '', second = ''] = words.map(one => one.toLowerCase())
+  const live = await read($, liveAtom)
+  const wb = await read($, wbAtom)
+  const config = codex.codexOf(wb.team)
+  const path = live.codexPath
+  const state = `Codex ${config.enabled ? 'on' : 'off'}${config.enabled ? ` (cross-review ${config.review ? 'on' : 'off'}, rescue ${config.rescue ? 'on' : 'off'})` : ''}${wb.team?.enabled ? '' : '; it only acts while team mode is on'}.`
+
+  if (first === 'check') {
+    if (!path) return 'The Codex plugin was not found, so SmartWorkbench cannot use it. Install it first (/plugin install codex@openai-codex).'
+    const ran = await $.process.run(['node', path, 'setup', '--json']).catch(() => undefined)
+    if (!ran || ran.exitCode !== 0) return `Codex setup check failed to run: ${(ran?.stderr ?? '').trim().slice(0, 200) || 'no output'}`
+    try {
+      const report = JSON.parse(ran.stdout) as { ready?: boolean; auth?: { loggedIn?: boolean; detail?: string }; codex?: { detail?: string } }
+      return `Codex ${report.ready ? 'reports ready' : 'is not ready'}: ${report.codex?.detail ?? 'no version'}; ${report.auth?.detail ?? (report.auth?.loggedIn ? 'logged in' : 'not logged in')}. ${state}`
+    } catch {
+      return `Codex setup check printed something unreadable. ${state}`
+    }
+  }
+
+  if (first === 'on') {
+    if (!path) return 'The Codex plugin was not found, so it stays off. Install it first (/plugin install codex@openai-codex).'
+    const answer = await $.ui.ask(codex.CODEX_CONSENT, { header: 'Codex', options: ['Turn on', 'Cancel'] }).catch(() => 'Cancel')
+    if (answer !== 'Turn on') return 'Codex stays off.'
+    await mutate($, current => ({ ...current, team: codex.setCodex(current.team, { enabled: true, review: true }) }))
+    await audit($, 'team.codex', { on: true })
+
+    return `Codex on: after code changes the lead runs one read-only Codex review per turn and gives it to the advisor. ${wb.team?.enabled ? '' : 'Team mode is off, so turn it on with /swb team on. '}Rescue is separate: /swb team codex rescue on.`
+  }
+
+  if (first === 'off') {
+    await mutate($, current => ({ ...current, team: codex.setCodex(current.team, { enabled: false }) }))
+    await audit($, 'team.codex', { on: false })
+
+    return 'Codex off: Claude is no longer told to use it, and its commands ask again.'
+  }
+
+  if ((first === 'review' || first === 'rescue') && (second === 'on' || second === 'off')) {
+    if (!config.enabled) return 'Turn Codex on first: /swb team codex on.'
+    await mutate($, current => ({ ...current, team: codex.setCodex(current.team, { [first]: second === 'on' }) }))
+    await audit($, 'team.codex', { [first]: second === 'on' })
+
+    return `Codex ${first === 'review' ? 'cross-review' : 'rescue'} ${second}.`
+  }
+
+  return `${state} ${path ? 'Plugin found.' : 'Plugin not found.'}\n/swb team codex on|off|check · /swb team codex review|rescue on|off`
+}
+
 async function setTeam($: $, enabled: boolean, isFromCommand = false): Promise<string> {
   const wb = await mutate($, current => ({ ...current, team: { ...current.team, enabled } }))
   await audit($, enabled ? 'team.on' : 'team.off')
@@ -718,6 +787,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   if (word === 'team') {
     const [, sub = '', first, second] = args.trim().split(/\s+/)
     const verb = sub.toLowerCase()
+    if (verb === 'codex') return { text: await codexCommand($, args.trim().split(/\s+/).slice(2)) }
     if (verb === 'on' || verb === 'off') return { text: await setTeam($, verb === 'on', true) }
 
     // /swb team <lead|explorer|advisor> <model> [effort], or an effort alone
@@ -1582,6 +1652,8 @@ export const register: Register = on => {
     // the automatic reviews only while team mode is on.
     await registerRole($, 'explorer')
     await registerRole($, 'advisor')
+    const codexPath = await detectCodex($)
+    await setLive($, live => ({ ...live, codexPath }))
 
     if ((await read($, liveAtom)).policy?.audit) {
       const name = await $.process.run(['git', 'config', 'user.name']).catch(() => undefined)
