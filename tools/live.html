@@ -10,7 +10,7 @@
 :root{
   color-scheme:dark;
   --bg:#0a0d12; --win:#0d1117; --panel:#10151c; --line:#2a3340; --fg:#c9d1d9; --dim:#6b7785; --faint:#3a4452;
-  --opus:#b388ff; --sonnet:#ff9d52; --haiku:#3cc8e6; --guard:#a6e22e;
+  --codex:#f472b6; --opus:#b388ff; --sonnet:#ff9d52; --haiku:#3cc8e6; --guard:#a6e22e;
   --allow:#2fb562; --ask:#e9a820; --block:#ff5d73; --hold:#b388ff; --loop:#6ea8ff;
   --mono:ui-monospace,"JetBrains Mono","SF Mono",Menlo,Consolas,"Noto Sans Mono CJK KR",monospace;
 }
@@ -37,6 +37,8 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.55 var(--mon
 body.ready .box{transition:box-shadow .2s}
 .box h3{margin:0 0 3px;font-size:.88rem;font-weight:600}
 .box .sub{color:var(--dim);font-size:.72rem}
+.side{display:flex;flex-direction:column;gap:18px;min-width:0}
+.box.codex{border-color:var(--codex)} .box.codex h3{color:var(--codex)}.box.codex.busy{color:var(--codex)}.c-codex{color:var(--codex)}.sq.codex{background:var(--codex)}
 .box.opus{border-color:var(--opus)} .box.opus h3{color:var(--opus)}
 .box.sonnet{border-color:var(--sonnet)} .box.sonnet h3{color:var(--sonnet)}
 .box.haiku{border-color:var(--haiku)} .box.haiku h3{color:var(--haiku)}
@@ -58,7 +60,7 @@ body.ready .box{transition:box-shadow .2s}
 #flow .hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
 #flow .ec{fill:var(--dim);font-size:10px;text-anchor:start}
 #flow .pk{stroke:var(--win);stroke-width:1.5;fill:var(--fg)}
-#flow .pk.allow{fill:var(--allow)}#flow .pk.ask{fill:var(--ask)}#flow .pk.block{fill:var(--block)}#flow .pk.hold{fill:var(--hold)}#flow .pk.loop{fill:var(--loop)}
+#flow .pk.allow{fill:var(--allow)}#flow .pk.ask{fill:var(--ask)}#flow .pk.block{fill:var(--block)}#flow .pk.hold{fill:var(--hold)}#flow .pk.loop{fill:var(--loop)}#flow .pk.codex{fill:var(--codex)}
 #flow .pk.wait{animation:pulse 1s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.35}}
 .box.waiting{box-shadow:0 0 0 1px var(--ask),0 0 14px -4px var(--ask)}
@@ -124,7 +126,7 @@ button:hover{color:var(--fg)}
       <span class="m c-opus">◆ OPUS · ON CALL</span><span class="m c-sonnet">◆ SONNET · LEAD</span><span class="m c-haiku">◆ HAIKU · SWARM</span></div>
     <div class="legend">
       <span><span class="sq opus"></span><span data-i="lg-advisor"></span></span><span><span class="sq sonnet"></span><span data-i="lg-lead"></span></span>
-      <span><span class="sq haiku"></span><span data-i="lg-sub"></span></span><span><span class="sq guard"></span><span data-i="lg-guard"></span></span>
+      <span><span class="sq haiku"></span><span data-i="lg-sub"></span></span><span><span class="sq guard"></span><span data-i="lg-guard"></span></span><span><span class="sq codex"></span>codex</span>
       <span><span class="sq allow"></span>allow</span><span><span class="sq ask"></span>ask</span>
       <span><span class="sq block"></span>block</span><span><span class="sq opus"></span>hold</span><span><span class="sq loop"></span>loop</span>
       <span style="margin-left:auto"><button id="lang" aria-label="language"></button> <button id="clear" data-i="clear"></button></span>
@@ -139,6 +141,7 @@ button:hover{color:var(--fg)}
     </div>
     <div class="grid" id="grid">
       <svg id="flow" aria-hidden="true"></svg>
+      <div class="side">
       <aside class="box opus" id="b-opus">
         <h3>Opus · on call</h3>
         <div class="sub" data-i="o-sub"></div>
@@ -151,6 +154,15 @@ button:hover{color:var(--fg)}
         <div class="kv"><span data-i="o-team-l"></span><span id="o-team">?</span></div>
         <div class="state idle" id="o-state"></div>
       </aside>
+      <aside class="box codex" id="b-codex">
+        <h3>OpenAI Codex</h3>
+        <div class="sub" data-i="x-sub"></div>
+        <div class="kv" style="margin-top:6px"><span data-i="x-rev-l"></span><span id="x-rev">0</span></div>
+        <div class="kv"><span data-i="x-task-l"></span><span id="x-task">0</span></div>
+        <div class="kv"><span data-i="x-set-l"></span><span id="x-set">?</span></div>
+        <div class="state idle" id="x-state"></div>
+      </aside>
+      </div>
 
       <div class="tree">
         <div class="box user" id="b-user"><h3 data-i="u-h"></h3><div class="sub" id="u-text"></div></div>
@@ -220,6 +232,7 @@ var DICT = {
   'clear': ['clear', '비우기'],
   'o-sub': ['/advisor · reviewer (read-only)', '/advisor · 조언자 (읽기 전용)'], 'o-when': ['called when', '호출 시점'],
   'o-design-l': ['◇ design before a big edit', '◇ 큰 편집 전 설계'], 'o-plan-l': ['◇ plan review', '◇ 계획 검토'], 'o-final-l': ['◇ final check', '◇ 종료 전 점검'],
+  'x-sub': ['cross-review · rescue (team setting)', '교차검증 · 구조 (팀 설정)'], 'x-rev-l': ['reviews', '리뷰'], 'x-task-l': ['tasks', '작업'], 'x-set-l': ['setting', '설정'],
   'o-calls-l': ['calls', '호출'], 'o-team-l': ['team mode', '팀 모드'],
   'u-h': ['USER · PROMPT', '사용자 · 프롬프트'],
   'l-sub': ['writes code · runs tools', '구현 · 코딩 · 도구 호출'], 'l-now-l': ['now', '지금'], 'l-calls-l': ['tool calls', '도구 호출'],
@@ -234,12 +247,12 @@ function T(k){ var d = DICT[k]; return d ? d[lang === 'ko' ? 1 : 0] : k; }
 
 var S, inflight, events = [];
 // ---- flow: where an event moves, drawn as packets on the links between the boxes ----
-var NODES = { u: 'b-user', l: 'b-lead', g: 'b-guard', d: 'b-sub', w: 'b-worker', e: 'b-explorer', p: 'b-loop', o: 'b-opus' };
-var NODE_NAME = { u: ['user', '사용자'], l: ['Sonnet lead', 'Sonnet 리드'], g: ['guard', '가드'], d: ['dispatcher', '디스패처'], w: ['worker', 'worker'], e: ['explorer', 'explorer'], p: ['loop', '루프'], o: ['Opus advisor', 'Opus 조언자'] };
+var NODES = { u: 'b-user', l: 'b-lead', g: 'b-guard', d: 'b-sub', w: 'b-worker', e: 'b-explorer', p: 'b-loop', o: 'b-opus', x: 'b-codex' };
+var NODE_NAME = { u: ['user', '사용자'], l: ['Sonnet lead', 'Sonnet 리드'], g: ['guard', '가드'], d: ['dispatcher', '디스패처'], w: ['worker', 'worker'], e: ['explorer', 'explorer'], p: ['loop', '루프'], o: ['Opus advisor', 'Opus 조언자'], x: ['OpenAI Codex', 'OpenAI Codex'] };
 // flow:begin
 // id: [from, to, shape, fraction of the from box's height, fraction of the to box's height, gutter offset]
 var EDGES = { 'u-l': ['u', 'l', 'v'], 'l-g': ['l', 'g', 'v'], 'g-d': ['g', 'd', 'v'], 'd-e': ['d', 'e', 'v'],
-  'g-w': ['g', 'w', 'gl', 0.75, 0.5, 0], 'p-l': ['p', 'l', 'gr', 0.5, 0.5, 0], 'g-o': ['o', 'g', 'h', 0.5, 0.3, 8] };
+  'g-w': ['g', 'w', 'gl', 0.75, 0.5, 0], 'p-l': ['p', 'l', 'gr', 0.5, 0.5, 0], 'g-o': ['o', 'g', 'h', 0.5, 0.3, 4], 'x-g': ['x', 'g', 'h', 0.5, 0.6, 8] };
 var CLS = Object.assign(Object.create(null), { allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop', info: 'info' });
 var MAX_LIVE = 16, MAX_QUEUE = 50, MAX_PACKETS = 300, HOP_MS = 450;
 var NS = 'http://www.w3.org/2000/svg';
@@ -257,7 +270,8 @@ function routeOf(ev, ctx){
       break;
     case 'tool.start': {
       var path;
-      if (ev.agent) path = ctx.onlyAdvisor ? ['o', 'g'] : ['e', 'd', 'g'];
+      if (ev.codex) path = ev.agent ? ['d', 'g', 'x'] : ['l', 'g', 'x'];
+      else if (ev.agent) path = ctx.onlyAdvisor ? ['o', 'g'] : ['e', 'd', 'g'];
       else if (tool === 'Agent') path = /advisor/.test(sub) ? ['l', 'g', 'o'] : /explorer/.test(sub) ? ['l', 'g', 'd', 'e'] : ['l', 'g', 'd'];
       else if (/^(Edit|Write|NotebookEdit|MultiEdit|Bash)$/.test(tool)) path = ['l', 'g', 'w'];
       else path = ['l', 'g'];
@@ -461,7 +475,7 @@ var EDIT = Object.assign(Object.create(null), { Edit: 1, Write: 1, NotebookEdit:
 function plain(o){ return Object.assign(Object.create(null), o); }
 var TAGS = plain({ allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop' });
 function reset(){
-  S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, expCalls: 0, subCalls: 0, leadCalls: 0,
+  S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, codexReviews: 0, codexTasks: 0, codexBg: 0, codexOn: null, expCalls: 0, subCalls: 0, leadCalls: 0,
     edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '' };
   inflight = new Map();
   flowReset();
@@ -528,6 +542,12 @@ function render(){
   $('b-opus').classList.toggle('busy', adv > 0);
   $('o-state').className = 'state ' + (adv > 0 ? 'run' : 'idle');
   $('o-state').textContent = adv > 0 ? L('[ reviewing ]', '[ 검토 중 ]') : L('stands by until called', '호출될 때까지 대기');
+  var cdx = running('codex');
+  $('b-codex').classList.toggle('busy', cdx > 0);
+  $('x-rev').textContent = S.codexReviews; $('x-task').textContent = S.codexTasks;
+  $('x-set').textContent = S.codexOn === null ? '?' : S.codexOn ? 'ON' : L('off', '꺼짐');
+  $('x-state').className = 'state ' + (cdx > 0 ? 'run' : 'idle');
+  $('x-state').textContent = cdx > 0 ? L('[ running ]', '[ 실행 중 ]') : S.codexBg > 0 ? L('background jobs: state not tracked here', '백그라운드 작업: 상태는 여기서 추적하지 않음') : L('stands by', '대기');
   var leadNow = null;
   inflight.forEach(function(c){ if (c.lane === 'lead' || c.lane === 'worker') leadNow = c; });
   $('b-lead').classList.toggle('busy', !!leadNow);
@@ -562,18 +582,20 @@ function handle(ev){
   switch (ev.kind) {
     case 'prompt':
       S.team = !!ev.team;
+      S.codexOn = ev.codex === true;
       S.userText = ev.text;
       addLog(at, 'user', 'c-guard', [cut(ev.text, 110)].concat(ev.loop ? [' ', ['i', L('(loop pass)', '(루프 회차)')]] : []), '', ev.origin === 'plugin' ? 'PLUGIN' : 'PROMPT', 'info');
       break;
     case 'tool.start': {
       var sub = String(ev.subagent || '');
-      var lane = ev.agent ? 'sub' : /advisor/.test(sub) ? 'advisor' : /explorer/.test(sub) ? 'explorer' : (EDIT[ev.tool] || ev.tool === 'Bash') ? 'worker' : 'lead';
-      var who = lane === 'advisor' ? 'opus:adv' : lane === 'explorer' ? 'haiku:exp' : lane === 'sub' ? 'sub:' + cut(ev.agent, 4) : 'sonnet';
-      var whoClass = lane === 'advisor' ? 'c-opus' : (lane === 'explorer' || lane === 'sub') ? 'c-haiku' : 'c-sonnet';
+      var lane = ev.codex ? 'codex' : ev.agent ? 'sub' : /advisor/.test(sub) ? 'advisor' : /explorer/.test(sub) ? 'explorer' : (EDIT[ev.tool] || ev.tool === 'Bash') ? 'worker' : 'lead';
+      var who = lane === 'codex' ? 'codex' : lane === 'advisor' ? 'opus:adv' : lane === 'explorer' ? 'haiku:exp' : lane === 'sub' ? 'sub:' + cut(ev.agent, 4) : 'sonnet';
+      var whoClass = lane === 'codex' ? 'c-codex' : lane === 'advisor' ? 'c-opus' : (lane === 'explorer' || lane === 'sub') ? 'c-haiku' : 'c-sonnet';
       if (lane === 'advisor') S.opusCalls++;
+      if (lane === 'codex') { if (/review/.test(String(ev.codex))) S.codexReviews++; else if (ev.codex === 'task') S.codexTasks++; if (ev.codexBg) S.codexBg++; }
       if (lane === 'explorer') S.expCalls++;
       if (lane === 'sub') { S.subCalls++; S.reads++; }
-      if (!ev.agent) { S.leadCalls++; if (EDIT[ev.tool]) S.edits++; else if (ev.tool === 'Bash') S.shells++; else if (lane === 'lead') S.reads++; }
+      if (!ev.agent) { S.leadCalls++; if (EDIT[ev.tool]) S.edits++; else if (ev.tool === 'Bash' && lane !== 'codex') S.shells++; else if (lane === 'lead') S.reads++; }
       if (ev.policy === 'allow') S.allow++;
       var entry = { lane: lane, tool: cut(ev.tool, 40), summary: cut(ev.summary, 120) };
       var kind = ev.policy === 'ask' ? 'ask' : ev.policy === 'block' ? 'block' : '';
@@ -639,7 +661,7 @@ function handle(ev){
 
 // ---- ui: pause, replay, speed, filters, and the detail drawer ----
 var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null;
-var FIELDS = ['kind', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id'];
+var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id'];
 function store(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
 function stored(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
 function nodeName(n){ return NODE_NAME[n] ? NODE_NAME[n][lang === 'ko' ? 1 : 0] : n; }
