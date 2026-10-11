@@ -66,6 +66,12 @@ function pump() {
 }
 const timer = setInterval(pump, 150)
 
+// A comment line now and then keeps an idle stream from being closed by a proxy's read timeout (often 60 s) and shows a dead client early.
+const PING_MS = Number(process.env.SWB_LIVE_PING_MS) || 15000
+const pinger = setInterval(() => {
+  for (const res of clients) res.write(': ping\n\n')
+}, PING_MS)
+
 // A page on another site can point its own hostname at 127.0.0.1 (DNS rebinding) and read the feed;
 // only a loopback Host header or a named host the owner trusts (a reverse proxy in front of this server) is served.
 const TRUSTED = (process.env.SWB_LIVE_HOSTS ?? '').split(',').map(one => one.trim().toLowerCase()).filter(Boolean)
@@ -80,7 +86,8 @@ const server = createServer((req, res) => {
     return
   }
   if (req.url === '/events') {
-    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
+    // no-transform and x-accel-buffering keep a reverse proxy (nginx, a CDN) from holding the stream back or recompressing it.
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' })
     res.write(': connected\n\n')
     pump()
     for (const line of recent) res.write(`data: ${line}\n\n`)
@@ -103,6 +110,7 @@ const server = createServer((req, res) => {
 
 function stop() {
   clearInterval(timer)
+  clearInterval(pinger)
   server.close()
   process.exit(0)
 }
