@@ -12,6 +12,7 @@ const dir = mkdtempSync(join(tmpdir(), 'swb-live-'))
 const feed = join(dir, '.claude', 'smartworkbench-live.jsonl')
 const port = 20000 + Math.floor(Math.random() * 20000)
 const sleep = ms => new Promise(done => setTimeout(done, ms))
+process.env.SWB_LIVE_PING_MS = '200'
 let failed = 0
 const check = (ok, what) => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`)
@@ -30,11 +31,13 @@ function launch(at = port, where = dir) {
 // Stays connected to /events and collects every data line that arrives.
 function follow() {
   const lines = []
+  const raw = { text: '' }
   const req = get({ host: '127.0.0.1', port, path: '/events', headers: { host: `127.0.0.1:${port}` } }, res => {
+    res.on('data', chunk => (raw.text += chunk))
     res.on('data', chunk => lines.push(...String(chunk).split('\n').filter(one => one.startsWith('data: '))))
   })
   req.on('error', () => undefined)
-  return { lines, close: () => req.destroy() }
+  return { lines, raw, close: () => req.destroy() }
 }
 
 function headerOf(path, name) {
@@ -84,6 +87,12 @@ try {
   for (let i = 0; i < 40 && second.out.code === undefined; i++) await sleep(100)
   check(second.out.code === 1 && second.out.stderr.includes('EADDRINUSE'), 'a second start on the same port exits 1 with EADDRINUSE')
   check(existsSync(feed), 'a failed second start leaves the running feed in place')
+
+  check((await headerOf('/events', 'x-accel-buffering')) === 'no', 'the stream tells a proxy not to buffer it')
+  const idle = follow()
+  await sleep(700)
+  check(idle.raw.text.includes(': ping'), 'an idle stream gets a keep-alive comment')
+  idle.close()
 
   const watcher = follow()
   await sleep(300)
