@@ -156,6 +156,9 @@ describe('risk rules', () => {
       // a substitution in the segment can hold another command whose quoted arguments are not ours
       `grep $(awk 'BEGIN{system("rm -rf /tmp/x")}' f) g`,
       'grep <(sh -c "rm -rf /tmp/x") f',
+      // a runner word in quotes does not switch blanking on: the shape is fixed and options are checked as typed
+      'rg --pre "sh" "rm -rf /tmp/x"',
+      'git -c core.pager="sh" commit -m "rm -rf x"',
       // a command word cut off by the 256-character window is not trusted
       'git commit ' + 'a '.repeat(150) + '-m "rm -rf x"',
       // operands before the flags, and a "(" that is not a substitution
