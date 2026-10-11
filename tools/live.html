@@ -195,42 +195,58 @@ function T(k){ var d = DICT[k]; return d ? d[lang === 'ko' ? 1 : 0] : k; }
 
 var S, inflight, events = [];
 var EDIT = { Edit: 1, Write: 1, NotebookEdit: 1, MultiEdit: 1 };
+var TAGS = { allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop' };
 function reset(){
   S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, expCalls: 0, subCalls: 0, leadCalls: 0,
     edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '' };
-  inflight = {};
-  $('log').innerHTML = '<div class="empty">' + L('waiting for events', '이벤트를 기다리는 중') + '</div>';
-  $('flags').innerHTML = '<div class="empty">' + L('none yet', '아직 없음') + '</div>';
+  inflight = new Map();
+  $('log').textContent = '';
+  $('log').appendChild(el('div', 'empty', L('waiting for events', '이벤트를 기다리는 중')));
+  $('flags').textContent = '';
+  $('flags').appendChild(el('div', 'empty', L('none yet', '아직 없음')));
 }
 
 function $(id){ return document.getElementById(id); }
-function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+// Text from the feed only ever reaches the page through textContent, so it can never become markup.
+function el(tag, cls, text){ var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+// Parts are plain strings (text) or [tag, text] pairs for <i> and <code>.
+function fill(node, parts){
+  parts.forEach(function(p){ node.appendChild(typeof p === 'string' ? document.createTextNode(p) : el(p[0], null, p[1])); });
+  return node;
+}
 function clock(at){ return new Date(at).toTimeString().slice(0, 8); }
-function cut(s, n){ s = String(s == null ? '' : s).replace(/\s+/g, ' '); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+function cut(s, n){
+  s = String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim();
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
 var replaying = false;
 function fresh(){ return !replaying && Date.now() - loadedAt > 1500 ? ' new' : ''; }
 
-function addLog(at, who, whoClass, html, kind, tag, tagClass){
+function addLog(at, who, whoClass, parts, kind, tag, tagClass){
   var log = $('log');
-  if (log.firstChild && log.firstChild.className === 'empty') log.innerHTML = '';
-  var row = document.createElement('div');
-  row.className = 'row ' + (kind || '') + fresh();
-  row.innerHTML = '<span class="tm">' + clock(at) + '</span><span class="' + whoClass + '">' + esc(who) + '</span><span class="m">' + html + '</span><span>' +
-    (tag ? '<span class="tag ' + (/^[a-z]+$/.test(tagClass) ? tagClass : '') + '">' + esc(tag) + '</span>' : '') + '</span>';
+  if (log.firstChild && log.firstChild.className === 'empty') log.textContent = '';
+  var row = el('div', 'row ' + (kind || '') + fresh());
+  row.appendChild(el('span', 'tm', clock(at)));
+  row.appendChild(el('span', whoClass, who));
+  row.appendChild(fill(el('span', 'm'), parts));
+  var last = el('span');
+  if (tag) last.appendChild(el('span', 'tag ' + (TAGS[tagClass] || ''), tag));
+  row.appendChild(last);
   log.insertBefore(row, log.firstChild);
   while (log.children.length > 120) log.removeChild(log.lastChild);
   return row;
 }
-function addFlag(at, kind, label, text){
+function addFlag(at, kind, label, parts){
   var f = $('flags');
-  if (f.firstChild && f.firstChild.className === 'empty') f.innerHTML = '';
-  var el = document.createElement('div');
-  el.className = 'flag ' + kind + fresh();
-  el.innerHTML = '<span class="tag ' + kind + '">' + label + '</span><span class="m">' + text + '</span><span class="w">' + L('turn ', '턴 ') + (S.turn + 1) + ' · ' + clock(at) + '</span>';
-  f.insertBefore(el, f.firstChild);
+  if (f.firstChild && f.firstChild.className === 'empty') f.textContent = '';
+  var row = el('div', 'flag ' + kind + fresh());
+  row.appendChild(el('span', 'tag ' + kind, label));
+  row.appendChild(fill(el('span', 'm'), parts));
+  row.appendChild(el('span', 'w', L('turn ', '턴 ') + (S.turn + 1) + ' · ' + clock(at)));
+  f.insertBefore(row, f.firstChild);
   while (f.children.length > 10) f.removeChild(f.lastChild);
 }
-function running(lane){ var n = 0; for (var k in inflight) if (inflight[k].lane === lane) n++; return n; }
+function running(lane){ var n = 0; inflight.forEach(function(c){ if (c.lane === lane) n++; }); return n; }
 function setBusy(boxId, stateId, n, label){
   $(boxId).classList.toggle('busy', n > 0);
   var st = $(stateId);
@@ -247,7 +263,7 @@ function render(){
   $('o-state').className = 'state ' + (adv > 0 ? 'run' : 'idle');
   $('o-state').textContent = adv > 0 ? L('[ reviewing ]', '[ 검토 중 ]') : L('stands by until called', '호출될 때까지 대기');
   var leadNow = null;
-  for (var k in inflight) if (inflight[k].lane === 'lead' || inflight[k].lane === 'worker') leadNow = inflight[k];
+  inflight.forEach(function(c){ if (c.lane === 'lead' || c.lane === 'worker') leadNow = c; });
   $('b-lead').classList.toggle('busy', !!leadNow);
   $('l-now').textContent = leadNow ? cut(leadNow.tool + ' ' + leadNow.summary, 34) : L('idle', '대기');
   $('l-calls').textContent = S.leadCalls;
@@ -278,10 +294,10 @@ function handle(ev){
     case 'prompt':
       S.team = !!ev.team;
       S.userText = ev.text;
-      addLog(at, 'user', 'c-guard', esc(cut(ev.text, 110)) + (ev.loop ? ' <i>' + L('(loop pass)', '(루프 회차)') + '</i>' : ''), '', ev.origin === 'plugin' ? 'PLUGIN' : 'PROMPT', 'info');
+      addLog(at, 'user', 'c-guard', [cut(ev.text, 110)].concat(ev.loop ? [' ', ['i', L('(loop pass)', '(루프 회차)')]] : []), '', ev.origin === 'plugin' ? 'PLUGIN' : 'PROMPT', 'info');
       break;
     case 'tool.start': {
-      var sub = ev.subagent || '';
+      var sub = String(ev.subagent || '');
       var lane = ev.agent ? 'sub' : /advisor/.test(sub) ? 'advisor' : /explorer/.test(sub) ? 'explorer' : (EDIT[ev.tool] || ev.tool === 'Bash') ? 'worker' : 'lead';
       var who = lane === 'advisor' ? 'opus:adv' : lane === 'explorer' ? 'haiku:exp' : lane === 'sub' ? 'sub:' + cut(ev.agent, 4) : 'sonnet';
       var whoClass = lane === 'advisor' ? 'c-opus' : (lane === 'explorer' || lane === 'sub') ? 'c-haiku' : 'c-sonnet';
@@ -290,31 +306,33 @@ function handle(ev){
       if (lane === 'sub') { S.subCalls++; S.reads++; }
       if (!ev.agent) { S.leadCalls++; if (EDIT[ev.tool]) S.edits++; else if (ev.tool === 'Bash') S.shells++; else if (lane === 'lead') S.reads++; }
       if (ev.policy === 'allow') S.allow++;
-      inflight[ev.id] = { lane: lane, tool: ev.tool, summary: ev.summary };
+      var entry = { lane: lane, tool: cut(ev.tool, 40), summary: cut(ev.summary, 120) };
       var kind = ev.policy === 'ask' ? 'ask' : ev.policy === 'block' ? 'block' : '';
-      var row = addLog(at, who, whoClass, esc(ev.tool) + ' <i>' + esc(cut(ev.summary, 80)) + '</i>', kind, String(ev.policy).toUpperCase(), { allow: 'allow', ask: 'ask', block: 'block' }[ev.policy] || 'info');
-      inflight[ev.id].row = row;
-      if (ev.policy === 'block') delete inflight[ev.id];
+      var row = addLog(at, who, whoClass, [cut(ev.tool, 40), ' ', ['i', cut(ev.summary, 80)]], kind, String(ev.policy).toUpperCase(), ev.policy);
+      entry.row = row;
+      if (ev.policy !== 'block') inflight.set(String(ev.id), entry);
       break;
     }
     case 'tool.end': {
-      var c = inflight[ev.id];
+      var c = inflight.get(String(ev.id));
       if (c && c.row) {
-        c.row.querySelector('.m').insertAdjacentHTML('beforeend', ' <i>→ ' + esc(ev.outcome) + '</i>');
+        var line = c.row.querySelector('.m');
+        line.appendChild(document.createTextNode(' '));
+        line.appendChild(el('i', null, '→ ' + cut(ev.outcome, 20)));
         if (ev.outcome === 'error') c.row.className += ' block';
       }
-      delete inflight[ev.id];
+      inflight.delete(String(ev.id));
       break;
     }
     case 'guard.block':
       S.block++;
-      addFlag(at, 'block', 'BLOCK', esc(ev.reason) + ' · <code>' + esc(cut(ev.input, 70)) + '</code>');
-      addLog(at, 'guard', 'c-guard', esc(ev.tool) + L(' blocked ', ' 차단 ') + '<i>' + esc(cut(ev.input, 70)) + '</i>', 'block', 'BLOCK', 'block');
+      addFlag(at, 'block', 'BLOCK', [cut(ev.reason, 120), ' · ', ['code', cut(ev.input, 70)]]);
+      addLog(at, 'guard', 'c-guard', [cut(ev.tool, 40) + L(' blocked ', ' 차단 '), ['i', cut(ev.input, 70)]], 'block', 'BLOCK', 'block');
       break;
     case 'guard.ask':
       S.ask++;
-      addFlag(at, ev.answer === 'declined' ? 'block' : 'ask', 'ASK', esc(ev.reason) + ' → ' + esc(ev.answer) + ' · <code>' + esc(cut(ev.input, 60)) + '</code>');
-      addLog(at, 'guard', 'c-guard', esc(ev.tool) + L(' asked → ', ' 확인 → ') + esc(ev.answer), 'ask', 'ASK', 'ask');
+      addFlag(at, ev.answer === 'declined' ? 'block' : 'ask', 'ASK', [cut(ev.reason, 120) + ' → ' + cut(ev.answer, 20) + ' · ', ['code', cut(ev.input, 60)]]);
+      addLog(at, 'guard', 'c-guard', [cut(ev.tool, 40) + L(' asked → ', ' 확인 → ') + cut(ev.answer, 20)], 'ask', 'ASK', 'ask');
       break;
     case 'team.design-required':
     case 'team.plan-review-required':
@@ -322,30 +340,30 @@ function handle(ev){
       var h = HOLD[ev.kind];
       S[h[0]]++;
       var label = L(h[1], h[2]);
-      addFlag(at, 'hold', 'HOLD', esc(label) + (ev.tool ? ' · ' + esc(ev.tool) : ''));
-      addLog(at, 'opus', 'c-opus', esc(label) + L(' required', ' 요구'), 'hold', 'HOLD', 'hold');
+      addFlag(at, 'hold', 'HOLD', [label + (ev.tool ? ' · ' + cut(ev.tool, 40) : '')]);
+      addLog(at, 'opus', 'c-opus', [label + L(' required', ' 요구')], 'hold', 'HOLD', 'hold');
       break;
     }
     case 'loop.start':
-      S.pass = L('started · ', '시작 · ') + (ev.limit === 'inf' ? L('no limit', '무한') : ev.limit + L(' passes', '회'));
-      addLog(at, 'loop', 'c-loop', L('start · items ', '시작 · 항목 ') + esc(ev.items) + ' · ' + esc(ev.limit), '', 'LOOP', 'loop');
+      S.pass = L('started · ', '시작 · ') + (ev.limit === 'inf' ? L('no limit', '무한') : cut(ev.limit, 8) + L(' passes', '회'));
+      addLog(at, 'loop', 'c-loop', [L('start · items ', '시작 · 항목 ') + cut(ev.items, 8) + ' · ' + cut(ev.limit, 8)], '', 'LOOP', 'loop');
       break;
     case 'loop.pass':
-      S.pass = L('pass ' + ev.done + ' done', ev.done + '회차 끝');
-      addLog(at, 'loop', 'c-loop', L('pass ' + esc(ev.done) + ' done → next pass', esc(ev.done) + '회차 끝 → 다음 회차'), '', 'LOOP', 'loop');
+      S.pass = L('pass ' + cut(ev.done, 8) + ' done', cut(ev.done, 8) + '회차 끝');
+      addLog(at, 'loop', 'c-loop', [L('pass ' + cut(ev.done, 8) + ' done → next pass', cut(ev.done, 8) + '회차 끝 → 다음 회차')], '', 'LOOP', 'loop');
       break;
     case 'loop.done': case 'loop.stop': case 'loop.cancel': {
       S.pass = null;
       var end = { 'loop.done': L('finished', '완료'), 'loop.stop': L('stopped', '중지'), 'loop.cancel': L('ended by your prompt', '사용자 입력으로 종료') }[ev.kind];
-      addLog(at, 'loop', 'c-loop', end + (ev.done != null ? ' · ' + esc(ev.done) + L(' passes', '회') : ''), '', 'LOOP', 'loop');
+      addLog(at, 'loop', 'c-loop', [end + (ev.done != null ? ' · ' + cut(ev.done, 8) + L(' passes', '회') : '')], '', 'LOOP', 'loop');
       break;
     }
     case 'turn':
       S.turn++;
-      addLog(at, 'turn', 'c-guard', ev.aborted ? L('turn aborted (Esc)', '턴 중단 (Esc)') : L('turn done', '턴 완료'), ev.aborted ? 'block' : '', ev.aborted ? 'ABORT' : 'DONE', ev.aborted ? 'block' : 'info');
+      addLog(at, 'turn', 'c-guard', [ev.aborted ? L('turn aborted (Esc)', '턴 중단 (Esc)') : L('turn done', '턴 완료')], ev.aborted ? 'block' : '', ev.aborted ? 'ABORT' : 'DONE', ev.aborted ? 'block' : 'info');
       break;
     default:
-      if (/^(contract|condition|task|session)\./.test(ev.kind)) addLog(at, 'wb', 'c-guard', esc(ev.kind), '', '', '');
+      if (/^(contract|condition|task|session)\./.test(String(ev.kind))) addLog(at, 'wb', 'c-guard', [cut(ev.kind, 40)], '', '', '');
   }
   render();
 }
