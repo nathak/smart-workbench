@@ -1565,6 +1565,38 @@ async function teamTab($: $, { els, wb, live, width }: View): Promise<RenderElem
           </Box>
         )
       })}
+      {(() => {
+        const cx = codex.codexOf(wb.team)
+        const found = typeof live.codexPath === 'string'
+        const say = (words: string[]) => void codexCommand($, words).then(text => toast(text.split('\n')[0] ?? ''))
+
+        return (
+          <Box key="codex" flexDirection="column" marginTop={1}>
+            <Box gap={1}>
+              <Text bold>CODEX (OpenAI)</Text>
+              <Text color={cx.enabled ? 'success' : undefined}>{cx.enabled ? '● on' : '○ off'}</Text>
+              <Button key="codex-toggle" variant={cx.enabled ? undefined : 'primary'} label={cx.enabled ? 'Turn off' : 'Turn on'} onPress={() => say([cx.enabled ? 'off' : 'on'])} />
+              <Button key="codex-check" label="Check" onPress={() => say(['check'])} />
+            </Box>
+            <Text dimColor wrap="wrap">
+              {found
+                ? 'Plugin found; login is not checked until you press Check.'
+                : 'Codex plugin not found, so this stays off. Install it with /plugin install codex@openai-codex.'}{' '}
+              Codex sends the diff and the files it reads to OpenAI under your Codex account. Off by default.
+            </Text>
+            {cx.enabled && (
+              <Box gap={2} marginLeft={2}>
+                <Select key="codex-review" label="Cross-review" value={cx.review ? 'on' : 'off'} options={[{ value: 'on' }, { value: 'off' }]} onSelect={value => say(['review', value])} />
+                <Select key="codex-rescue" label="Rescue" value={cx.rescue ? 'on' : 'off'} options={[{ value: 'on' }, { value: 'off' }]} onSelect={value => say(['rescue', value])} />
+              </Box>
+            )}
+            <Text dimColor wrap="wrap">
+              {isOn ? 'Cross-review: one read-only Codex review per turn before the advisor\'s final check. Rescue: one Codex task after a repeated error. ' : 'Acts only while team mode is on. '}
+              --write and transfer always ask. Runs this session: {track.codexRuns ?? 0}
+            </Text>
+          </Box>
+        )
+      })()}
       <Box marginTop={1} flexDirection="column">
         <Text dimColor>Session model setting now: {row?.value || 'unknown'}</Text>
         <Text dimColor>

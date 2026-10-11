@@ -956,3 +956,30 @@ test('Codex review stays a question while a loop pass runs, and without team mod
   expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: REVIEW }))).toContain('declined')
   expect(ran).toEqual([])
 })
+
+test('the Team tab drives Codex: found or missing, on with consent, and the two switches', async ($, on) => {
+  const { workbench } = world(on, { files: CODEX_FILES, commands: CODEX_RUNS, ask: labels => (labels.includes('Turn on') ? 'Turn on' : 'Block') })
+  await $.session.start(start)
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-team' })
+  expect(await ui.find({ type: 'Text', text: /CODEX \(OpenAI\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Plugin found/ })).toBeDefined()
+
+  await ui.press({ key: 'codex-toggle' })
+  expect(workbench().team?.codex).toEqual({ enabled: true, review: true, rescue: false })
+  await ui.select({ key: 'codex-rescue', value: 'on' })
+  expect(workbench().team?.codex?.rescue).toBe(true)
+  await ui.select({ key: 'codex-review', value: 'off' })
+  expect(workbench().team?.codex?.review).toBe(false)
+  await ui.press({ key: 'codex-toggle' })
+  expect(workbench().team?.codex?.enabled).toBe(false)
+})
+
+test('the Team tab says so when the Codex plugin is not found', async ($, on) => {
+  world(on, { commands: { 'printenv HOME': { exitCode: 0, stdout: '/home/u\n' } } })
+  await $.session.start(start)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-team' })
+  expect(await ui.find({ type: 'Text', text: /Codex plugin not found/ })).toBeDefined()
+})
