@@ -829,3 +829,21 @@ test('the live feed stays untouched when no server keeps the feed file', async (
   await $.prompt.submit({ text: 'fix the login', ...COMPOSER })
   expect(writes.some(one => one.argv[0] === 'tee')).toBe(false)
 })
+
+test('the live feed pairs every started call with an end, a blocked one too, and times the finished ones', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: { '.claude/smartworkbench-live.jsonl': '' }, commands: { [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } }, processed: writes })
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Bash', command: 'rm -rf /' })
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/a.ts` })
+
+  const lines = writes.filter(one => one.argv[0] === 'tee').map(one => JSON.parse(one.stdin ?? '{}') as Record<string, unknown>)
+  const blocked = lines.find(one => one.kind === 'guard.block')
+  const started = lines.filter(one => one.kind === 'tool.start')
+  const ended = lines.filter(one => one.kind === 'tool.end')
+
+  expect(blocked?.id).toBeDefined()
+  expect(started.map(one => one.id)).toEqual(ended.map(one => one.id))
+  expect(ended.map(one => one.outcome)).toEqual(['blocked', 'ok'])
+  expect(typeof ended[1]?.ms).toBe('number')
+})

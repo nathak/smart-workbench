@@ -1715,7 +1715,8 @@ export const register: Register = on => {
     if (policy === 'block') {
       await mutate($, current => model.recordCall(current, { ...call, outcome: 'blocked', durationMs: 0 }))
       await badge($, { ...call, outcome: 'blocked' })
-      await audit($, 'guard.block', { tool: e.tool, input: call.summary, reason: verdict.reason, rule: verdict.category })
+      await audit($, 'guard.block', { id: call.id, tool: e.tool, input: call.summary, reason: verdict.reason, rule: verdict.category })
+      await emit($, 'tool.end', { id: call.id, outcome: 'blocked', ms: 0 })
 
       return {
         deny: `SmartWorkbench blocked this ${e.tool} call: ${verdict.reason}. The user's guard policy forbids it; do not retry it another way. Ask the user if it is really needed.`,
@@ -1741,7 +1742,8 @@ export const register: Register = on => {
         const durationMs = (await $.clock.now()) - startedAt
         await mutate($, current => model.recordCall(current, { ...call, outcome: 'declined', durationMs }))
         await badge($, { ...call, outcome: 'declined' })
-        await audit($, 'guard.ask', { tool: e.tool, input: call.summary, reason: verdict.reason, answer: 'declined' })
+        await audit($, 'guard.ask', { id: call.id, tool: e.tool, input: call.summary, reason: verdict.reason, answer: 'declined' })
+        await emit($, 'tool.end', { id: call.id, outcome: 'declined', ms: durationMs })
 
         return { deny: `The user declined this ${e.tool} call in SmartWorkbench (${verdict.reason}).` }
       }
@@ -1750,6 +1752,7 @@ export const register: Register = on => {
         await allowForSession($, scope.key, scope.label)
       }
       await audit($, 'guard.ask', {
+        id: call.id,
         tool: e.tool,
         input: call.summary,
         reason: verdict.reason,
@@ -1803,7 +1806,7 @@ export const register: Register = on => {
 
     if (e.tool === 'Agent' && e.subagent_type === crew.ADVISOR && isOk) {
       await updateTrack($, track => crew.advisorRan(track, endedAt))
-      await audit($, 'team.advisor', { description: e.description })
+      await audit($, 'team.advisor', { id: call.id, description: e.description })
     } else if (isTeam && ran.deny === undefined && e.tool !== 'Agent') {
       const key = crew.failureKey(e.tool, e as unknown as Record<string, unknown>)
       let nudge = false
@@ -1814,11 +1817,14 @@ export const register: Register = on => {
       })
       if (nudge) {
         await audit($, 'team.repeat-error', { tool: e.tool, input: call.summary, count: track.failures[key] ?? 0 })
+        // This branch returns early, so the badge and the end of the call are recorded here.
+        await badge($, { ...call, outcome })
+        await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt })
         return { ...ran, context: [...(ran.context ?? []), crew.repeatNudge(track.failures[key] ?? crew.REPEAT_LIMIT)] }
       }
     }
     await badge($, { ...call, outcome })
-    await emit($, 'tool.end', { id: call.id, outcome })
+    await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt })
 
     return ran
   }).catch(($, e, next) => {
