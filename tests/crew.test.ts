@@ -164,3 +164,13 @@ describe('failure keys', () => {
     expect(crew.DESIGN_FIRST).toContain(`${crew.SMALL_TURN_LINES} lines in this turn`)
   })
 })
+
+describe('image run check', () => {
+  test('lists the paths git reports and the ones an image run should not have written', async () => {
+    expect(codex.porcelainPaths(' M src/a.ts\0?? assets/x.png\0R  new.png\0old.png\0')).toEqual(['src/a.ts', 'assets/x.png', 'new.png'])
+    expect(codex.isImagePath('assets/x.png')).toBe(true)
+    expect(codex.isImagePath('public/img/a-b.JPG')).toBe(true)
+    for (const bad of ['src/a.ts', 'assets/x.svg', 'assets/../src/x.png', 'docs/x.png', 'assets/a b.png']) expect(codex.isImagePath(bad)).toBe(false)
+    expect(codex.strayWrites(['src/a.ts'], ['src/a.ts', 'assets/x.png', 'src/b.ts'])).toEqual(['src/b.ts'])
+  })
+})

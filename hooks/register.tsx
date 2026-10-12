@@ -236,6 +236,13 @@ async function injection($: $, wb: Workbench): Promise<Injection> {
 
 type ContextNumbers = { contextPercent?: number; contextTokens?: number; contextWindow?: number }
 
+// Paths git reports as changed or untracked, or undefined outside a repository or when git fails.
+async function gitPaths($: $): Promise<string[] | undefined> {
+  const ran = await $.process.run(['git', 'status', '--porcelain=v1', '-z', '-uall']).catch(() => undefined)
+
+  return ran?.exitCode === 0 ? codex.porcelainPaths(ran.stdout) : undefined
+}
+
 async function refreshUsage($: $): Promise<ContextNumbers> {
   const { context } = await $.session.usage()
   const numbers: ContextNumbers = { contextPercent: context.percent, contextTokens: context.tokens, contextWindow: context.window }
@@ -2022,9 +2029,23 @@ export const register: Register = on => {
 
     $.ui.log(`SmartWorkbench timing: tool.call guard ${(await $.clock.now()) - hookStart}ms for ${e.tool}`, { to: 'debug' })
 
+    // An image run is allowed unasked, so what it changed is checked afterwards: warned about, never reverted.
+    const isBackgroundImage = isImage && /\s--background\b/.test(e.command)
+    const imageBefore = isImage && !isBackgroundImage ? await gitPaths($) : undefined
+
     // Allow still goes through Claude Code's own permission check beneath.
     const ran = await next(e)
     const endedAt = await $.clock.now()
+    if (isImage && ran.deny === undefined) {
+      const after = imageBefore ? await gitPaths($) : undefined
+      const stray = imageBefore && after ? codex.strayWrites(imageBefore, after) : []
+      if (isBackgroundImage) await audit($, 'codex.write-check', { id: call.id, skipped: 'background' }).catch(() => undefined)
+      if (stray.length > 0) {
+        const paths = stray.slice(0, 10).join(', ')
+        await audit($, 'codex.write-check', { id: call.id, count: stray.length, paths }).catch(() => undefined)
+        $.ui.toast(`SmartWorkbench: the Codex image run also changed files outside the image folders: ${model.cut(paths, 200)}. Nothing was reverted; check git diff.`)
+      }
+    }
     const isOk = ran.deny === undefined && ran.isError !== true
     const outcome = ran.deny !== undefined ? 'blocked' : isOk ? 'ok' : 'error'
     const kinds = e.tool === 'Bash' ? evidenceKindsOf(e.command) : []

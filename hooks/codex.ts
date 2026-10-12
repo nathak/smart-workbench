@@ -65,6 +65,34 @@ export function isPlainInvocation(command: string, path: string, allowWrite = fa
 // is not held to the path (its edits do not pass the Guard), so the folder list stays short. The number of pictures is the user's to ask for.
 export const IMAGE_DIRS = ['assets', 'images', 'public', 'static']
 
+// A picture under an asset folder, the only kind of file an image run is expected to write.
+const IMAGE_PATH = new RegExp(`^(?:${IMAGE_DIRS.join('|')})/[\\w-]+(?:/[\\w-]+)*\\.(?:png|jpe?g|webp)$`, 'i')
+
+export function isImagePath(path: string): boolean {
+  return !path.includes('..') && IMAGE_PATH.test(path)
+}
+
+// The paths in `git status --porcelain=v1 -z -uall`: entries are "XY path" separated by NUL, a rename or copy is followed by its old path.
+export function porcelainPaths(stdout: string): string[] {
+  const parts = stdout.split('\0')
+  const paths: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i] ?? ''
+    if (entry.length < 4) continue
+    paths.push(entry.slice(3))
+    if (entry[0] === 'R' || entry[0] === 'C') i++
+  }
+
+  return paths
+}
+
+// Paths that changed during an image run and are not pictures in an asset folder.
+export function strayWrites(before: readonly string[], after: readonly string[]): string[] {
+  const seen = new Set(before)
+
+  return after.filter(path => !seen.has(path) && !isImagePath(path))
+}
+
 export function isImageTask(command: string, path: string): boolean {
   if (!isPlainInvocation(command, path, true)) return false
   const hit = /^node[ \t]+\S+[ \t]+task((?:[ \t]+--(?:write|wait|background))*)[ \t]+("[^"]*"|'[^']*')$/.exec(command.trim().replace(/^node[ \t]+"([^"]*)"/, 'node $1'))
