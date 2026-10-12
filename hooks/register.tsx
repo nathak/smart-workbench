@@ -426,8 +426,14 @@ async function detectCodex($: $): Promise<string | null> {
     const marker = root.indexOf('/plugins/')
     let base = marker >= 0 ? root.slice(0, marker + '/plugins/'.length) : undefined
     if (!base) {
-      const home = await $.process.run(['printenv', 'HOME'])
-      base = home.exitCode === 0 && home.stdout.trim() ? `${home.stdout.trim()}/.claude/plugins/` : undefined
+      // A custom config folder (CLAUDE_CONFIG_DIR) holds the plugin list; without one it is ~/.claude.
+      const config = await $.process.run(['printenv', 'CLAUDE_CONFIG_DIR']).catch(() => undefined)
+      const dir = config?.exitCode === 0 ? config.stdout.trim().replace(/\/$/, '') : ''
+      if (dir) base = `${dir}/plugins/`
+      else {
+        const home = await $.process.run(['printenv', 'HOME'])
+        base = home.exitCode === 0 && home.stdout.trim() ? `${home.stdout.trim()}/.claude/plugins/` : undefined
+      }
     }
     if (!base) return null
     const path = codex.companionFrom(await $.fs.read(`${base}installed_plugins.json`))

@@ -1022,6 +1022,19 @@ test('Codex stays off when no plugin list is found', async ($, on) => {
   expect(workbench()?.team?.codex?.enabled ?? false).toBe(false)
 })
 
+test('the Codex plugin list is read from CLAUDE_CONFIG_DIR when that is set', async ($, on) => {
+  const dir = '/cfg/plugins/cache/openai-codex/codex/1.0.6'
+  world(on, {
+    files: {
+      '/cfg/plugins/installed_plugins.json': JSON.stringify({ plugins: { 'codex@openai-codex': [{ installPath: dir }] } }),
+      [`${dir}/scripts/codex-companion.mjs`]: '',
+    },
+    commands: { 'printenv CLAUDE_CONFIG_DIR': { exitCode: 0, stdout: '/cfg/\n' }, 'printenv HOME': { exitCode: 0, stdout: '/home/u\n' } },
+  })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'team codex', ...COMMAND })).text).toContain('Plugin found')
+})
+
 const REVIEW = `node ${CODEX_DIR}/scripts/codex-companion.mjs review --wait`
 
 test('with Codex on in team mode: the prompt carries the Codex brief, a review runs unasked once per turn, and the final check names it', async ($, on) => {
