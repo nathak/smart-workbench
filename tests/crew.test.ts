@@ -87,6 +87,10 @@ describe('design first', () => {
     expect(crew.TEAM_CONTEXT).toContain('designs; you implement')
     expect(crew.DESIGN_FIRST).toContain('Asked once per turn')
     expect(crew.ADVISOR_SPEC.prompt).toContain('DESIGN:')
+    expect(crew.ADVISOR_SPEC.maxTurns).toBe(35)
+    // A reviewer that runs out of turns returns nothing, so both prompts tell it to answer before the limit.
+    expect(crew.ADVISOR_SPEC.prompt).toContain('UNVERIFIED')
+    expect(crew.EXPLORER_SPEC.prompt).toContain('stop reading and answer')
   })
 })
 
