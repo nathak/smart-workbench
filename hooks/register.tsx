@@ -117,13 +117,26 @@ async function pull($: $): Promise<void> {
 // Never throws and costs one fs.exists per event when nobody watches.
 const LIVE_FILE = '.claude/smartworkbench-live.jsonl'
 
+// tee is the cheap way to append one line; where it is missing (Windows without a Unix shell) or fails, node does it, for the rest of the session.
+const APPEND_SCRIPT = "require('fs').appendFileSync(process.argv[1], require('fs').readFileSync(0))"
+let appender: 'tee' | 'node' = 'tee'
+
+async function appendLine($: $, path: string, text: string): Promise<void> {
+  if (appender === 'tee') {
+    const ran = await $.process.run(['tee', '-a', path], { stdin: text }).catch(() => undefined)
+    if (ran?.exitCode === 0) return
+    appender = 'node'
+  }
+  await $.process.run(['node', '-e', APPEND_SCRIPT, path], { stdin: text })
+}
+
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
   try {
     const path = `${await $.session.cwd()}/${LIVE_FILE}`
     if (!(await $.fs.exists(path))) return
     const session = (await read($, liveAtom)).sessionId
     const line = JSON.stringify({ at: await $.clock.now(), kind, ...(session ? { session } : {}), ...detail })
-    await $.process.run(['tee', '-a', path], { stdin: `${line}\n` })
+    await appendLine($, path, `${line}\n`)
   } catch {
     // The feed is optional.
   }
@@ -1655,6 +1668,7 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    appender = 'tee'
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
     const argumentHint = '[new|team|advise|loop|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
