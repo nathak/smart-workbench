@@ -170,4 +170,15 @@ check(promptHits(['l', 'g', 'o'], { type: 'edge', id: 'g-o' }) && promptHits(['l
 check(!promptHits(['u', 'l'], { type: 'edge', id: 'g-w' }) && !promptHits(['u', 'l'], { type: 'node', id: 'o' }), 'a prompt is not listed on a link or box it did not cross')
 check(page.includes('id="ctx"') && page.includes('pre.full') && page.includes('pre-wrap'), 'the page has the context gauge and shows a whole prompt as preformatted text')
 
+// Every hop a route takes must be a drawn link, or the packet silently goes nowhere.
+const samples = [
+  { kind: 'prompt', origin: 'user' }, { kind: 'prompt', origin: 'user', loop: true }, { kind: 'prompt', origin: 'plugin' },
+  { kind: 'tool.start', tool: 'Edit', policy: 'allow' }, { kind: 'tool.start', tool: 'Read', policy: 'ask' }, { kind: 'tool.start', tool: 'Bash', policy: 'block' },
+  { kind: 'tool.start', tool: 'Agent', subagent: 'smartworkbench:advisor', policy: 'allow' }, { kind: 'tool.start', tool: 'Agent', subagent: 'smartworkbench:explorer', policy: 'allow' },
+  { kind: 'tool.start', tool: 'Bash', codex: 'review', policy: 'allow' }, { kind: 'tool.start', tool: 'Bash', codex: 'task', agent: 'a1', policy: 'ask' },
+  ...['loop.start', 'loop.pass', 'loop.done', 'loop.stop', 'loop.cancel', 'turn', 'guard.block', 'guard.ask', 'team.design-required', 'team.plan-review-required', 'team.final-check-required'].map(kind => ({ kind })),
+]
+const missingHops = samples.flatMap(ev => routeOf(ev, { looping: true }).flatMap(route => route.path.slice(1).map((to, i) => [route.path[i], to])).filter(([a, b]) => hopOf(a, b) === null).map(([a, b]) => `${ev.kind}:${a}>${b}`))
+check(missingHops.length === 0, `every hop of every route is a drawn link${missingHops.length ? ' (missing ' + missingHops.join(', ') + ')' : ''}`)
+
 process.exit(failed === 0 ? 0 : 1)

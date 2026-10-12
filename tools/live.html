@@ -296,7 +296,8 @@ function routeOf(ev, ctx){
     case 'team.final-check-required': out.push({ path: ['l', 'g', 'o'], cls: 'hold' }); break;
     case 'team.repeat-error': out.push({ path: ['g', 'l'], cls: 'ask' }); break;
     case 'loop.start': case 'loop.pass': out.push({ path: ['p', 'l'], cls: 'loop' }); break;
-    case 'loop.cancel': case 'loop.stop': out.push({ path: ['u', 'p'], cls: 'block' }); break;
+    // The person's stop or prompt reaches the loop through the lead; there is no direct user-to-loop link in the picture.
+    case 'loop.cancel': case 'loop.stop': out.push({ path: ['u', 'l', 'p'], cls: 'block' }); break;
     case 'turn': out.push({ path: ['l', 'u'], cls: ev.aborted ? 'block' : 'info' }); break;
   }
   return out;
