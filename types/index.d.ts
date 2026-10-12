@@ -190,6 +190,8 @@ export type Live = {
   contextPercent?: number
   contextTokens?: number
   contextWindow?: number
+  // /swb live --no-prompts: the feed keeps only the 120-character start of a prompt, not its text.
+  livePrompts?: false
   pinWarnings: string[]
   lastSummary?: string
   policy?: ProjectPolicy

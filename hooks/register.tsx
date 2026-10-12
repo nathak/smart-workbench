@@ -14,7 +14,7 @@ import * as model from './model'
 import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
-import { classify, decide, sessionScope, summarize } from './risk'
+import { classify, decide, redact, sessionScope, summarize } from './risk'
 
 type $ = EngineInterface
 type Els = Elements['terminal'] | Elements['desktop'] | Elements['vscode']
@@ -130,6 +130,13 @@ async function appendLine($: $, path: string, text: string): Promise<void> {
   await $.process.run(['node', '-e', APPEND_SCRIPT, path], { stdin: text })
 }
 
+// The text a prompt event carries for the live view's per-segment list: secrets masked, cut, with its real length.
+const PROMPT_MAX = 2000
+
+function promptOf(live: Live, text: string): Record<string, unknown> {
+  return live.livePrompts === false ? {} : { prompt: model.cut(redact(text), PROMPT_MAX), promptLength: text.length }
+}
+
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
   try {
     const path = `${await $.session.cwd()}/${LIVE_FILE}`
@@ -185,9 +192,27 @@ async function injection($: $, wb: Workbench): Promise<Injection> {
   return injectionOf(wb.task, contents)
 }
 
-async function refreshUsage($: $): Promise<void> {
+type ContextNumbers = { contextPercent?: number; contextTokens?: number; contextWindow?: number }
+
+async function refreshUsage($: $): Promise<ContextNumbers> {
   const { context } = await $.session.usage()
-  await setLive($, live => ({ ...live, contextPercent: context.percent, contextTokens: context.tokens, contextWindow: context.window }))
+  const numbers: ContextNumbers = { contextPercent: context.percent, contextTokens: context.tokens, contextWindow: context.window }
+  await setLive($, live => ({ ...live, ...numbers }))
+
+  return numbers
+}
+
+// What one turn cost, for the live feed: only numbers the engine reported.
+function usageOf(usage: unknown): Record<string, unknown> {
+  const u = (usage ?? {}) as Record<string, unknown>
+  const n = (key: string) => (typeof u[key] === 'number' ? (u[key] as number) : 0)
+  const input = n('input_tokens') + n('cache_read_input_tokens') + n('cache_creation_input_tokens')
+
+  return {
+    ...(input > 0 ? { tokensIn: input } : {}),
+    ...(n('output_tokens') > 0 ? { tokensOut: n('output_tokens') } : {}),
+    ...(typeof u.model === 'string' ? { model: u.model } : {}),
+  }
 }
 
 async function openPane($: $, tab?: Tab): Promise<boolean> {
@@ -714,20 +739,23 @@ function statusText(wb: Workbench, live: Live): string {
 let liveServer: { url: string; stop: () => void } | undefined
 
 async function liveCommand($: $, rest: string): Promise<{ text: string }> {
-  const arg = rest.trim().toLowerCase()
+  const noPrompts = /(?:^|\s)--no-prompts\b/.test(rest)
+  const arg = rest.replace(/(?:^|\s)--no-prompts\b/, ' ').trim().toLowerCase()
 
   if (arg === 'stop' || arg === 'off') {
     if (!liveServer) return { text: 'The live view is not running.' }
     liveServer.stop()
     liveServer = undefined
+    await setLive($, live => ({ ...live, livePrompts: undefined }))
 
     return { text: 'Live view stopped; the feed file is removed.' }
   }
   if (liveServer) return { text: `Live view: ${liveServer.url}\n/swb live stop to end it.` }
 
   const port = arg === '' ? 4317 : Number(arg)
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) return { text: 'Usage: /swb live [port 1024-65535] | /swb live stop' }
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) return { text: 'Usage: /swb live [port 1024-65535] [--no-prompts] | /swb live stop' }
 
+  await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined }))
   const url = `http://127.0.0.1:${port}`
   const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--port', String(port)] })
   const iterator = child[Symbol.asyncIterator]()
@@ -756,7 +784,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   const timeout = $.clock.sleep(3000).then(() => false, () => false)
 
   if (await Promise.race([started, timeout])) {
-    return { text: `Live view: ${url}\nOpen it in a browser. /swb live stop to end it. The feed holds prompt starts, so do not commit .claude/smartworkbench-live.jsonl.` }
+    return { text: `Live view: ${url}\nOpen it in a browser. /swb live stop to end it. The feed holds prompts up to 2000 characters with secrets masked (a heuristic); /swb live --no-prompts keeps only their first 120 characters. Do not commit .claude/smartworkbench-live.jsonl.` }
   }
   handle.stop()
 
@@ -1765,7 +1793,7 @@ export const register: Register = on => {
     // Own work only, for checking the performance targets with --debug.
     $.ui.log(`SmartWorkbench timing: prompt.submit ${(await $.clock.now()) - startedAt}ms before the prompt went on`, { to: 'debug' })
 
-    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(e.text.replace(/\s+/g, ' '), 120), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
+    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(e.text).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
 
     const all = [...blocks, ...loopBlocks]
 
@@ -1866,6 +1894,8 @@ export const register: Register = on => {
       ...(e.agentId ? { agent: e.agentId } : {}),
       ...(typeof sub === 'string' ? { subagent: sub } : {}),
       ...(codexRun ? { codex: codexRun.op, ...(codexRun.background ? { codexBg: true } : {}), ...(codexRun.write ? { codexWrite: true } : {}) } : {}),
+      ...(e.tool === 'Agent' && typeof (e as unknown as Record<string, unknown>).prompt === 'string' ? promptOf(live, (e as unknown as Record<string, string>).prompt as string) : {}),
+      ...(codexRun && e.tool === 'Bash' ? promptOf(live, e.command) : {}),
     })
 
     if (policy === 'block') {
@@ -2005,11 +2035,13 @@ export const register: Register = on => {
     const ran = await next(e)
 
     if (e.agentId !== undefined) {
+      await emit($, 'turn.agent', { agent: e.agentId, ...usageOf(e.usage) })
+
       return ran
     }
 
-    await refreshUsage($).catch(() => undefined)
-    await emit($, 'turn', { aborted: e.isAborted === true })
+    const ctx = await refreshUsage($).catch(() => ({}))
+    await emit($, 'turn', { aborted: e.isAborted === true, ...ctx, ...usageOf(e.usage) })
 
     // The loop's first pass: a command cannot submit a prompt, the end of its turn can.
     // Not awaited: submit returns when the pass's turn ends, and this hook must not wait for a whole loop.
