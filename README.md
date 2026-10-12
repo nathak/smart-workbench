@@ -51,7 +51,8 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb new` | Start a new task contract |
 | `/swb lock` · `/swb unlock` | Lock or unlock the contract |
 | `/swb team [on\|off]` | Team mode: Opus designs and reviews, Sonnet builds, Haiku explores; opens the Team tab |
-| `/swb live [port\|stop]` | Start or stop the live web view of the request flow |
+| `/swb live [port\|stop] [--no-prompts]` | Start or stop the live web view of the request flow |
+| `/swb loop <count\|inf> <item>[; <item>...]` · `stop` · `status` | Repeat a task; see *Loop* |
 | `/swb team <role> <model> [effort]` | Set a role's model and effort (`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Ask the Opus advisor now |
 | `/swb intent` · `context` · `run` · `verify` | Open that tab |
@@ -125,6 +126,15 @@ Shows the last `n` (default 20) entries of the audit log, when the guard file tu
 
 #### `/swb clear`
 After asking (`Clear` / `Cancel`), resets this project's workbench: contract, pins, observed files, tool call history, evidence and changed files. The guard profile and pause switch, templates, context sets and other projects are left alone.
+
+#### `/swb live [port|stop] [--no-prompts]`
+Starts the live web view as a child process of the session and prints its address (default `http://127.0.0.1:4317`; the port must be 1024 to 65535). `stop` ends it. Running it again while a view is up prints the address; with `--no-prompts` it switches the running view to short prompts from then on (stop and start again to get full prompts back). A view that its process note shows still running on this machine is not started over (the message says which process holds it and which two files to delete if it is gone). `--no-prompts` keeps only the first 120 characters of each prompt and no subagent results. See *Live view*.
+
+#### `/swb loop <count|inf> <item>[; <item>...]` · `stop` · `status`
+Repeats a task; `stop` ends it after the current turn and `status` shows the passes done. See *Loop*.
+
+#### `/swb team codex ...`
+Switches for the optional Codex second opinion: `on`, `off`, `check`, `review on|off`, `rescue on|off`. See *Team mode*.
 
 ### Panel
 
@@ -318,6 +328,38 @@ With `"audit": true` (or `{ "path": "logs/agent-audit.jsonl" }`, a path inside t
 
 Measured in a live session (Claude Code 2.1.295), the mod's own work per event: **2 ms** per prompt (target 20 ms) and **4 ms** per tool call, including the state save (target 10 ms). Run Claude Code with `--debug` to see `SmartWorkbench timing:` lines for your project.
 
+### Reference
+
+**Environment variables**
+
+| Variable | Read by | Meaning |
+|---|---|---|
+| `SWB_LIVE_HOSTS` | live server | Extra `Host` names it answers, comma separated: a host name, with `:port` only for a non-standard port; no scheme or path (see *Live view*) |
+| `SWB_LIVE_PING_MS` | live server | Milliseconds between the keep-alive comments on the event stream (default 15000) |
+| `CLAUDE_CONFIG_DIR` | plugin | Where the installed plugin list is read from when looking for the Codex plugin |
+
+**Files the plugin writes** (all inside the project, under `.claude/`)
+
+| File | Written by | Commit it? |
+|---|---|---|
+| `smartworkbench.json` | you (`/swb policy init` writes an example) | Yes, it is the shared rules |
+| `smartworkbench-task.json` | `/swb share` | Yes, to hand the task over |
+| `smartworkbench-handoff.md` | `/swb export` | Your call; it names changed files and failures |
+| `smartworkbench-audit.jsonl` | the audit log, when on | Your call |
+| `smartworkbench-live.jsonl` · `smartworkbench-live.pid` | the live view, while it runs | No. Prompts and command summaries; removed when the view stops normally (after a crash or kill they stay; `/swb live stop` removes them) |
+
+**Troubleshooting**
+
+- *The live page stays at zero or answers `403`.* A `403` means the `Host` is not on the list: add the host name to `SWB_LIVE_HOSTS` (no `http://`, no path); a proxy or tunnel on a non-standard port needs `name:port`. Zero counters with a `200` stream mean no event has been written yet: check that `.claude/smartworkbench-live.jsonl` exists and that `/swb live` did not report a feed error. Behind a proxy, turn response buffering off for the stream.
+- *`/swb live` says a view runs elsewhere.* Stop it where it runs. If it is gone, delete `.claude/smartworkbench-live.jsonl` and `.claude/smartworkbench-live.pid`.
+- *A tool call was blocked and I want it.* Run it yourself outside Claude Code, or add an `allow` rule only where the built-in table lets a project rule loosen it (it cannot loosen a Block or a secrets Ask).
+- *Team mode sends my edit back.* The design-first gate asks once per turn for an advisor `DESIGN` before a big edit; ask with `/swb advise` or let Claude consult the advisor, then repeat the edit.
+- *An `inf` loop never ends.* Build output that is not git-ignored changes the working tree every pass; add it to `.gitignore` or use `/swb loop stop`.
+- *The panel is not shown.* `/swb status` prints the same state as text.
+- *A condition lost its Verified mark.* Code changed after the passing check; run the check again.
+
+**Changes between releases** are listed in [CHANGELOG.md](CHANGELOG.md).
+
 ### Trust and storage
 
 See [docs/PERMISSIONS.md](docs/PERMISSIONS.md) for the full list of hooks, calls, files and commands.
@@ -413,7 +455,8 @@ claude plugin update smartworkbench
 | `/swb new` | 새 작업 계약 시작 |
 | `/swb lock` · `/swb unlock` | 계약 잠금·해제 |
 | `/swb team [on\|off]` | 팀 모드: Opus 설계·검토, Sonnet 구축, Haiku 탐색. Team 탭 열기 |
-| `/swb live [포트\|stop]` | 요청 흐름 실시간 웹 화면 시작·종료 |
+| `/swb live [포트\|stop] [--no-prompts]` | 요청 흐름 실시간 웹 화면 시작·종료 |
+| `/swb loop <횟수\|inf> <항목>[; <항목>...]` · `stop` · `status` | 작업 반복. *루프* 참고 |
 | `/swb team <role> <model> [effort]` | 역할별 모델·effort 지정(`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Opus 조언자에게 바로 묻기 |
 | `/swb intent` · `context` · `run` · `verify` | 해당 탭 열기 |
@@ -487,6 +530,15 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 
 #### `/swb clear`
 먼저 확인(`Clear` / `Cancel`)한 뒤 이 프로젝트의 계약, Pin, 관찰 파일, 툴 호출 기록, 증거, 변경 파일을 모두 초기화합니다. Guard 프로필과 일시정지 설정, 템플릿, Context set, 다른 프로젝트는 건드리지 않습니다.
+
+#### `/swb live [포트|stop] [--no-prompts]`
+실시간 웹 화면을 세션의 자식 프로세스로 띄우고 주소(기본 `http://127.0.0.1:4317`, 포트는 1024~65535)를 알려 줍니다. `stop`은 끕니다. 이미 떠 있을 때 다시 실행하면 주소를 보여 주고, `--no-prompts`를 주면 그때부터 실행 중인 화면이 짧은 프롬프트 모드로 바뀝니다(전체 모드로 되돌리려면 stop 후 다시 시작). 프로세스 메모상 이 컴퓨터에서 아직 도는 화면 위에는 새로 띄우지 않습니다(어느 프로세스가 잡고 있는지, 이미 없다면 지울 파일 두 개가 무엇인지 알려 줍니다). `--no-prompts`는 프롬프트를 앞 120자만 남기고 서브에이전트 결과는 기록하지 않습니다. *실시간 보기* 참고.
+
+#### `/swb loop <횟수|inf> <항목>[; <항목>...]` · `stop` · `status`
+작업을 반복합니다. `stop`은 현재 턴이 끝난 뒤 종료하고 `status`는 진행 횟수를 보여 줍니다. *루프* 참고.
+
+#### `/swb team codex ...`
+선택 기능인 Codex 교차검증 스위치입니다: `on`, `off`, `check`, `review on|off`, `rescue on|off`. *팀 모드* 참고.
 
 ### 패널
 
@@ -679,6 +731,38 @@ location / {
 ### 성능
 
 실제 세션(Claude Code 2.1.295)에서 잰 Mod 자체 처리 시간은 프롬프트당 **2ms**(목표 20ms), 툴 호출당 **4ms**(상태 저장 포함, 목표 10ms)입니다. `--debug`로 실행하면 `SmartWorkbench timing:` 줄로 내 프로젝트에서의 시간을 볼 수 있습니다.
+
+### 참고
+
+**환경변수**
+
+| 변수 | 쓰는 곳 | 뜻 |
+|---|---|---|
+| `SWB_LIVE_HOSTS` | 실시간 서버 | 추가로 받을 `Host` 이름. 쉼표 구분, 호스트 이름을 적고 표준이 아닌 포트일 때만 `:포트`를 붙입니다. `http://`와 경로는 쓰지 않습니다(*실시간 보기* 참고) |
+| `SWB_LIVE_PING_MS` | 실시간 서버 | 이벤트 스트림 유지용 주석을 보내는 간격(밀리초, 기본 15000) |
+| `CLAUDE_CONFIG_DIR` | 플러그인 | Codex 플러그인을 찾을 때 설치 목록을 읽는 위치 |
+
+**플러그인이 쓰는 파일** (모두 프로젝트의 `.claude/` 아래)
+
+| 파일 | 만드는 쪽 | 커밋? |
+|---|---|---|
+| `smartworkbench.json` | 사용자(`/swb policy init`이 예시를 씀) | 예, 팀 공용 규칙입니다 |
+| `smartworkbench-task.json` | `/swb share` | 예, 작업을 넘길 때 |
+| `smartworkbench-handoff.md` | `/swb export` | 판단에 따라. 바뀐 파일과 실패가 적힙니다 |
+| `smartworkbench-audit.jsonl` | 감사 로그(켰을 때) | 판단에 따라 |
+| `smartworkbench-live.jsonl` · `smartworkbench-live.pid` | 실시간 보기가 도는 동안 | 아니요. 프롬프트와 명령 요약이 들어 있고, 정상 종료하면 지워집니다(강제 종료·크래시 뒤에는 남으며 `/swb live stop`이 지웁니다) |
+
+**문제 해결**
+
+- *실시간 화면이 0이거나 `403`이 나옵니다.* `403`은 `Host`가 목록에 없다는 뜻입니다. `SWB_LIVE_HOSTS`에 호스트 이름을 추가하세요(`http://`와 경로 없이). 표준이 아닌 포트의 프록시나 터널이면 `이름:포트`로 적어야 합니다. `200`인데 카운터가 0이면 아직 기록된 이벤트가 없는 것입니다. `.claude/smartworkbench-live.jsonl`이 있는지, `/swb live`가 피드 오류를 알리지 않았는지 보세요. 프록시 뒤라면 스트림의 응답 버퍼링을 끄세요.
+- *`/swb live`가 다른 곳에서 돌고 있다고 합니다.* 도는 곳에서 끄세요. 이미 없다면 `.claude/smartworkbench-live.jsonl`과 `.claude/smartworkbench-live.pid`를 지우세요.
+- *도구 호출이 차단됐는데 필요합니다.* Claude Code 밖에서 직접 실행하거나, 프로젝트 규칙이 완화할 수 있는 항목에 한해 `allow` 규칙을 추가하세요(Block과 비밀 Ask는 풀 수 없습니다).
+- *팀 모드가 편집을 되돌려 보냅니다.* 설계 우선 규칙이 큰 편집 전에 턴마다 한 번 조언자의 `DESIGN`을 요구합니다. `/swb advise`로 묻거나 Claude가 조언자에게 자문하게 한 뒤 편집을 다시 하세요.
+- *`inf` 루프가 끝나지 않습니다.* `.gitignore`에 없는 빌드 산출물이 매 회차 작업 트리를 바꾸는 경우입니다. 무시 목록에 넣거나 `/swb loop stop`을 쓰세요.
+- *패널이 보이지 않습니다.* `/swb status`가 같은 상태를 텍스트로 보여 줍니다.
+- *조건의 Verified 표시가 사라졌습니다.* 통과한 검사 뒤에 코드가 바뀐 것입니다. 검사를 다시 실행하세요.
+
+**릴리스별 변경 내용**은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
 
 ### 신뢰와 저장
 
