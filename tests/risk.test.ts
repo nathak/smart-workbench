@@ -317,4 +317,21 @@ describe('redact', () => {
     expect(redact('-----BEGIN PRIVATE KEY-----\nzzz\n-----END PRIVATE KEY-----')).toBe('[private key]')
     expect(redact('fix the login page and run the tests')).toBe('fix the login page and run the tests')
   })
+
+  test('quoted names, PGP blocks, more token formats and URL passwords with an at sign are masked; ordinary words are not', async () => {
+    expect(redact('{"api_key": "abcd1234", "password": "hunter2", "token": "abc"}')).not.toMatch(/abcd1234|hunter2|"abc"/)
+    expect(redact('-----BEGIN PGP PRIVATE KEY BLOCK-----\nzzz\n-----END PGP PRIVATE KEY BLOCK-----')).toBe('[private key]')
+    expect(redact('sk_live_' + 'A'.repeat(24))).toBe('***')
+    expect(redact('npm_' + 'a'.repeat(36))).toBe('***')
+    expect(redact('https://u:p@ss@host/x')).toBe('https://***@host/x')
+    expect(redact('the token validation code and Basic authentication')).toBe('the token validation code and Basic authentication')
+    expect(redact('Authorization: Bearer abc12345xyz')).toContain('Bearer ***')
+  })
+
+  test('a long run of dashes does not make the scan slow', async () => {
+    const started = Date.now()
+    redact('a-'.repeat(4000))
+    expect(Date.now() - started).toBeLessThan(500)
+  })
 })
+

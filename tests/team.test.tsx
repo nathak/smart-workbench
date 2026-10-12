@@ -875,6 +875,27 @@ test('the live feed carries a prompt up to 2000 characters with secrets masked, 
   expect(long.promptLength).toBe(5000)
 })
 
+test('the live feed masks secrets in a command summary and a token cut by the scan window, and --no-prompts works on a running server', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: { ...FEED_RUNS, 'curl -H Authorization: Bearer abc12345xyz https://x.test': { exitCode: 0, stdout: '' } }, processed: writes })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Bash', command: 'curl -H "Authorization: Bearer abc12345xyz" https://x.test' })
+  expect(JSON.stringify(feedLines(writes))).not.toContain('abc12345xyz')
+
+  await $.prompt.submit({ text: 'x'.repeat(7990) + ` ghp_${'a'.repeat(36)}`, ...COMPOSER })
+  expect(JSON.stringify(feedLines(writes).filter(one => one.kind === 'prompt'))).not.toContain('ghp_aaaa')
+
+  await $.command.run({ command: 'swb', args: 'live 4400', ...COMMAND })
+  expect((await $.command.run({ command: 'swb', args: 'live --no-prompts', ...COMMAND })).text).toContain('first 120 characters')
+  await $.prompt.submit({ text: 'later prompt', ...COMPOSER })
+  expect(feedLines(writes).filter(one => one.kind === 'prompt').at(-1)?.prompt).toBeUndefined()
+})
+
 test('the live feed carries the brief of an Agent call and the text of a Codex task, not of other calls', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { files: { ...FEED_FILES, ...CODEX_FILES }, commands: { ...FEED_RUNS, ...CODEX_RUNS }, processed: writes })

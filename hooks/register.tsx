@@ -135,8 +135,13 @@ async function appendLine($: $, path: string, text: string): Promise<void> {
 const PROMPT_MAX = 2000
 const PROMPT_SCAN = 8000
 
+// A scan window that ends inside a word would leave half a token below its length limits, so the cut word is dropped.
+function scanned(text: string): string {
+  return text.length <= PROMPT_SCAN ? text : text.slice(0, PROMPT_SCAN).replace(/\S*$/, '')
+}
+
 function promptOf(live: Live, text: string): Record<string, unknown> {
-  return live.livePrompts === false ? {} : { prompt: model.cut(redact(text.slice(0, PROMPT_SCAN)), PROMPT_MAX), promptLength: text.length }
+  return live.livePrompts === false ? {} : { prompt: model.cut(redact(scanned(text)), PROMPT_MAX), promptLength: text.length }
 }
 
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
@@ -144,7 +149,9 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
     const path = `${await $.session.cwd()}/${LIVE_FILE}`
     if (!(await $.fs.exists(path))) return
     const session = (await read($, liveAtom)).sessionId
-    const line = JSON.stringify({ at: await $.clock.now(), kind, ...(session ? { session } : {}), ...detail })
+    // Every text the feed carries is masked here, so a command summary or a URL cannot carry a secret around the prompt masking.
+    const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? redact(scanned(value)) : value]))
+    const line = JSON.stringify({ at: await $.clock.now(), kind, ...(session ? { session } : {}), ...masked })
     await appendLine($, path, `${line}\n`)
   } catch {
     // The feed is optional.
@@ -752,7 +759,15 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
 
     return { text: 'Live view stopped; the feed file is removed.' }
   }
-  if (liveServer) return { text: `Live view: ${liveServer.url}\n/swb live stop to end it.` }
+  if (liveServer) {
+    if (noPrompts) {
+      await setLive($, live => ({ ...live, livePrompts: false }))
+
+      return { text: `Live view: ${liveServer.url}\nFrom now on the feed keeps only the first 120 characters of a prompt (lines already written stay).` }
+    }
+
+    return { text: `Live view: ${liveServer.url}\n/swb live stop to end it.` }
+  }
 
   const port = arg === '' ? 4317 : Number(arg)
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { text: 'Usage: /swb live [port 1024-65535] [--no-prompts] | /swb live stop' }
@@ -1795,7 +1810,7 @@ export const register: Register = on => {
     // Own work only, for checking the performance targets with --debug.
     $.ui.log(`SmartWorkbench timing: prompt.submit ${(await $.clock.now()) - startedAt}ms before the prompt went on`, { to: 'debug' })
 
-    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(e.text.slice(0, PROMPT_SCAN)).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
+    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(scanned(e.text)).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
 
     const all = [...blocks, ...loopBlocks]
 
