@@ -80,17 +80,16 @@ export function porcelainPaths(stdout: string): string[] {
     const entry = parts[i] ?? ''
     if (entry.length < 4) continue
     paths.push(entry.slice(3))
-    if (entry[0] === 'R' || entry[0] === 'C') i++
+    // A rename or copy is followed by its old path, whichever of the two columns says so.
+    if (/[RC]/.test(entry.slice(0, 2))) i++
   }
 
   return paths
 }
 
-// Paths that changed during an image run and are not pictures in an asset folder.
-export function strayWrites(before: readonly string[], after: readonly string[]): string[] {
-  const seen = new Set(before)
-
-  return after.filter(path => !seen.has(path) && !isImagePath(path))
+// Paths that changed during an image run (new, or a different size or modification time than before) and are not pictures in an asset folder.
+export function strayWrites(before: ReadonlyMap<string, string>, after: ReadonlyMap<string, string>): string[] {
+  return [...after].filter(([path, stat]) => before.get(path) !== stat && !isImagePath(path)).map(([path]) => path)
 }
 
 export function isImageTask(command: string, path: string): boolean {

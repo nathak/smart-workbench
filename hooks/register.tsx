@@ -183,7 +183,6 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
       const missed = feedMissed
       feedMissed = 0
       await appendLine($, path, `${JSON.stringify({ at, kind: 'feed.recovered', missed })}\n`).catch(() => undefined)
-      isFeedNoted = false
       await setLive($, current => ({ ...current, feedError: undefined })).catch(() => undefined)
     }
   } catch {
@@ -236,21 +235,40 @@ async function injection($: $, wb: Workbench): Promise<Injection> {
 
 type ContextNumbers = { contextPercent?: number; contextTokens?: number; contextWindow?: number }
 
-// Paths git reports as changed or untracked, or undefined outside a repository or when git fails.
-async function gitPaths($: $): Promise<string[] | undefined> {
-  const ran = await $.process.run(['git', 'status', '--porcelain=v1', '-z', '-uall']).catch(() => undefined)
+// One look at the working tree: git's changed paths with each one's size and modification time, so a further edit to a file that was
+// already modified or untracked (a binary too) shows. undefined outside a repository or when git fails.
+type TreeState = { status: string; stats: Map<string, string> }
+const STAT_SCRIPT = "const fs=require('fs');for(const p of fs.readFileSync(0,'utf8').split('\\n')){if(!p)continue;let r;try{const s=fs.statSync(p);r=s.size+':'+Math.round(s.mtimeMs)}catch(e){r='gone'}console.log(p+'\\t'+r)}"
+let treeRoot: string | undefined
 
-  return ran?.exitCode === 0 ? codex.porcelainPaths(ran.stdout) : undefined
+async function treeState($: $): Promise<TreeState | undefined> {
+  // --no-optional-locks: this read-only look must not take index.lock from a Codex job or another session.
+  const status = await $.process.run(['git', '--no-optional-locks', 'status', '--porcelain=v1', '-z', '-uall']).catch(() => undefined)
+  if (status?.exitCode !== 0) return undefined
+  if (treeRoot === undefined) {
+    const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).catch(() => undefined)
+    treeRoot = top?.exitCode === 0 ? top.stdout.trim() : ''
+  }
+  const paths = codex.porcelainPaths(status.stdout).filter(path => !path.includes('\n'))
+  const stats = new Map(paths.map(path => [path, ''] as const))
+  if (paths.length > 0) {
+    const ran = await $.process.run(['node', '-e', STAT_SCRIPT], { stdin: paths.join('\n'), ...(treeRoot ? { cwd: treeRoot } : {}) }).catch(() => undefined)
+    if (ran?.exitCode === 0) {
+      for (const line of ran.stdout.split('\n')) {
+        const at = line.lastIndexOf('\t')
+        if (at > 0 && stats.has(line.slice(0, at))) stats.set(line.slice(0, at), line.slice(at + 1))
+      }
+    }
+  }
+
+  return { status: status.stdout, stats }
 }
 
-// A fingerprint of the git working tree (changed paths and their diff), or undefined outside a repository or when git fails.
+// A fingerprint of the working tree for the loop's "did anything change" check.
 async function workTreeHash($: $): Promise<string | undefined> {
-  const status = await $.process.run(['git', 'status', '--porcelain=v1', '-z', '-uall']).catch(() => undefined)
-  if (status?.exitCode !== 0) return undefined
-  const diff = await $.process.run(['git', 'diff', '-U0', '--no-color', '--no-ext-diff', 'HEAD']).catch(() => undefined)
-  if (diff?.exitCode !== 0) return undefined
+  const state = await treeState($)
 
-  return loop.treeHash(`${status.stdout}\0${diff.stdout}`)
+  return state && loop.treeHash(`${state.status}\0${[...state.stats].map(([path, stat]) => `${path}\t${stat}`).join('\n')}`)
 }
 
 async function refreshUsage($: $): Promise<ContextNumbers> {
@@ -804,18 +822,19 @@ function statusText(wb: Workbench, live: Live): string {
 let liveServer: { url: string; stop: () => void } | undefined
 
 const PID_FILE = '.claude/smartworkbench-live.pid'
-const ALIVE_SCRIPT = "try{process.kill(Number(process.argv[1]),0)}catch(e){process.exit(e.code==='EPERM'?0:1)}"
+// Exit 0 = the process runs, 1 = it does not, 2 = the note was written on another machine or container, so its pid means nothing here.
+const ALIVE_SCRIPT = "if(process.argv[1]!==require('os').hostname())process.exit(2);try{process.kill(Number(process.argv[2]),0)}catch(e){process.exit(e.code==='EPERM'?0:1)}"
 const REMOVE_SCRIPT = "for(const f of process.argv.slice(1))require('fs').rmSync(f,{force:true})"
 
 // A live view this session did not start: whether its feed file is there and whether the process that made it still runs.
 async function foreignView($: $): Promise<{ state: 'none' | 'alive' | 'dead' | 'unknown'; pid?: string }> {
   const cwd = await $.session.cwd()
   if (!(await $.fs.exists(`${cwd}/${LIVE_FILE}`))) return { state: 'none' }
-  const pid = await $.fs.read(`${cwd}/${PID_FILE}`).then(text => text.trim(), () => '')
-  if (!/^\d+$/.test(pid)) return { state: 'unknown' }
-  const ran = await $.process.run(['node', '-e', ALIVE_SCRIPT, pid]).catch(() => undefined)
+  const note = /^(\S+) (\d+)$/.exec(await $.fs.read(`${cwd}/${PID_FILE}`).then(text => text.trim(), () => ''))
+  if (!note) return { state: 'unknown' }
+  const ran = await $.process.run(['node', '-e', ALIVE_SCRIPT, note[1] ?? '', note[2] ?? '']).catch(() => undefined)
 
-  return { state: ran?.exitCode === 0 ? 'alive' : 'dead', pid }
+  return ran?.exitCode === 2 ? { state: 'unknown' } : { state: ran?.exitCode === 0 ? 'alive' : 'dead', pid: note[2] }
 }
 
 // A line for /swb live when the feed cannot be written, so the page's silence is not mistaken for an idle session.
@@ -838,7 +857,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
 
         return { text: 'Removed a feed left behind by a live view that is no longer running.' }
       }
-      if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) serves this project's feed; stop it where it runs.` }
+      if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) serves this project's feed; stop it where it runs. If it is not running, delete ${LIVE_FILE} and ${PID_FILE}.` }
       if (other.state === 'unknown') return { text: `The live view is not running in this session, but ${LIVE_FILE} exists (no process note beside it). Delete it if no live view is running.` }
 
       return { text: 'The live view is not running.' }
@@ -863,9 +882,11 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { text: 'Usage: /swb live [port 1024-65535] [--no-prompts] | /swb live stop' }
 
   const other = await foreignView($)
-  if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) already serves this project's feed; a second one would empty it. Stop that one first.` }
+  if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) already serves this project's feed; a second one would empty it. Stop that one first, or delete ${LIVE_FILE} and ${PID_FILE} if it is not running.` }
 
-  await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined }))
+  feedMissed = 0
+  isFeedNoted = false
+  await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined, feedError: undefined }))
   const url = `http://127.0.0.1:${port}`
   const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--port', String(port)] })
   const iterator = child[Symbol.asyncIterator]()
@@ -1821,6 +1842,7 @@ export const register: Register = on => {
     appender = 'tee'
     feedMissed = 0
     isFeedNoted = false
+    treeRoot = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
     const argumentHint = '[new|team|advise|loop|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
@@ -2071,14 +2093,14 @@ export const register: Register = on => {
 
     // An image run is allowed unasked, so what it changed is checked afterwards: warned about, never reverted.
     const isBackgroundImage = isImage && /\s--background\b/.test(e.command)
-    const imageBefore = isImage && !isBackgroundImage ? await gitPaths($) : undefined
+    const imageBefore = isImage && !isBackgroundImage ? await treeState($) : undefined
 
     // Allow still goes through Claude Code's own permission check beneath.
     const ran = await next(e)
     const endedAt = await $.clock.now()
     if (isImage && ran.deny === undefined) {
-      const after = imageBefore ? await gitPaths($) : undefined
-      const stray = imageBefore && after ? codex.strayWrites(imageBefore, after) : []
+      const after = imageBefore ? await treeState($) : undefined
+      const stray = imageBefore && after ? codex.strayWrites(imageBefore.stats, after.stats) : []
       if (isBackgroundImage) await audit($, 'codex.write-check', { id: call.id, skipped: 'background' }).catch(() => undefined)
       if (stray.length > 0) {
         const paths = stray.slice(0, 10).join(', ')

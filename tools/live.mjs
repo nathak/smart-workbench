@@ -4,6 +4,7 @@
 // The plugin writes the feed only while this file exists, so stopping the server (which removes it) stops the writes.
 import { createServer } from 'node:http'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -138,7 +139,7 @@ server.listen(port, '127.0.0.1', () => {
     mkdirSync(dirname(feed), { recursive: true })
     writeFileSync(feed, '')
     created = true
-    writeFileSync(pidFile, String(process.pid))
+    writeFileSync(pidFile, `${hostname()} ${process.pid}`)
   } catch (err) {
     console.error(`Cannot create ${feed}: ${err.code ?? err.message}`)
     process.exit(1)

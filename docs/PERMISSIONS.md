@@ -50,12 +50,12 @@ It never reads environment variables and never stores the conversation or Live p
 | `git rev-parse --abbrev-ref HEAD` | `/swb new`, to draft a goal |
 | `git config user.name` | session start, only when audit is on |
 | `git rev-parse HEAD`, `git status --porcelain`, `gh run list …` | `/swb ci`, Check CI |
-| `git status --porcelain=v1 -z -uall` (and `git diff -U0 … HEAD` for loops) | before and after a Codex image run; at the start and end of each pass of an `inf` loop |
+| `git --no-optional-locks status --porcelain=v1 -z -uall`, `git rev-parse --show-toplevel`, and `node -e <statSync of the listed paths>` (the paths go in on stdin) | before and after a Codex image run; at the start and end of each pass of an `inf` loop |
 | `node -e <process.kill(pid, 0)> <pid>`, `node -e <rmSync> <feed> <pid file>` | `/swb live`, `/swb live stop`, only when a feed file this session did not create exists: tells a running view from a leftover one, and removes a leftover |
 | `node -e <appendFileSync>` | live feed writes, only where `tee` is missing or fails |
 | `gh issue view …` | `/swb issue #n` |
 | `tee -a <project>/.claude/smartworkbench-live.jsonl` (the line goes in on stdin) | each event, only while the live feed file exists |
-| `node <plugin>/tools/live.mjs <project> --port <n>` (writes `.claude/smartworkbench-live.pid` beside the feed, removes both on exit) | `/swb live`; kept as a child and ended by `/swb live stop`, the end of the session or a reload |
+| `node <plugin>/tools/live.mjs <project> --port <n>` (writes `.claude/smartworkbench-live.pid`, "<host> <pid>", beside the feed and removes both on exit) | `/swb live`; kept as a child and ended by `/swb live stop`, the end of the session or a reload |
 
 ### Network
 
@@ -63,7 +63,7 @@ None of its own. `/swb live` starts a local web server that listens on `127.0.0.
 
 ### Codex (optional, off by default)
 
-With the Codex plugin installed and `/swb team codex on` consented to, SmartWorkbench lets the lead run `node <codex plugin>/scripts/codex-companion.mjs review` (and `task` for rescue) as ordinary Bash calls; those go through the Guard like any other. That plugin sends the repository's diff and the files it reads to OpenAI under your Codex account. SmartWorkbench itself makes no request. At session start it only reads Claude Code's `installed_plugins.json` to find the script; `/swb team codex check` runs the plugin's `setup --json`. `--write` tasks and `transfer` always ask, except image generation: a plain `task --write` whose brief names an image and one output file under `assets/`, `images/`, `public/` or `static/` runs unasked. Codex's own writes do not pass the Guard, so that path is only as binding as the brief. Afterwards it runs `git status --porcelain` before and after the run (two read-only git calls per image run) and warns about changes outside the picture paths; it never reverts.
+With the Codex plugin installed and `/swb team codex on` consented to, SmartWorkbench lets the lead run `node <codex plugin>/scripts/codex-companion.mjs review` (and `task` for rescue) as ordinary Bash calls; those go through the Guard like any other. That plugin sends the repository's diff and the files it reads to OpenAI under your Codex account. SmartWorkbench itself makes no request. At session start it only reads Claude Code's `installed_plugins.json` to find the script; `/swb team codex check` runs the plugin's `setup --json`. `--write` tasks and `transfer` always ask, except image generation: a plain `task --write` whose brief names an image and one output file under `assets/`, `images/`, `public/` or `static/` runs unasked. Codex's own writes do not pass the Guard, so that path is only as binding as the brief. Afterwards it compares the changed paths, with their size and modification time, before and after the run (read-only `git status` and a small node call each time) and warns about changes outside the picture paths; it never reverts.
 
 ### Model
 
@@ -117,7 +117,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 | `git rev-parse --abbrev-ref HEAD` | `/swb new`(목표 초안) |
 | `git config user.name` | 세션 시작, 감사 로그가 켜졌을 때만 |
 | `git rev-parse HEAD`, `git status --porcelain`, `gh run list …` | `/swb ci`, Check CI |
-| `git status --porcelain=v1 -z -uall` (루프에서는 `git diff -U0 … HEAD`도) | Codex 이미지 실행 전후, `inf` 루프의 회차 시작·끝 |
+| `git --no-optional-locks status --porcelain=v1 -z -uall`, `git rev-parse --show-toplevel`, `node -e <나열된 경로의 statSync>`(경로는 stdin으로 전달) | Codex 이미지 실행 전후, `inf` 루프의 시작과 회차 끝 |
 | `node -e <process.kill(pid, 0)> <pid>`, `node -e <rmSync> <피드> <pid 파일>` | `/swb live`, `/swb live stop`. 이 세션이 만들지 않은 피드 파일이 있을 때만: 실행 중인 보기와 남은 파일을 구별하고 남은 것을 지웁니다 |
 | `node -e <appendFileSync>` | 실시간 피드 기록. `tee`가 없거나 실패할 때만 |
 | `gh issue view …` | `/swb issue #n` |
@@ -130,7 +130,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 ### Codex(선택, 기본 꺼짐)
 
-Codex 플러그인이 설치되어 있고 `/swb team codex on`에 동의하면, 리드가 `node <codex 플러그인>/scripts/codex-companion.mjs review`(구조용 `task` 포함)를 일반 Bash 호출로 실행할 수 있게 합니다. 이 호출도 다른 호출처럼 Guard를 거칩니다. 그 플러그인은 저장소의 diff와 읽은 파일을 사용자의 Codex 계정으로 OpenAI에 보냅니다. SmartWorkbench 자체는 요청을 보내지 않으며, 세션 시작 때 스크립트 위치를 찾으려고 Claude Code의 `installed_plugins.json`만 읽습니다. `/swb team codex check`는 플러그인의 `setup --json`을 실행합니다. `--write` 작업과 `transfer`는 항상 묻되, 이미지 생성은 예외입니다. 그림 설명과 `assets/`·`images/`·`public/`·`static/` 아래 출력 파일 하나를 적은 단순 `task --write`는 묻지 않고 실행됩니다. Codex가 직접 쓰는 파일은 Guard를 거치지 않으므로 그 경로는 지시문만큼만 지켜집니다. 실행 전후로 읽기 전용 `git status --porcelain`을 실행해(이미지 실행 1회당 2번) 그림 경로 밖의 변경을 경고하며, 되돌리지는 않습니다.
+Codex 플러그인이 설치되어 있고 `/swb team codex on`에 동의하면, 리드가 `node <codex 플러그인>/scripts/codex-companion.mjs review`(구조용 `task` 포함)를 일반 Bash 호출로 실행할 수 있게 합니다. 이 호출도 다른 호출처럼 Guard를 거칩니다. 그 플러그인은 저장소의 diff와 읽은 파일을 사용자의 Codex 계정으로 OpenAI에 보냅니다. SmartWorkbench 자체는 요청을 보내지 않으며, 세션 시작 때 스크립트 위치를 찾으려고 Claude Code의 `installed_plugins.json`만 읽습니다. `/swb team codex check`는 플러그인의 `setup --json`을 실행합니다. `--write` 작업과 `transfer`는 항상 묻되, 이미지 생성은 예외입니다. 그림 설명과 `assets/`·`images/`·`public/`·`static/` 아래 출력 파일 하나를 적은 단순 `task --write`는 묻지 않고 실행됩니다. Codex가 직접 쓰는 파일은 Guard를 거치지 않으므로 그 경로는 지시문만큼만 지켜집니다. 실행 전후로 변경 경로와 그 크기·수정 시각을 비교해(읽기 전용 `git status`와 작은 node 호출을 각각 한 번씩) 그림 경로 밖의 변경을 경고하며, 되돌리지는 않습니다.
 
 ### 모델
 
