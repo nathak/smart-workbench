@@ -215,6 +215,7 @@ Watch a request flow in a browser: prompts, tool calls and guard decisions, suba
 
 - `/swb live [port]` starts the server as a child of the session and prints its address (default `http://127.0.0.1:4317`); open it in a browser. `/swb live stop` ends it, and it also ends with the session. To run it yourself: `node <plugin folder>/tools/live.mjs [project] [--port 4317]`.
 - The server creates `.claude/smartworkbench-live.jsonl` in the project; while it exists the plugin appends one JSON line per event and the server streams it to the page (SSE). The server empties the file in place once it has read past 8 MB. Stopping the server removes the file and the writes stop. With no server, the plugin only checks that the file exists.
+- The page shows the context use (a gauge for the lead's last turn with a short history; subagents are not measured by the engine) and the tokens per model. Click a box or a link to see the prompts that crossed it (your prompt, loop prompts, the brief given to the advisor or an explorer, the text of a Codex task), newest first, and click one to read it whole. The feed keeps up to 2000 characters of each prompt with secrets masked (key and token names, well-known token formats, URL credentials, private keys; a heuristic, so a bare pasted token can slip through). `/swb live --no-prompts` keeps only the first 120 characters. Anyone who can open the page, including through a reverse proxy named in `SWB_LIVE_HOSTS`, sees these prompts.
 - The server listens on `127.0.0.1` only. The feed holds the start of each prompt and command summaries, so do not commit it.
 - The page is in English by default. The `한국어` / `EN` button in the top right switches it (remembered in the browser); `http://127.0.0.1:4317/?lang=ko` opens it in Korean.
 - Panels: Opus advisor, user prompt, Sonnet lead, guard decisions (allow / ask / block bars), Haiku dispatcher, worker / explorer / loop, flags and the session log.
@@ -529,7 +530,8 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 
 - `/swb live [포트]` 가 서버를 세션의 자식 프로세스로 띄우고 주소(기본 `http://127.0.0.1:4317`)를 알려 줍니다. 브라우저로 여세요. `/swb live stop` 으로 끄고, 세션이 끝나도 같이 꺼집니다. 직접 실행하려면 `node <플러그인 폴더>/tools/live.mjs [프로젝트 경로] [--port 4317]` 입니다.
 - 서버가 프로젝트의 `.claude/smartworkbench-live.jsonl` 을 만들면 플러그인이 이벤트를 한 줄씩 덧붙이고, 서버가 이를 SSE로 화면에 보냅니다. 서버는 8MB를 넘게 읽으면 파일을 제자리에서 비웁니다. 서버를 끄면 파일이 지워져 기록도 멈춥니다. 서버가 없을 때 플러그인이 하는 일은 파일 존재 확인뿐입니다.
-- 서버는 `127.0.0.1` 에만 열립니다. 피드에는 프롬프트 앞부분과 명령 요약이 들어 있으므로 커밋하지 마세요.
+- 화면에는 컨텍스트 사용량(리드의 마지막 턴 기준 게이지와 짧은 추이, 서브에이전트는 엔진이 측정하지 않음)과 모델별 토큰이 보입니다. 박스나 링크를 누르면 그곳을 지난 프롬프트(내 입력, 루프 프롬프트, 조언자·탐색 담당에게 준 브리프, Codex 작업 문구)가 최신순으로 나오고, 하나를 누르면 전문을 읽을 수 있습니다. 피드에는 프롬프트를 한 건당 2000자까지, 비밀을 가려서 저장합니다(키·토큰 이름, 알려진 토큰 형식, URL 속 계정 정보, 개인 키. 휴리스틱이라 접두사 없이 붙여 넣은 토큰은 새어 나갈 수 있습니다). `/swb live --no-prompts`를 쓰면 앞 120자만 남깁니다. `SWB_LIVE_HOSTS`로 연 리버스 프록시를 포함해 이 페이지를 열 수 있는 사람은 이 프롬프트를 볼 수 있습니다.
+- 서버는 `127.0.0.1` 에만 열립니다. 피드에는 프롬프트(2000자까지, 비밀은 가림)와 명령 요약이 들어 있으므로 커밋하지 마세요.
 - 화면은 기본이 영어입니다. 오른쪽 위의 `한국어` / `EN` 버튼으로 바꾸고(브라우저에 기억됨), `http://127.0.0.1:4317/?lang=ko` 로 열면 처음부터 한글입니다.
 - 패널은 Opus 조언자, 사용자 프롬프트, Sonnet 리드, 가드 판정(allow / ask / block 막대), Haiku 디스패처, worker / explorer / loop, flags, session log 입니다.
 - 데이터 흐름: 이벤트마다 박스 사이 연결선을 따라 점이 움직입니다(프롬프트: 사용자 → 리드, 도구 호출: 리드 → 가드 → worker / 디스패처 / Opus, `ask`는 답할 때까지 가드에서 대기, 끝난 호출은 온 길로 되돌아가고, 차단은 가드에서 빨갛게 돌아옵니다). 연결선마다 지나간 횟수가 표시됩니다. 서브에이전트 호출은 피드에 부모 정보가 없어 Opus인지 explorer인지 추정해서 표시합니다.

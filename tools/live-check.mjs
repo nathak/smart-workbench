@@ -142,7 +142,7 @@ check(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write|\beval\(|new Func
 
 // The routing table is a pure function between the flow markers; run it here without a browser.
 const flowCode = page.slice(page.indexOf('// flow:begin'), page.indexOf('// flow:end'))
-const { routeOf, returnRoute, hopOf } = new Function(`${flowCode}\nreturn { routeOf, returnRoute, hopOf }`)()
+const { routeOf, returnRoute, hopOf, promptHits, ctxLevel } = new Function(`${flowCode}\nreturn { routeOf, returnRoute, hopOf, promptHits, ctxLevel }`)()
 const paths = (ev, ctx = {}) => routeOf(ev, ctx).map(one => `${one.path.join('>')}:${one.cls}${one.park ? ':park' : ''}`)
 check(paths({ kind: 'prompt', origin: 'user' })[0] === 'u>l:info', 'a prompt moves from the user to the lead')
 check(paths({ kind: 'prompt', origin: 'user', loop: true }).join() === 'u>l:info,p>l:loop', 'a loop prompt also moves from the loop to the lead')
@@ -164,5 +164,9 @@ check(paths({ kind: 'contract.set' }).length === 0, 'contract events move nothin
 check(returnRoute({ full: ['l', 'g', 'w'] }, 'ok').path.join('>') === 'w>g>l', 'a finished call walks back the way it went')
 check(returnRoute({ full: ['l', 'g', 'w'] }, 'blocked').path.join('>') === 'g>l', 'a refused call comes back from the guard')
 check(hopOf('w', 'g')?.rev === true && hopOf('l', 'u')?.id === 'u-l' && hopOf('x', 'y') === null, 'hops know their link and direction')
+check(ctxLevel(undefined) === 'none' && ctxLevel(null) === 'none' && ctxLevel(59) === 'allow' && ctxLevel(60) === 'ask' && ctxLevel(79) === 'ask' && ctxLevel(80) === 'block', 'the context gauge changes colour at 60 and 80 percent')
+check(promptHits(['l', 'g', 'o'], { type: 'edge', id: 'g-o' }) && promptHits(['l', 'g', 'd', 'e'], { type: 'edge', id: 'd-e' }) && promptHits(['l', 'g', 'x'], { type: 'edge', id: 'x-g' }) && promptHits(['u', 'l'], { type: 'node', id: 'u' }), 'a prompt belongs to the boxes and links on its path')
+check(!promptHits(['u', 'l'], { type: 'edge', id: 'g-w' }) && !promptHits(['u', 'l'], { type: 'node', id: 'o' }), 'a prompt is not listed on a link or box it did not cross')
+check(page.includes('id="ctx"') && page.includes('pre.full') && page.includes('pre-wrap'), 'the page has the context gauge and shows a whole prompt as preformatted text')
 
 process.exit(failed === 0 ? 0 : 1)
