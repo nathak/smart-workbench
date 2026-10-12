@@ -145,17 +145,36 @@ function scanned(text: string): string {
   return text.length <= PROMPT_SCAN ? text : text.slice(0, PROMPT_SCAN).replace(/\S*$/, '')
 }
 
-function promptOf(live: Live, text: string): Record<string, unknown> {
+// key: 'prompt' for what is sent to a model, 'output' for what a subagent sent back; the Length, Cut and Scanned fields follow it.
+function promptOf(live: Live, text: string, key: 'prompt' | 'output' = 'prompt'): Record<string, unknown> {
   if (live.livePrompts === false) return {}
   const masked = redact(scanned(text))
 
   return {
-    prompt: model.cut(masked, PROMPT_MAX),
-    promptLength: text.length,
+    [key]: model.cut(masked, PROMPT_MAX),
+    [`${key}Length`]: text.length,
     // Masking alone can shorten a text, so "cut" and "only the start was scanned" are sent as facts, not guessed from lengths.
-    ...(masked.length > PROMPT_MAX ? { promptCut: true } : {}),
-    ...(text.length > PROMPT_SCAN ? { promptScanned: PROMPT_SCAN } : {}),
+    ...(masked.length > PROMPT_MAX ? { [`${key}Cut`]: true } : {}),
+    ...(text.length > PROMPT_SCAN ? { [`${key}Scanned`]: PROMPT_SCAN } : {}),
   }
+}
+
+// What each subagent answered at the end of its run, until the Agent call that started it returns and carries it to the page.
+const agentAnswers = new Map<string, Record<string, unknown>>()
+
+// The answer of the subagent an Agent call ran: from the run's own last turn (found by the agent id in the call's record), or the
+// result itself when the tool returned plain text.
+async function agentOutput($: $, result: unknown): Promise<Record<string, unknown>> {
+  const id = typeof result === 'object' && result !== null ? (result as { agentId?: unknown }).agentId : undefined
+  if (typeof id === 'string' && agentAnswers.has(id)) {
+    const held = agentAnswers.get(id) ?? {}
+    agentAnswers.delete(id)
+
+    return { agentRun: id, ...held }
+  }
+  if (typeof result === 'string' && result !== '') return promptOf(await read($, liveAtom), result, 'output')
+
+  return typeof id === 'string' ? { agentRun: id } : {}
 }
 
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
@@ -1840,6 +1859,7 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    agentAnswers.clear()
     appender = 'tee'
     feedMissed = 0
     isFeedNoted = false
@@ -2112,6 +2132,7 @@ export const register: Register = on => {
     const isOk = ran.deny === undefined && ran.isError !== true
     const outcome = ran.deny !== undefined ? 'blocked' : isOk ? 'ok' : 'error'
     const kinds = e.tool === 'Bash' ? evidenceKindsOf(e.command) : []
+    const agentOut = e.tool === 'Agent' && ran.deny === undefined && !ran.isError ? await agentOutput($, ran.result) : {}
     const notebookPath = (e as unknown as Record<string, unknown>).notebook_path
     const rawPath =
       'file_path' in e && typeof e.file_path === 'string' ? e.file_path : typeof notebookPath === 'string' ? notebookPath : undefined
@@ -2172,12 +2193,12 @@ export const register: Register = on => {
         await audit($, 'team.repeat-error', { tool: e.tool, input: call.summary, count: track.failures[key] ?? 0 })
         // This branch returns early, so the badge and the end of the call are recorded here.
         await badge($, { ...call, outcome })
-        await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt })
+        await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut })
         return { ...ran, context: [...(ran.context ?? []), crew.repeatNudge(track.failures[key] ?? crew.REPEAT_LIMIT)] }
       }
     }
     await badge($, { ...call, outcome })
-    await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt })
+    await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut })
 
     return ran
   }).catch(($, e, next) => {
@@ -2197,6 +2218,10 @@ export const register: Register = on => {
 
     if (e.agentId !== undefined) {
       await emit($, 'turn.agent', { agent: e.agentId, ...usageOf(e.usage) })
+      if (typeof e.answer === 'string' && e.answer !== '') {
+        agentAnswers.set(e.agentId, promptOf(await read($, liveAtom), e.answer, 'output'))
+        if (agentAnswers.size > 50) agentAnswers.delete(agentAnswers.keys().next().value as string)
+      }
 
       return ran
     }
