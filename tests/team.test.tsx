@@ -2,6 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import type { Workbench } from '../types'
+import { workflowLabel, workflowOf } from '../hooks/workflow'
 
 const CWD = '/work'
 const PLUGIN = 'smartworkbench'
@@ -1005,6 +1006,53 @@ test('the live feed turn line carries the context and the turn tokens; --no-prom
   const prompt = feedLines(writes).filter(one => one.kind === 'prompt').at(-1)
   expect(prompt?.text).toBe('secret plan')
   expect(prompt?.prompt).toBeUndefined()
+})
+
+test('a Workflow call is shown by the name and description its script states, with the script as input; ok means started, not finished', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
+  await $.session.start(start)
+  const script = "export const meta = { name: 'ship-it', description: 'build and test', phases: [] }\n// API_KEY=abc12345xyz\nawait run()"
+  await $.tool.call({ tool: 'Workflow', script, args: { target: 'x' } } as unknown as Parameters<typeof $.tool.call>[0])
+  await $.tool.call({ tool: 'Workflow', name: 'nightly', resumeFromRunId: 'r1' } as unknown as Parameters<typeof $.tool.call>[0])
+
+  const lines = feedLines(writes)
+  const starts = lines.filter(one => one.kind === 'tool.start' && one.tool === 'Workflow')
+  expect(starts[0]).toMatchObject({ workflow: 'ship-it', workflowDesc: 'build and test' })
+  expect(String(starts[0]?.summary)).toContain('ship-it')
+  expect(String(starts[0]?.prompt)).toContain('export const meta')
+  expect(String(starts[0]?.prompt)).toContain('target')
+  expect(String(starts[0]?.prompt)).not.toContain('abc12345xyz')
+  expect(starts[1]).toMatchObject({ workflow: 'nightly', workflowSaved: true, workflowResume: true })
+  expect(starts[1]?.prompt).toBeUndefined()
+  expect(lines.filter(one => one.kind === 'tool.end' && one.workflowBg === true).length).toBe(2)
+})
+
+test('--no-prompts keeps a workflow call\'s name but not its script', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'live 4400 --no-prompts', ...COMMAND })
+  await $.tool.call({ tool: 'Workflow', script: "export const meta = { name: 'quiet', description: 'd' }\nawait run()" } as unknown as Parameters<typeof $.tool.call>[0])
+  const start1 = feedLines(writes).find(one => one.kind === 'tool.start' && one.tool === 'Workflow')
+  expect(start1).toMatchObject({ workflow: 'quiet' })
+  expect(start1?.prompt).toBeUndefined()
+})
+
+test('the workflow name is read from the script text without running it', () => {
+  expect(workflowOf({ script: "export const meta = { name: 'a\\'b', description: \"two words\" }" })).toMatchObject({ name: "a'b", description: 'two words', saved: false })
+  expect(workflowOf({ script: 'export const meta = { name: `x-${y}` }' }).name).toBeUndefined()
+  expect(workflowOf({ script: 'await run()' }).name).toBeUndefined()
+  expect(workflowOf({ name: 'nightly' })).toMatchObject({ name: 'nightly', saved: true })
+  expect(workflowLabel({ script: 'await run()' })).toBe('inline script')
+  expect(workflowLabel({ scriptPath: '/p/flows/ship.mjs' })).toBe('ship.mjs')
+  const started = Date.now()
+  workflowOf({ script: 'x'.repeat(300000) })
+  expect(Date.now() - started).toBeLessThan(200)
 })
 
 test('a live feed that cannot be written is reported once, shown by /swb live, and a line says when writing works again', async ($, on) => {

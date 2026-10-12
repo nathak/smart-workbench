@@ -201,6 +201,7 @@ button:hover{color:var(--fg)}
           <div class="sub" data-i="s-sub"></div>
           <div class="kv" style="margin-top:6px"><span data-i="s-exp-l"></span><span id="s-exp">0</span></div>
           <div class="kv"><span data-i="s-calls-l"></span><span id="s-calls">0</span></div>
+          <div class="kv"><span data-i="s-wf-l"></span><span id="s-wf">0</span></div>
         </div>
         <div class="link"></div>
         <div class="rows">
@@ -249,7 +250,7 @@ var DICT = {
   'u-h': ['USER · PROMPT', '사용자 · 프롬프트'],
   'l-sub': ['writes code · runs tools', '구현 · 코딩 · 도구 호출'], 'l-now-l': ['now', '지금'], 'l-calls-l': ['tool calls', '도구 호출'],
   'g-h': ['GUARD · DECISION LAYER', 'GUARD · 판정 계층'], 'g-note': ['rule-based · no model call', '규칙 판정 · 모델 호출 없음'],
-  's-sub': ['runs explorers in parallel · read-only', '탐색기를 병렬로 호출 · 읽기 전용'], 's-exp-l': ['explorer runs', 'explorer 호출'], 's-calls-l': ['subagent tool calls', '서브에이전트 도구 호출'],
+  's-sub': ['runs explorers in parallel · read-only', '탐색기를 병렬로 호출 · 읽기 전용'], 's-exp-l': ['explorer runs', 'explorer 호출'], 's-calls-l': ['subagent tool calls', '서브에이전트 도구 호출'], 's-wf-l': ['workflows started', '시작한 워크플로'],
   'w-sub': ['Sonnet · edits + tests', 'Sonnet · 편집 + 테스트'], 'w-edit-l': ['edits', '편집'], 'w-sh-l': ['shell', '셸'],
   'e-sub': ['Haiku · read code + docs', 'Haiku · 코드·문서 읽기'], 'e-read-l': ['reads', '읽기'], 'e-run-l': ['running', '실행 중'],
   'p-sub': ['repeats a task', '회차 반복'], 'p-pass-l': ['pass', '회차'], 'p-turn-l': ['turns', '턴'],
@@ -284,6 +285,7 @@ function routeOf(ev, ctx){
       var path;
       if (ev.codex) path = ev.agent ? ['d', 'g', 'x'] : ['l', 'g', 'x'];
       else if (ev.agent) path = ctx.onlyAdvisor ? ['o', 'g'] : ['e', 'd', 'g'];
+      else if (tool === 'Workflow') path = ['l', 'g', 'd'];
       else if (tool === 'Agent') path = /advisor/.test(sub) ? ['l', 'g', 'o'] : /explorer/.test(sub) ? ['l', 'g', 'd', 'e'] : ['l', 'g', 'd'];
       else if (/^(Edit|Write|NotebookEdit|MultiEdit|Bash)$/.test(tool)) path = ['l', 'g', 'w'];
       else path = ['l', 'g'];
@@ -511,7 +513,7 @@ var EDIT = Object.assign(Object.create(null), { Edit: 1, Write: 1, NotebookEdit:
 function plain(o){ return Object.assign(Object.create(null), o); }
 var TAGS = plain({ allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop' });
 function reset(){
-  S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, codexReviews: 0, codexTasks: 0, codexBg: 0, codexOn: null, expCalls: 0, subCalls: 0, leadCalls: 0,
+  S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, codexReviews: 0, codexTasks: 0, codexBg: 0, codexOn: null, expCalls: 0, subCalls: 0, wfRuns: 0, wfBg: 0, leadCalls: 0,
     edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '', ctx: null, ctxHist: [], tok: plain({}) };
   inflight = new Map();
   flowReset();
@@ -609,8 +611,8 @@ function render(){
   $('l-now').textContent = leadNow ? cut(leadNow.tool + ' ' + leadNow.summary, 34) : L('idle', '대기');
   $('l-calls').textContent = S.leadCalls;
   $('u-text').textContent = S.userText ? cut(S.userText, 90) : L('none yet', '아직 없음');
-  $('s-exp').textContent = S.expCalls; $('s-calls').textContent = S.subCalls;
-  $('b-sub').classList.toggle('busy', running('explorer') + running('sub') > 0);
+  $('s-exp').textContent = S.expCalls; $('s-calls').textContent = S.subCalls; $('s-wf').textContent = S.wfRuns;
+  $('b-sub').classList.toggle('busy', running('explorer') + running('sub') + running('workflow') > 0);
   $('w-edit').textContent = S.edits; $('w-sh').textContent = S.shells;
   setBusy('b-worker', 'w-state', running('worker'));
   $('e-read').textContent = S.reads; $('e-run').textContent = running('explorer') + running('sub');
@@ -673,20 +675,21 @@ function handle(ev){
       break;
     case 'tool.start': {
       var sub = String(ev.subagent || '');
-      var lane = ev.codex ? 'codex' : ev.agent ? 'sub' : /advisor/.test(sub) ? 'advisor' : /explorer/.test(sub) ? 'explorer' : (EDIT[ev.tool] || ev.tool === 'Bash') ? 'worker' : 'lead';
-      var who = lane === 'codex' ? 'codex' : lane === 'advisor' ? 'opus:adv' : lane === 'explorer' ? 'haiku:exp' : lane === 'sub' ? 'sub:' + cut(ev.agent, 4) : 'sonnet';
-      var whoClass = lane === 'codex' ? 'c-codex' : lane === 'advisor' ? 'c-opus' : (lane === 'explorer' || lane === 'sub') ? 'c-haiku' : 'c-sonnet';
+      var lane = ev.codex ? 'codex' : ev.agent ? 'sub' : ev.tool === 'Workflow' ? 'workflow' : /advisor/.test(sub) ? 'advisor' : /explorer/.test(sub) ? 'explorer' : (EDIT[ev.tool] || ev.tool === 'Bash') ? 'worker' : 'lead';
+      var who = lane === 'codex' ? 'codex' : lane === 'advisor' ? 'opus:adv' : lane === 'explorer' ? 'haiku:exp' : lane === 'sub' ? 'sub:' + cut(ev.agent, 4) : lane === 'workflow' ? 'workflow' : 'sonnet';
+      var whoClass = lane === 'codex' ? 'c-codex' : lane === 'advisor' ? 'c-opus' : (lane === 'explorer' || lane === 'sub' || lane === 'workflow') ? 'c-haiku' : 'c-sonnet';
       if (lane === 'advisor') S.opusCalls++;
       if (lane === 'codex') { if (/review/.test(String(ev.codex))) S.codexReviews++; else if (ev.codex === 'task') S.codexTasks++; if (ev.codexBg) S.codexBg++; }
       if (lane === 'explorer') S.expCalls++;
       if (lane === 'sub') { S.subCalls++; S.reads++; }
+      if (lane === 'workflow') S.wfRuns++;
       if (!ev.agent) { S.leadCalls++; if (EDIT[ev.tool]) S.edits++; else if (ev.tool === 'Bash' && lane !== 'codex') S.shells++; else if (lane === 'lead') S.reads++; }
       if (ev.policy === 'allow') S.allow++;
       var entry = { lane: lane, tool: cut(ev.tool, 40), summary: cut(ev.summary, 120) };
       var kind = ev.policy === 'ask' ? 'ask' : ev.policy === 'block' ? 'block' : '';
-      var row = addLog(at, who, whoClass, [cut(ev.tool, 40), ' ', ['i', cut(ev.summary, 80)]], kind, String(ev.policy).toUpperCase(), ev.policy);
+      var row = addLog(at, who, whoClass, [cut(ev.tool, 40), ' ', ['i', cut(ev.summary, 80)]].concat(ev.workflowSaved ? [' ', ['i', L('(saved)', '(저장됨)')]] : [], ev.workflowResume ? [' ', ['i', L('(resumed)', '(이어서)')]] : []), kind, String(ev.policy).toUpperCase(), ev.policy);
       entry.row = row;
-      if (typeof ev.prompt === 'string' && ev.prompt) expandable(row, ev.prompt, L('— input —', '— 입력 —'));
+      if (typeof ev.prompt === 'string' && ev.prompt) expandable(row, ev.prompt, ev.tool === 'Workflow' ? L('— script —', '— 스크립트 —') : L('— input —', '— 입력 —'));
       if (ev.policy !== 'block') { inflight.set(String(ev.id), entry); if (inflight.size > MAX_INFLIGHT) inflight.delete(inflight.keys().next().value); }
       break;
     }
@@ -696,9 +699,10 @@ function handle(ev){
         if (typeof ev.output === 'string' && ev.output) expandable(c.row, ev.output, L('— output —', '— 출력 —'));
         var line = c.row.querySelector('.m');
         line.appendChild(document.createTextNode(' '));
-        line.appendChild(el('i', null, '→ ' + cut(ev.outcome, 20)));
+        line.appendChild(el('i', null, ev.workflowBg ? L('→ started · runs in background, its end is not shown here', '→ 시작됨 · 백그라운드 실행, 끝은 여기 표시되지 않음') : '→ ' + cut(ev.outcome, 20)));
         if (ev.outcome === 'error') c.row.className += ' block';
       }
+      if (ev.workflowBg) S.wfBg++;
       inflight.delete(String(ev.id));
       break;
     }

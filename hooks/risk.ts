@@ -1,4 +1,5 @@
 import type { GuardProfile, Policy, Risk } from '../types'
+import { workflowLabel } from './workflow'
 
 export type Verdict = {
   category: string
@@ -352,6 +353,7 @@ export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolea
 }
 
 export function summarize(tool: string, input: unknown): string {
+  if (tool === 'Workflow') return workflowLabel(input)
   const args = (input ?? {}) as Record<string, unknown>
   const text =
     args.command ?? args.file_path ?? args.notebook_path ?? args.pattern ?? args.url ?? args.query ?? args.description ?? ''

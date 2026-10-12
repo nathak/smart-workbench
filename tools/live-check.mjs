@@ -152,6 +152,7 @@ check(paths({ kind: 'tool.start', tool: 'Edit', policy: 'allow' })[0] === 'l>g>w
 check(paths({ kind: 'tool.start', tool: 'Read', policy: 'allow' })[0] === 'l>g:allow', 'a read stops at the guard')
 check(paths({ kind: 'tool.start', tool: 'Agent', subagent: 'smartworkbench:advisor', policy: 'allow' })[0] === 'l>g>o:allow', 'the advisor is reached through the guard')
 check(paths({ kind: 'tool.start', tool: 'Agent', subagent: 'smartworkbench:explorer', policy: 'allow' })[0] === 'l>g>d>e:allow', 'an explorer is reached through the dispatcher')
+check(paths({ kind: 'tool.start', tool: 'Workflow', policy: 'allow' })[0] === 'l>g>d:allow', 'a workflow is started through the dispatcher')
 check(paths({ kind: 'tool.start', tool: 'Bash', policy: 'ask' })[0] === 'l>g:ask:park', 'an ask parks at the guard')
 check(paths({ kind: 'tool.start', tool: 'Bash', policy: 'block' })[0] === 'l>g:block', 'a block stops at the guard')
 check(paths({ kind: 'tool.start', agent: 'a1', tool: 'Read' }, { onlyAdvisor: true })[0] === 'o>g:allow', 'a call by a lone advisor comes from Opus')
@@ -168,6 +169,7 @@ check(hopOf('w', 'g')?.rev === true && hopOf('l', 'u')?.id === 'u-l' && hopOf('x
 check(ctxLevel(undefined) === 'none' && ctxLevel(null) === 'none' && ctxLevel(59) === 'allow' && ctxLevel(60) === 'ask' && ctxLevel(79) === 'ask' && ctxLevel(80) === 'block', 'the context gauge changes colour at 60 and 80 percent')
 check(promptHits(['l', 'g', 'o'], { type: 'edge', id: 'g-o' }) && promptHits(['l', 'g', 'd', 'e'], { type: 'edge', id: 'd-e' }) && promptHits(['l', 'g', 'x'], { type: 'edge', id: 'x-g' }) && promptHits(['u', 'l'], { type: 'node', id: 'u' }), 'a prompt belongs to the boxes and links on its path')
 check(!promptHits(['u', 'l'], { type: 'edge', id: 'g-w' }) && !promptHits(['u', 'l'], { type: 'node', id: 'o' }), 'a prompt is not listed on a link or box it did not cross')
+check(page.includes('id="s-wf"'), 'the dispatcher box counts started workflows')
 check(page.includes('id="ctx"') && page.includes('pre.full') && page.includes('pre-wrap'), 'the page has the context gauge and shows a whole prompt as preformatted text')
 
 // Every hop a route takes must be a drawn link, or the packet silently goes nowhere.
@@ -175,6 +177,7 @@ const samples = [
   { kind: 'prompt', origin: 'user' }, { kind: 'prompt', origin: 'user', loop: true }, { kind: 'prompt', origin: 'plugin' },
   { kind: 'tool.start', tool: 'Edit', policy: 'allow' }, { kind: 'tool.start', tool: 'Read', policy: 'ask' }, { kind: 'tool.start', tool: 'Bash', policy: 'block' },
   { kind: 'tool.start', tool: 'Agent', subagent: 'smartworkbench:advisor', policy: 'allow' }, { kind: 'tool.start', tool: 'Agent', subagent: 'smartworkbench:explorer', policy: 'allow' },
+  { kind: 'tool.start', tool: 'Workflow', policy: 'allow' }, { kind: 'tool.start', tool: 'Workflow', agent: 'a1', policy: 'allow' },
   { kind: 'tool.start', tool: 'Bash', codex: 'review', policy: 'allow' }, { kind: 'tool.start', tool: 'Bash', codex: 'task', agent: 'a1', policy: 'ask' },
   ...['loop.start', 'loop.pass', 'loop.done', 'loop.stop', 'loop.cancel', 'turn', 'guard.block', 'guard.ask', 'team.design-required', 'team.plan-review-required', 'team.final-check-required'].map(kind => ({ kind })),
 ]

@@ -15,6 +15,7 @@ import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPa
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
 import { classify, decide, redact, sessionScope, summarize } from './risk'
+import { workflowOf } from './workflow'
 
 type $ = EngineInterface
 type Els = Elements['terminal'] | Elements['desktop'] | Elements['vscode']
@@ -156,6 +157,19 @@ function promptOf(live: Live, text: string, key: 'prompt' | 'output' = 'prompt')
     // Masking alone can shorten a text, so "cut" and "only the start was scanned" are sent as facts, not guessed from lengths.
     ...(masked.length > PROMPT_MAX ? { [`${key}Cut`]: true } : {}),
     ...(text.length > PROMPT_SCAN ? { [`${key}Scanned`]: PROMPT_SCAN } : {}),
+  }
+}
+
+// What the live view shows of a Workflow call: its name and description as the script states them, and the script with its args as the input.
+function workflowFields(live: Live, input: unknown): Record<string, unknown> {
+  const wf = workflowOf(input)
+
+  return {
+    ...(wf.name ? { workflow: wf.name } : {}),
+    ...(wf.description ? { workflowDesc: wf.description } : {}),
+    ...(wf.saved ? { workflowSaved: true } : {}),
+    ...(wf.resume ? { workflowResume: true } : {}),
+    ...(wf.text ? promptOf(live, wf.text) : {}),
   }
 }
 
@@ -2063,6 +2077,7 @@ export const register: Register = on => {
       ...(codexRun ? { codex: codexRun.op, ...(codexRun.background ? { codexBg: true } : {}), ...(codexRun.write ? { codexWrite: true } : {}) } : {}),
       ...(e.tool === 'Agent' && typeof (e as unknown as Record<string, unknown>).prompt === 'string' ? promptOf(live, (e as unknown as Record<string, string>).prompt as string) : {}),
       ...(codexRun && e.tool === 'Bash' ? promptOf(live, e.command) : {}),
+      ...(e.tool === 'Workflow' ? workflowFields(live, e) : {}),
     })
 
     if (policy === 'block') {
@@ -2132,6 +2147,8 @@ export const register: Register = on => {
     const isOk = ran.deny === undefined && ran.isError !== true
     const outcome = ran.deny !== undefined ? 'blocked' : isOk ? 'ok' : 'error'
     const kinds = e.tool === 'Bash' ? evidenceKindsOf(e.command) : []
+    // A finished Workflow call only means the run started in the background; nothing here tells when or how it ends.
+    const bg = e.tool === 'Workflow' && ran.deny === undefined && !ran.isError ? { workflowBg: true } : {}
     const agentOut = e.tool === 'Agent' && ran.deny === undefined && !ran.isError ? await agentOutput($, ran.result) : {}
     const notebookPath = (e as unknown as Record<string, unknown>).notebook_path
     const rawPath =
@@ -2181,7 +2198,7 @@ export const register: Register = on => {
     if (e.tool === 'Agent' && e.subagent_type === crew.ADVISOR && isOk) {
       await updateTrack($, track => crew.advisorRan(track, endedAt))
       await audit($, 'team.advisor', { id: call.id, description: e.description })
-    } else if (isTeam && ran.deny === undefined && !isUnsettled && e.tool !== 'Agent') {
+    } else if (isTeam && ran.deny === undefined && !isUnsettled && e.tool !== 'Agent' && e.tool !== 'Workflow') {
       const key = crew.failureKey(e.tool, e as unknown as Record<string, unknown>)
       let nudge = false
       const track = await updateTrack($, current => {
@@ -2193,12 +2210,12 @@ export const register: Register = on => {
         await audit($, 'team.repeat-error', { tool: e.tool, input: call.summary, count: track.failures[key] ?? 0 })
         // This branch returns early, so the badge and the end of the call are recorded here.
         await badge($, { ...call, outcome })
-        await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut })
+        await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut, ...bg })
         return { ...ran, context: [...(ran.context ?? []), crew.repeatNudge(track.failures[key] ?? crew.REPEAT_LIMIT)] }
       }
     }
     await badge($, { ...call, outcome })
-    await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut })
+    await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut, ...bg })
 
     return ran
   }).catch(($, e, next) => {
