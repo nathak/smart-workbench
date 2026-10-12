@@ -62,7 +62,7 @@ export function iterationPrompt(loop: LoopState): string {
   const list = loop.items.length === 1 ? loop.items[0] : loop.items.map((one, i) => `${i + 1}. ${one}`).join('\n')
   const ends =
     loop.limit === null
-      ? `It repeats until the person runs /swb loop stop, or until ${IDLE_LIMIT} passes in a row change no file with an edit tool.`
+      ? `It repeats until the person runs /swb loop stop, or until ${IDLE_LIMIT} passes in a row change no file (an edit tool, or in a git repository any change to the working tree).`
       : `${loop.limit} passes in all.`
 
   return [
@@ -76,15 +76,27 @@ export type Step = { loop: LoopState | undefined; reason?: string; text?: string
 
 // A turn ended with a loop running: count the pass and either hold the turn for the next one or end the loop.
 // edited = the pass changed a file; an infinite loop that changes nothing IDLE_LIMIT times in a row ends.
-export function advance(loop: LoopState, edited: boolean, now: number): Step {
+// A short fingerprint of text (FNV-1a), for comparing two states of the working tree.
+export function treeHash(text: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+
+  return `${text.length}:${hash.toString(16)}`
+}
+
+// hash: the working tree after this pass, kept for the next comparison.
+export function advance(loop: LoopState, edited: boolean, now: number, hash?: string): Step {
   const idle = edited ? 0 : (loop.idle ?? 0) + 1
-  const next: LoopState = { ...loop, done: loop.done + 1, idle, passAt: now, continuing: true, pending: false }
+  const next: LoopState = { ...loop, done: loop.done + 1, idle, passAt: now, continuing: true, pending: false, ...(hash !== undefined ? { treeHash: hash } : {}) }
 
   if (loop.limit !== null && next.done >= loop.limit) {
     return { loop: undefined, text: `Loop finished: ${next.done} of ${loop.limit} passes done.` }
   }
   if (loop.limit === null && idle >= IDLE_LIMIT) {
-    return { loop: undefined, text: `Loop stopped after ${next.done} passes: the last ${IDLE_LIMIT} changed no file with an edit tool (changes made only by shell commands do not count).` }
+    return { loop: undefined, text: `Loop stopped after ${next.done} passes: the last ${IDLE_LIMIT} changed no file (no edit-tool edit and, in a git repository, no change to the working tree).` }
   }
 
   return { loop: next, reason: iterationPrompt(next) }

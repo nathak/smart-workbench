@@ -68,3 +68,14 @@ describe('loop wording', () => {
     expect(loop.describe(loop.begin(['a'], 2, 0))).toContain('not started')
   })
 })
+
+describe('working tree hash', () => {
+  test('differs for different text, is stable for the same text, and is kept by advance', async () => {
+    expect(loop.treeHash(' M a\0')).toBe(loop.treeHash(' M a\0'))
+    expect(loop.treeHash(' M a\0')).not.toBe(loop.treeHash(' M b\0'))
+    const next = loop.advance(loop.begin(['a'], null, 0), false, 1, 'h1').loop!
+    expect(next.treeHash).toBe('h1')
+    expect(loop.advance(next, false, 2).loop!.treeHash).toBe('h1')
+  })
+})
+
