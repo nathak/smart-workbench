@@ -12,6 +12,8 @@ const portAt = args.indexOf('--port')
 const port = portAt >= 0 ? Number(args[portAt + 1]) : 4317
 const project = resolve(args.find((one, i) => !one.startsWith('--') && args[i - 1] !== '--port') ?? process.cwd())
 const feed = join(project, '.claude', 'smartworkbench-live.jsonl')
+// Names this process, so the plugin can tell a feed left behind by a killed server from one a running view keeps.
+const pidFile = join(project, '.claude', 'smartworkbench-live.pid')
 const page = join(dirname(fileURLToPath(import.meta.url)), 'live.html')
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -118,7 +120,10 @@ process.on('SIGINT', stop)
 process.on('SIGTERM', stop)
 process.on('SIGHUP', stop)
 process.on('exit', () => {
-  if (created) rmSync(feed, { force: true })
+  if (created) {
+    rmSync(feed, { force: true })
+    rmSync(pidFile, { force: true })
+  }
 })
 
 // Not "SmartWorkbench live:" — the plugin reads that prefix as a successful start.
@@ -133,6 +138,7 @@ server.listen(port, '127.0.0.1', () => {
     mkdirSync(dirname(feed), { recursive: true })
     writeFileSync(feed, '')
     created = true
+    writeFileSync(pidFile, String(process.pid))
   } catch (err) {
     console.error(`Cannot create ${feed}: ${err.code ?? err.message}`)
     process.exit(1)

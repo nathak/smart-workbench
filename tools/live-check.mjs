@@ -74,6 +74,7 @@ try {
   for (let i = 0; i < 40 && !first.out.stdout.includes('SmartWorkbench live:'); i++) await sleep(100)
   check(first.out.stdout.includes('SmartWorkbench live:'), 'starts and prints its address')
   check(existsSync(feed), 'creates the feed after listening')
+  check(readFileSync(join(dir, '.claude', 'smartworkbench-live.pid'), 'utf8') === String(first.child.pid), 'names its process beside the feed')
 
   appendFileSync(feed, '{"kind":"a"}\n{"kind":"b"}\n')
   await sleep(400)
@@ -121,7 +122,7 @@ try {
   appendFileSync(feed, '')
   first.child.kill('SIGTERM')
   for (let i = 0; i < 20 && first.out.code === undefined; i++) await sleep(100)
-  check(!existsSync(feed), 'removes the feed on exit')
+  check(!existsSync(feed) && !existsSync(join(dir, '.claude', 'smartworkbench-live.pid')), 'removes the feed and the process note on exit')
 
   for (const signal of ['SIGINT', 'SIGHUP']) {
     const otherDir = mkdtempSync(join(tmpdir(), 'swb-live-'))

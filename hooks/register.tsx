@@ -803,6 +803,21 @@ function statusText(wb: Workbench, live: Live): string {
 // The live view's web server (tools/live.mjs), a child of this session: it ends with /swb live stop, the session or a reload.
 let liveServer: { url: string; stop: () => void } | undefined
 
+const PID_FILE = '.claude/smartworkbench-live.pid'
+const ALIVE_SCRIPT = "try{process.kill(Number(process.argv[1]),0)}catch(e){process.exit(e.code==='EPERM'?0:1)}"
+const REMOVE_SCRIPT = "for(const f of process.argv.slice(1))require('fs').rmSync(f,{force:true})"
+
+// A live view this session did not start: whether its feed file is there and whether the process that made it still runs.
+async function foreignView($: $): Promise<{ state: 'none' | 'alive' | 'dead' | 'unknown'; pid?: string }> {
+  const cwd = await $.session.cwd()
+  if (!(await $.fs.exists(`${cwd}/${LIVE_FILE}`))) return { state: 'none' }
+  const pid = await $.fs.read(`${cwd}/${PID_FILE}`).then(text => text.trim(), () => '')
+  if (!/^\d+$/.test(pid)) return { state: 'unknown' }
+  const ran = await $.process.run(['node', '-e', ALIVE_SCRIPT, pid]).catch(() => undefined)
+
+  return { state: ran?.exitCode === 0 ? 'alive' : 'dead', pid }
+}
+
 // A line for /swb live when the feed cannot be written, so the page's silence is not mistaken for an idle session.
 async function feedNote($: $): Promise<string> {
   const why = (await read($, liveAtom)).feedError
@@ -815,7 +830,19 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   const arg = rest.replace(/(?:^|\s)--no-prompts\b/, ' ').trim().toLowerCase()
 
   if (arg === 'stop' || arg === 'off') {
-    if (!liveServer) return { text: 'The live view is not running.' }
+    if (!liveServer) {
+      const other = await foreignView($)
+      if (other.state === 'dead') {
+        const cwd = await $.session.cwd()
+        await $.process.run(['node', '-e', REMOVE_SCRIPT, `${cwd}/${LIVE_FILE}`, `${cwd}/${PID_FILE}`]).catch(() => undefined)
+
+        return { text: 'Removed a feed left behind by a live view that is no longer running.' }
+      }
+      if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) serves this project's feed; stop it where it runs.` }
+      if (other.state === 'unknown') return { text: `The live view is not running in this session, but ${LIVE_FILE} exists (no process note beside it). Delete it if no live view is running.` }
+
+      return { text: 'The live view is not running.' }
+    }
     liveServer.stop()
     liveServer = undefined
     await setLive($, live => ({ ...live, livePrompts: undefined }))
@@ -834,6 +861,9 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
 
   const port = arg === '' ? 4317 : Number(arg)
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { text: 'Usage: /swb live [port 1024-65535] [--no-prompts] | /swb live stop' }
+
+  const other = await foreignView($)
+  if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) already serves this project's feed; a second one would empty it. Stop that one first.` }
 
   await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined }))
   const url = `http://127.0.0.1:${port}`

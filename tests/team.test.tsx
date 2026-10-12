@@ -1060,6 +1060,27 @@ test('an image run in a folder that is not a git repository, or one that only wr
   expect(toasts.some(one => one.includes('outside the image folders'))).toBe(false)
 })
 
+const ALIVE = "try{process.kill(Number(process.argv[1]),0)}catch(e){process.exit(e.code==='EPERM'?0:1)}"
+const REMOVE = "for(const f of process.argv.slice(1))require('fs').rmSync(f,{force:true})"
+
+test('/swb live stop removes a feed left behind by a live view that is gone, and leaves one that still runs', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const commands: Record<string, Run> = {
+    [`node -e ${ALIVE} 4242`]: { exitCode: 1, stdout: '' },
+    [`node -e ${REMOVE} ${CWD}/.claude/smartworkbench-live.jsonl ${CWD}/.claude/smartworkbench-live.pid`]: { exitCode: 0, stdout: '' },
+  }
+  world(on, { files: { ...FEED_FILES, '.claude/smartworkbench-live.pid': '4242\n' }, commands, processed: writes })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })).text).toContain('Removed a feed left behind')
+  expect(writes.some(one => one.argv[2] === REMOVE)).toBe(true)
+
+  commands[`node -e ${ALIVE} 4242`] = { exitCode: 0, stdout: '' }
+  writes.length = 0
+  expect((await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })).text).toContain('started elsewhere (process 4242)')
+  expect((await $.command.run({ command: 'swb', args: 'live 4400', ...COMMAND })).text).toContain('would empty it')
+  expect(writes.some(one => one.argv[2] === REMOVE)).toBe(false)
+})
+
 test('the live feed stays untouched when no server keeps the feed file', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { processed: writes })

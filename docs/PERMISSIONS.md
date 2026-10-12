@@ -50,9 +50,12 @@ It never reads environment variables and never stores the conversation or Live p
 | `git rev-parse --abbrev-ref HEAD` | `/swb new`, to draft a goal |
 | `git config user.name` | session start, only when audit is on |
 | `git rev-parse HEAD`, `git status --porcelain`, `gh run list …` | `/swb ci`, Check CI |
+| `git status --porcelain=v1 -z -uall` (and `git diff -U0 … HEAD` for loops) | before and after a Codex image run; at the start and end of each pass of an `inf` loop |
+| `node -e <process.kill(pid, 0)> <pid>`, `node -e <rmSync> <feed> <pid file>` | `/swb live`, `/swb live stop`, only when a feed file this session did not create exists: tells a running view from a leftover one, and removes a leftover |
+| `node -e <appendFileSync>` | live feed writes, only where `tee` is missing or fails |
 | `gh issue view …` | `/swb issue #n` |
 | `tee -a <project>/.claude/smartworkbench-live.jsonl` (the line goes in on stdin) | each event, only while the live feed file exists |
-| `node <plugin>/tools/live.mjs <project> --port <n>` | `/swb live`; kept as a child and ended by `/swb live stop`, the end of the session or a reload |
+| `node <plugin>/tools/live.mjs <project> --port <n>` (writes `.claude/smartworkbench-live.pid` beside the feed, removes both on exit) | `/swb live`; kept as a child and ended by `/swb live stop`, the end of the session or a reload |
 
 ### Network
 
@@ -114,9 +117,12 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 | `git rev-parse --abbrev-ref HEAD` | `/swb new`(목표 초안) |
 | `git config user.name` | 세션 시작, 감사 로그가 켜졌을 때만 |
 | `git rev-parse HEAD`, `git status --porcelain`, `gh run list …` | `/swb ci`, Check CI |
+| `git status --porcelain=v1 -z -uall` (루프에서는 `git diff -U0 … HEAD`도) | Codex 이미지 실행 전후, `inf` 루프의 회차 시작·끝 |
+| `node -e <process.kill(pid, 0)> <pid>`, `node -e <rmSync> <피드> <pid 파일>` | `/swb live`, `/swb live stop`. 이 세션이 만들지 않은 피드 파일이 있을 때만: 실행 중인 보기와 남은 파일을 구별하고 남은 것을 지웁니다 |
+| `node -e <appendFileSync>` | 실시간 피드 기록. `tee`가 없거나 실패할 때만 |
 | `gh issue view …` | `/swb issue #n` |
 | `tee -a <프로젝트>/.claude/smartworkbench-live.jsonl`(한 줄을 stdin으로 전달) | 이벤트마다, 실시간 피드 파일이 있을 때만 |
-| `node <플러그인>/tools/live.mjs <프로젝트> --port <n>` | `/swb live`. 자식 프로세스로 두고 `/swb live stop`, 세션 종료, 리로드 때 끝남 |
+| `node <플러그인>/tools/live.mjs <프로젝트> --port <n>`(피드 옆에 `.claude/smartworkbench-live.pid`를 쓰고 종료 때 둘 다 지움) | `/swb live`. 자식 프로세스로 두고 `/swb live stop`, 세션 종료, 리로드 때 끝남 |
 
 ### 네트워크
 
