@@ -480,7 +480,12 @@ function flow(ev){
     var id = String(ev.id), start = R.get(id);
     R.delete(id);
     unpark(id);
-    send(returnRoute(start, ev.outcome), metaOf(ev, { outcome: cut(ev.outcome, 20), ms: typeof ev.ms === 'number' ? ev.ms : null, tool: start ? start.tool : '', summary: start ? start.summary : '' }));
+    var back = returnRoute(start, ev.outcome);
+    if (typeof ev.output === 'string' && ev.output) {
+      PR.push({ at: ev.at || Date.now(), tag: 'RESULT', loop: false, cut: ev.outputCut === true, scanned: typeof ev.outputScanned === 'number' ? ev.outputScanned : 0, paths: [back.path], prompt: ev.output, len: typeof ev.outputLength === 'number' ? ev.outputLength : ev.output.length });
+      if (PR.length > MAX_PROMPTS) PR.shift();
+    }
+    send(back, metaOf(ev, { outcome: cut(ev.outcome, 20), ms: typeof ev.ms === 'number' ? ev.ms : null, tool: start ? start.tool : '', summary: start ? start.summary : '' }));
     return;
   }
   if (ev.kind === 'guard.ask' && ev.answer !== 'declined' && ev.id != null) {
@@ -534,15 +539,19 @@ function keep(s){
   return String(s == null ? '' : s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ');
 }
 // A log row that opens the full prompt under it; text goes in with textContent only.
-function expandable(row, text){
-  var full = el('pre', 'full', keep(text));
+// A row can hold several (the input of a call, later its output); opening the row opens them all. title labels one of them.
+function expandable(row, text, title){
+  var full = el('pre', 'full', (title ? title + '\n' : '') + keep(text));
   full.hidden = true;
   row.appendChild(full);
+  if (row.fulls) { row.fulls.push(full); return; }
+  row.fulls = [full];
   row.classList.add('prm');
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
-  row.onclick = function(e){ if (e.target.closest && e.target.closest('pre.full')) return; full.hidden = !full.hidden; };
-  row.onkeydown = function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); full.hidden = !full.hidden; } };
+  var toggle = function(){ var open = row.fulls[0].hidden; row.fulls.forEach(function(f){ f.hidden = !open; }); };
+  row.onclick = function(e){ if (e.target.closest && e.target.closest('pre.full')) return; toggle(); };
+  row.onkeydown = function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
 }
 var replaying = false;
 function fresh(){ return !replaying && Date.now() - loadedAt > 1500 ? ' new' : ''; }
@@ -677,13 +686,14 @@ function handle(ev){
       var kind = ev.policy === 'ask' ? 'ask' : ev.policy === 'block' ? 'block' : '';
       var row = addLog(at, who, whoClass, [cut(ev.tool, 40), ' ', ['i', cut(ev.summary, 80)]], kind, String(ev.policy).toUpperCase(), ev.policy);
       entry.row = row;
-      if (typeof ev.prompt === 'string' && ev.prompt) expandable(row, ev.prompt);
+      if (typeof ev.prompt === 'string' && ev.prompt) expandable(row, ev.prompt, L('— input —', '— 입력 —'));
       if (ev.policy !== 'block') { inflight.set(String(ev.id), entry); if (inflight.size > MAX_INFLIGHT) inflight.delete(inflight.keys().next().value); }
       break;
     }
     case 'tool.end': {
       var c = inflight.get(String(ev.id));
       if (c && c.row) {
+        if (typeof ev.output === 'string' && ev.output) expandable(c.row, ev.output, L('— output —', '— 출력 —'));
         var line = c.row.querySelector('.m');
         line.appendChild(document.createTextNode(' '));
         line.appendChild(el('i', null, '→ ' + cut(ev.outcome, 20)));
@@ -752,7 +762,7 @@ function handle(ev){
 
 // ---- ui: pause, replay, speed, filters, and the detail drawer ----
 var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null;
-var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id', 'promptLength', 'contextPercent', 'tokensIn', 'tokensOut', 'model', 'paths', 'skipped', 'missed'];
+var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id', 'promptLength', 'contextPercent', 'tokensIn', 'tokensOut', 'model', 'paths', 'skipped', 'missed', 'outputLength', 'agentRun'];
 function store(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
 function stored(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
 function nodeName(n){ return NODE_NAME[n] ? NODE_NAME[n][lang === 'ko' ? 1 : 0] : n; }
@@ -877,7 +887,7 @@ function drawRefresh(){
   pl.textContent = '';
   var hits = PR.filter(function(r){ return r.paths.some(function(p){ return promptHits(p, f); }); }).slice(-20).reverse();
   pl.hidden = !hits.length;
-  if (hits.length) pl.appendChild(el('h5', null, L('prompts that crossed here', '여기를 지난 프롬프트') + ' (' + hits.length + ')'));
+  if (hits.length) pl.appendChild(el('h5', null, L('prompts and results that crossed here', '여기를 지난 프롬프트·결과') + ' (' + hits.length + ')'));
   hits.forEach(function(r){
     var prow = el('button', 'pkt prm');
     prow.appendChild(el('span', 'tm', clock(r.at)));

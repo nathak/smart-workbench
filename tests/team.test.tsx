@@ -40,6 +40,8 @@ type WorldOptions = {
   fail?: (command: string) => boolean
   // Collects the toasts shown.
   toasts?: string[]
+  // The agent id an Agent call's record carries.
+  agentId?: string
   // What the engine reports as the session's context use; the default is only the window.
   context?: { tokens?: number; window: number; percent?: number }
 }
@@ -107,6 +109,7 @@ function world(on: On, options: WorldOptions = {}) {
     if (options.fail?.(command)) {
       return { isError: true, result: 'Exit code 1', text: 'Exit code 1\nauth: 1 failed' }
     }
+    if (e.tool === 'Agent' && options.agentId) return { result: { agentId: options.agentId } }
     return { result: { stdout: 'ok', stderr: '', interrupted: false } }
   })
 
@@ -944,6 +947,28 @@ test('the live feed says whether a prompt was cut or only partly scanned, not by
   expect(cut?.promptCut).toBe(true)
   expect(cut?.promptScanned).toBeUndefined()
   expect(scanned?.promptScanned).toBe(8000)
+})
+
+test('the live feed carries what a subagent answered on the end of the Agent call that ran it, masked and cut', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, agentId: 'sub-1' })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.session.start(start)
+  await $.turn.complete({ answer: `Found it: src/a.ts:10 uses API_KEY=abc123 here. ${'x'.repeat(3000)}`, agentId: 'sub-1', durationMs: 1, isAborted: false, turnId: 's1', reason: 'answer' })
+  await $.tool.call({ ...advisorCall, prompt: 'look for the key' })
+
+  const end = feedLines(writes).find(one => one.kind === 'tool.end' && one.agentRun === 'sub-1') as Record<string, unknown>
+  expect(String(end.output)).toContain('Found it: src/a.ts:10')
+  expect(String(end.output)).not.toContain('abc123')
+  expect((end.output as string).length).toBe(2000)
+  expect(end.outputLength).toBeGreaterThan(3000)
+  expect(end.outputCut).toBe(true)
+  // The answer is handed over once: a second call with the same record carries none.
+  await $.tool.call({ ...advisorCall, prompt: 'again' })
+  const ends = feedLines(writes).filter(one => one.kind === 'tool.end' && one.agentRun === 'sub-1')
+  expect(ends.length).toBe(2)
+  expect(ends[1]?.output).toBeUndefined()
 })
 
 test('the live feed carries the brief of an Agent call and the text of a Codex task, not of other calls', async ($, on) => {
