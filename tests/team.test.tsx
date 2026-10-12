@@ -989,7 +989,7 @@ test('a live feed that cannot be written is reported once, shown by /swb live, a
   const APPEND = "require('fs').appendFileSync(process.argv[1], require('fs').readFileSync(0))"
   const commands: Record<string, Run> = {
     [`tee -a ${FEED}`]: { exitCode: 1, stdout: '' },
-    [`node -e ${APPEND} ${FEED}`]: { exitCode: 1, stdout: '', stderr: 'EACCES: permission denied' },
+    [`node -e ${APPEND} -- ${FEED}`]: { exitCode: 1, stdout: '', stderr: 'EACCES: permission denied' },
   }
   world(on, { files: FEED_FILES, commands, processed: writes, toasts })
   on('prompt.submit', ($, e) => ({ text: e.text }))
@@ -1004,7 +1004,7 @@ test('a live feed that cannot be written is reported once, shown by /swb live, a
   expect(toasts.filter(one => one.includes('cannot be written')).length).toBe(1)
   expect((await $.command.run({ command: 'swb', args: 'live', ...COMMAND })).text).toContain('not writing (EACCES')
 
-  commands[`node -e ${APPEND} ${FEED}`] = { exitCode: 0, stdout: '' }
+  commands[`node -e ${APPEND} -- ${FEED}`] = { exitCode: 0, stdout: '' }
   await $.prompt.submit({ text: 'three', ...COMPOSER })
   const recovered = writes.filter(one => one.argv[0] === 'node' && one.argv[1] === '-e').map(one => JSON.parse(one.stdin ?? '{}') as Record<string, unknown>).filter(one => one.kind === 'feed.recovered')
   expect(recovered.length).toBe(1)
@@ -1072,25 +1072,33 @@ const REMOVE = "for(const f of process.argv.slice(1))require('fs').rmSync(f,{for
 test('/swb live stop removes a feed left behind by a live view that is gone, and leaves one that still runs', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   const commands: Record<string, Run> = {
-    [`node -e ${ALIVE} box 4242`]: { exitCode: 1, stdout: '' },
-    [`node -e ${REMOVE} ${CWD}/.claude/smartworkbench-live.jsonl ${CWD}/.claude/smartworkbench-live.pid`]: { exitCode: 0, stdout: '' },
+    [`node -e ${ALIVE} -- box 4242`]: { exitCode: 1, stdout: '' },
+    [`node -e ${REMOVE} -- ${CWD}/.claude/smartworkbench-live.jsonl ${CWD}/.claude/smartworkbench-live.pid`]: { exitCode: 0, stdout: '' },
   }
   world(on, { files: { ...FEED_FILES, '.claude/smartworkbench-live.pid': 'box 4242\n' }, commands, processed: writes })
   await $.session.start(start)
   expect((await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })).text).toContain('Removed a feed left behind')
   expect(writes.some(one => one.argv[2] === REMOVE)).toBe(true)
 
-  commands[`node -e ${ALIVE} box 4242`] = { exitCode: 0, stdout: '' }
+  commands[`node -e ${ALIVE} -- box 4242`] = { exitCode: 0, stdout: '' }
   writes.length = 0
   // A note written on another machine or container says nothing about this one: leave the feed alone.
-  commands[`node -e ${ALIVE} box 4242`] = { exitCode: 2, stdout: '' }
+  commands[`node -e ${ALIVE} -- box 4242`] = { exitCode: 2, stdout: '' }
   expect((await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })).text).toContain('no process note')
   expect(writes.some(one => one.argv[2] === REMOVE)).toBe(false)
-  commands[`node -e ${ALIVE} box 4242`] = { exitCode: 0, stdout: '' }
+  commands[`node -e ${ALIVE} -- box 4242`] = { exitCode: 0, stdout: '' }
   writes.length = 0
   expect((await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })).text).toContain('started elsewhere (process 4242)')
   expect((await $.command.run({ command: 'swb', args: 'live 4400', ...COMMAND })).text).toContain('would empty it')
   expect(writes.some(one => one.argv[2] === REMOVE)).toBe(false)
+})
+
+test('a process note whose host looks like a node option is never passed to node', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: { ...FEED_FILES, '.claude/smartworkbench-live.pid': '--require=/tmp/evil.js 4242\n' }, processed: writes })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })).text).toContain('no process note')
+  expect(writes.some(one => one.argv.some(word => word.includes('evil.js')))).toBe(false)
 })
 
 test('the live feed stays untouched when no server keeps the feed file', async ($, on) => {

@@ -127,7 +127,7 @@ async function appendLine($: $, path: string, text: string): Promise<void> {
     if (ran?.exitCode === 0) return
     appender = 'node'
   }
-  const ran = await $.process.run(['node', '-e', APPEND_SCRIPT, path], { stdin: text })
+  const ran = await $.process.run(['node', '-e', APPEND_SCRIPT, '--', path], { stdin: text })
   if (ran.exitCode !== 0) throw new Error(ran.stderr.trim().split('\n').pop() || `node exited with ${ran.exitCode}`)
 }
 
@@ -830,9 +830,10 @@ const REMOVE_SCRIPT = "for(const f of process.argv.slice(1))require('fs').rmSync
 async function foreignView($: $): Promise<{ state: 'none' | 'alive' | 'dead' | 'unknown'; pid?: string }> {
   const cwd = await $.session.cwd()
   if (!(await $.fs.exists(`${cwd}/${LIVE_FILE}`))) return { state: 'none' }
-  const note = /^(\S+) (\d+)$/.exec(await $.fs.read(`${cwd}/${PID_FILE}`).then(text => text.trim(), () => ''))
+  // The note is a file of the project, so its words are untrusted: a host that begins with a dash would be read by node as an option.
+  const note = /^([A-Za-z0-9][A-Za-z0-9._-]*) (\d+)$/.exec(await $.fs.read(`${cwd}/${PID_FILE}`).then(text => text.trim(), () => ''))
   if (!note) return { state: 'unknown' }
-  const ran = await $.process.run(['node', '-e', ALIVE_SCRIPT, note[1] ?? '', note[2] ?? '']).catch(() => undefined)
+  const ran = await $.process.run(['node', '-e', ALIVE_SCRIPT, '--', note[1] ?? '', note[2] ?? '']).catch(() => undefined)
 
   return ran?.exitCode === 2 ? { state: 'unknown' } : { state: ran?.exitCode === 0 ? 'alive' : 'dead', pid: note[2] }
 }
@@ -853,7 +854,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
       const other = await foreignView($)
       if (other.state === 'dead') {
         const cwd = await $.session.cwd()
-        await $.process.run(['node', '-e', REMOVE_SCRIPT, `${cwd}/${LIVE_FILE}`, `${cwd}/${PID_FILE}`]).catch(() => undefined)
+        await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', `${cwd}/${LIVE_FILE}`, `${cwd}/${PID_FILE}`]).catch(() => undefined)
 
         return { text: 'Removed a feed left behind by a live view that is no longer running.' }
       }
