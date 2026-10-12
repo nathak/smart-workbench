@@ -725,6 +725,10 @@ function handle(ev){
       addLog(at, 'loop', 'c-loop', [end + (ev.done != null ? ' · ' + cut(ev.done, 8) + L(' passes', '회') : '')], '', 'LOOP', 'loop');
       break;
     }
+    case 'codex.write-check':
+      if (ev.skipped) addLog(at, 'codex', 'c-codex', [L('image run not checked (background)', '이미지 실행 점검 생략 (백그라운드)')], '', 'CODEX', 'info');
+      else addFlag(at, 'block', 'WRITE', [L('Codex image run changed ' + cut(ev.count, 6) + ' file(s) outside the image folders · ', '이미지 폴더 밖 파일 ' + cut(ev.count, 6) + '개 변경 · '), ['code', cut(ev.paths, 100)]]);
+      break;
     case 'feed.recovered':
       addFlag(at, 'ask', 'FEED', [cut(ev.missed, 8) + L(' events were not written to the feed', '개 이벤트가 피드에 기록되지 못했습니다')]);
       break;
@@ -747,7 +751,7 @@ function handle(ev){
 
 // ---- ui: pause, replay, speed, filters, and the detail drawer ----
 var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null;
-var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id', 'promptLength', 'contextPercent', 'tokensIn', 'tokensOut', 'model'];
+var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id', 'promptLength', 'contextPercent', 'tokensIn', 'tokensOut', 'model', 'paths', 'skipped', 'missed'];
 function store(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
 function stored(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
 function nodeName(n){ return NODE_NAME[n] ? NODE_NAME[n][lang === 'ko' ? 1 : 0] : n; }

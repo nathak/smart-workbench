@@ -28,7 +28,7 @@ type Run = { exitCode: number; stdout: string; stderr?: string }
 type WorldOptions = {
   files?: Record<string, string>
   store?: Record<string, unknown>
-  commands?: Record<string, Run>
+  commands?: Record<string, Run | Run[]>
   answer?: string
   // Answers a guard question from its option labels; the default takes the first.
   ask?: (labels: string[]) => string
@@ -81,7 +81,9 @@ function world(on: On, options: WorldOptions = {}) {
   })
   on('process.run', ($, e) => {
     options.processed?.push({ argv: e.argv, stdin: e.init?.stdin })
-    const run = commands[e.argv.join(' ')] ?? { exitCode: 1, stdout: '', stderr: `unexpected: ${e.argv.join(' ')}` }
+    const answer = commands[e.argv.join(' ')]
+    // A list answers one call after another, the last one for every call after that.
+    const run = (Array.isArray(answer) ? (answer.length > 1 ? answer.shift() : answer[0]) : answer) ?? { exitCode: 1, stdout: '', stderr: `unexpected: ${e.argv.join(' ')}` }
     return { value: { exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('command.register', ($, e) => ({ value: { command: e.name } }))
@@ -981,6 +983,55 @@ test('a live feed that cannot be written is reported once, shown by /swb live, a
   expect(recovered.length).toBe(1)
   expect((recovered[0]?.missed as number) > 0).toBe(true)
   expect((await $.command.run({ command: 'swb', args: 'live', ...COMMAND })).text).not.toContain('not writing')
+})
+
+const GIT_STATUS = 'git status --porcelain=v1 -z -uall'
+const imageRun = () => `node ${CODEX_DIR}/scripts/codex-companion.mjs task --write "draw a blue gear icon; save it as assets/gear.png and write nothing else"`
+
+test('an image run that changed files outside the image folders is warned about, never reverted', async ($, on) => {
+  const toasts: string[] = []
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, {
+    files: { ...CODEX_FILES, ...FEED_FILES },
+    commands: {
+      ...CODEX_RUNS,
+      ...FEED_RUNS,
+      [GIT_STATUS]: [
+        { exitCode: 0, stdout: ' M src/a.ts\0' },
+        { exitCode: 0, stdout: ' M src/a.ts\0?? assets/gear.png\0?? src/new.ts\0R  img/b.png\0img/old.png\0' },
+      ],
+    },
+    processed: writes,
+    toasts,
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })
+  await $.tool.call({ tool: 'Bash', command: imageRun() })
+
+  const warning = toasts.find(one => one.includes('outside the image folders')) ?? ''
+  expect(warning).toContain('src/new.ts')
+  expect(warning).toContain('img/b.png')
+  expect(warning).not.toContain('assets/gear.png')
+  expect(warning).not.toContain('src/a.ts')
+  const checks = feedLines(writes).filter(one => one.kind === 'codex.write-check')
+  expect(checks[0]?.count).toBe(2)
+})
+
+test('an image run in a folder that is not a git repository, or one that only wrote the picture, raises no warning', async ($, on) => {
+  const toasts: string[] = []
+  world(on, {
+    files: { ...CODEX_FILES, ...FEED_FILES },
+    commands: { ...CODEX_RUNS, ...FEED_RUNS, [GIT_STATUS]: { exitCode: 128, stdout: '' } },
+    toasts,
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })
+  await $.tool.call({ tool: 'Bash', command: imageRun() })
+  expect(toasts.some(one => one.includes('outside the image folders'))).toBe(false)
 })
 
 test('the live feed stays untouched when no server keeps the feed file', async ($, on) => {
