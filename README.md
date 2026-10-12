@@ -221,9 +221,56 @@ Watch a request flow in a browser: prompts, tool calls and guard decisions, suba
 - Panels: Opus advisor, user prompt, Sonnet lead, guard decisions (allow / ask / block bars), Haiku dispatcher, worker / explorer / loop, flags and the session log.
 - Data flow: each event moves as a dot along the links between the boxes (prompt: user → lead; tool call: lead → guard → worker / dispatcher / Opus; an `ask` waits at the guard until you answer; a finished call walks back; a block returns from the guard in red). Every link shows how many dots crossed it. Subagent calls are attributed to Opus or the explorer by a guess, since the feed carries no parent link.
 - Interaction: click or tap a box or a link for a drawer with what moved through it (tap a row for its fields); hover for a one-line tip. Toolbar: pause / resume (events wait and are applied on resume), replay the last 20 / 50 / 200 events at their real pace, speed 0.5×–4×, motion on / off (also off with the system's reduced-motion setting), and outcome filters. Feed text is always shown as text, never as markup.
-- The page serves other Host names only when you list them in the `SWB_LIVE_HOSTS` environment variable (comma separated), for example behind a reverse proxy.
+- The page serves other Host names only when you list them in the `SWB_LIVE_HOSTS` environment variable (comma separated), for example behind a reverse proxy. Details below.
 
 ![Live view](docs/live-view.png)
+
+#### `SWB_LIVE_HOSTS`: opening the live view under another host name
+
+**What it is.** The live server listens on `127.0.0.1` only, and before it answers any request (the page and the `/events` stream) it compares the request's `Host` header with a list of names it trusts. A request whose `Host` is not on the list gets an empty `403`. This is a defence against DNS rebinding: a web page on another site can make its own host name point at `127.0.0.1` and then read your feed, which holds prompts and commands, from your browser. `SWB_LIVE_HOSTS` adds names to that list.
+
+**What is accepted without it.** Only `127.0.0.1:<port>` and `localhost:<port>`, where `<port>` is the port the server was started on (4317 by default). `http://127.0.0.1:4317/` works; `http://[::1]:4317/` and `http://192.168.0.5:4317/` do not (the server is not even bound to those addresses).
+
+**Format.**
+
+- Host names separated by commas, for example `SWB_LIVE_HOSTS=live.example.com,claude.example.org`. Spaces around a name are ignored and the comparison is not case sensitive.
+- Write the name only: no `http://`, no path, no wildcards (`*.example.com` matches nothing).
+- Each name `n` is accepted as `n`, `n:80` and `n:443`, so a proxy on the standard ports needs no port in the list.
+- A name that carries a port, such as `live.example.com:8443` or `127.0.0.1:5000`, is accepted exactly as written and nothing else. Use that form for a proxy on another port, or for an SSH tunnel whose local port differs from the server's (`ssh -L 5000:127.0.0.1:4317 host` makes the browser send `Host: 127.0.0.1:5000`, which is refused unless it is listed).
+- An empty or unset variable adds nothing.
+
+**When you need it.**
+
+- A reverse proxy (nginx, Caddy, Traefik, a Cloudflare tunnel) that forwards the original `Host` header to the live server, which is what the browser used: list that name.
+- An SSH tunnel or a port mapping whose local port is not the server's port (see above).
+- You do not need it when the proxy rewrites `Host` to the upstream address (nginx's default `proxy_pass http://127.0.0.1:4317;` sends `Host: 127.0.0.1:4317`), or when the tunnel uses the same port on both ends.
+
+**Where to set it.** The variable is read by the live server process, `tools/live.mjs`, which `/swb live` starts as a child of Claude Code. So it must be in Claude Code's own environment when you start it, and it takes effect when the server starts:
+
+1. Set it in the shell that launches Claude Code: `export SWB_LIVE_HOSTS=live.example.com` (bash, zsh), `$env:SWB_LIVE_HOSTS = "live.example.com"` (PowerShell), `set SWB_LIVE_HOSTS=live.example.com` (cmd). Claude Code's own settings may also offer an `env` section; use it if your version does.
+2. Restart Claude Code, then run `/swb live stop` and `/swb live` again if a view was already running; a running server keeps the list it started with.
+
+**A reverse proxy in front of it.** The server only speaks plain HTTP on `127.0.0.1`, so the proxy must run on the same machine (or reach it through a tunnel). The stream is Server-Sent Events, so keep it unbuffered and open:
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:4317;
+  proxy_set_header Host $host;       # the name you listed in SWB_LIVE_HOSTS
+  proxy_http_version 1.1;
+  proxy_buffering off;               # events must not be held back
+  proxy_read_timeout 3600s;          # the stream is long lived
+}
+```
+
+The server already sends `X-Accel-Buffering: no` and a `: ping` comment every 15 seconds, which keeps most proxies from buffering or closing an idle stream.
+
+**Security.** The live server has no login of its own. Everyone who can reach the listed name sees everything the page shows: your prompts (up to 2000 characters each, with secrets masked by a heuristic), the briefs and results of subagents, command summaries and Codex task text. Put access control in front of it (a VPN, a proxy with authentication, an identity-aware tunnel), list only names you control, and start it with `/swb live --no-prompts` if prompts must not leave the machine. Do not leave a view running on a repository you would not show.
+
+**If it does not work.**
+
+- `403` on the page: the `Host` the browser sent is not on the list. Check it with `curl -s -o /dev/null -w "%{http_code}\n" -H "Host: live.example.com" http://127.0.0.1:4317/` on the machine (`200` once listed).
+- The page loads but stays `● waiting` or shows no events: the proxy is buffering or closing the stream (see the nginx settings), or the plugin cannot write the feed (look for the "live feed cannot be written" notice and `/swb live`).
+- Nothing changed after setting the variable: the server was started before it was set, or Claude Code was started from a shell that did not have it. Restart Claude Code and the live view.
 
 ### Project guard file
 
@@ -536,9 +583,56 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - 패널은 Opus 조언자, 사용자 프롬프트, Sonnet 리드, 가드 판정(allow / ask / block 막대), Haiku 디스패처, worker / explorer / loop, flags, session log 입니다.
 - 데이터 흐름: 이벤트마다 박스 사이 연결선을 따라 점이 움직입니다(프롬프트: 사용자 → 리드, 도구 호출: 리드 → 가드 → worker / 디스패처 / Opus, `ask`는 답할 때까지 가드에서 대기, 끝난 호출은 온 길로 되돌아가고, 차단은 가드에서 빨갛게 돌아옵니다). 연결선마다 지나간 횟수가 표시됩니다. 서브에이전트 호출은 피드에 부모 정보가 없어 Opus인지 explorer인지 추정해서 표시합니다.
 - 상호작용: 박스나 연결선을 클릭(터치)하면 지나간 내용을 담은 서랍이 열리고(행을 누르면 필드 표시), 마우스를 올리면 한 줄 안내가 뜹니다. 툴바: 일시정지/재개(멈춘 동안 온 이벤트는 재개할 때 반영), 최근 20/50/200개를 실제 간격대로 다시보기, 속도 0.5×~4×, 모션 켬/끔(시스템의 동작 줄이기 설정이면 자동으로 꺼짐), 결과별 필터. 피드의 글자는 항상 글자로만 표시되고 마크업으로 해석되지 않습니다.
-- 다른 Host 이름은 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분)에 적은 것만 받습니다. 리버스 프록시 뒤에서 쓸 때 설정하세요.
+- 다른 Host 이름은 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분)에 적은 것만 받습니다. 리버스 프록시 뒤에서 쓸 때 설정하세요. 자세한 설명은 아래에 있습니다.
 
 ![실시간 보기](docs/live-view.png)
+
+#### `SWB_LIVE_HOSTS`: 다른 호스트 이름으로 실시간 보기 열기
+
+**무엇인가.** 실시간 서버는 `127.0.0.1`에서만 듣고, 요청(페이지와 `/events` 스트림)에 답하기 전에 요청의 `Host` 헤더를 믿는 이름 목록과 비교합니다. 목록에 없는 `Host`는 빈 `403`을 받습니다. DNS 리바인딩을 막기 위한 것입니다. 다른 사이트의 웹 페이지가 자기 호스트 이름을 `127.0.0.1`로 연결해 두면, 브라우저를 통해 프롬프트와 명령이 들어 있는 피드를 읽을 수 있기 때문입니다. `SWB_LIVE_HOSTS`는 그 목록에 이름을 더합니다.
+
+**설정하지 않았을 때 받는 것.** `127.0.0.1:<포트>`와 `localhost:<포트>`뿐입니다. `<포트>`는 서버를 띄운 포트이며 기본값은 4317입니다. `http://127.0.0.1:4317/`은 되고, `http://[::1]:4317/`이나 `http://192.168.0.5:4317/`은 안 됩니다(서버가 그 주소에는 묶여 있지도 않습니다).
+
+**형식.**
+
+- 호스트 이름을 쉼표로 구분합니다. 예: `SWB_LIVE_HOSTS=live.example.com,claude.example.org`. 이름 앞뒤 공백은 무시하고 대소문자는 구분하지 않습니다.
+- 이름만 적습니다. `http://`, 경로, 와일드카드는 쓸 수 없습니다(`*.example.com`은 아무것도 맞지 않습니다).
+- 이름 `n`은 `n`, `n:80`, `n:443`으로 받습니다. 표준 포트의 프록시라면 목록에 포트를 적지 않아도 됩니다.
+- `live.example.com:8443`이나 `127.0.0.1:5000`처럼 포트가 붙은 이름은 적은 그대로만 받습니다. 다른 포트의 프록시나, 로컬 포트가 서버 포트와 다른 SSH 터널에는 이 형태를 쓰세요(`ssh -L 5000:127.0.0.1:4317 호스트`를 쓰면 브라우저가 `Host: 127.0.0.1:5000`을 보내는데, 목록에 없으면 거부됩니다).
+- 비어 있거나 설정하지 않으면 아무것도 더하지 않습니다.
+
+**언제 필요한가.**
+
+- 브라우저가 쓴 원래 `Host`를 그대로 실시간 서버로 넘기는 리버스 프록시(nginx, Caddy, Traefik, Cloudflare 터널 등): 그 이름을 적습니다.
+- 로컬 포트가 서버 포트와 다른 SSH 터널이나 포트 매핑(위 참고).
+- 프록시가 `Host`를 업스트림 주소로 바꿔 보낼 때(nginx 기본 `proxy_pass http://127.0.0.1:4317;`는 `Host: 127.0.0.1:4317`을 보냄)나, 터널 양끝 포트가 같을 때는 필요 없습니다.
+
+**어디에 설정하나.** 이 변수는 `/swb live`가 Claude Code의 자식 프로세스로 띄우는 실시간 서버(`tools/live.mjs`)가 읽습니다. 그래서 Claude Code를 시작할 때 그 환경에 들어 있어야 하고, 서버가 시작될 때 적용됩니다.
+
+1. Claude Code를 띄우는 셸에서 설정합니다. bash·zsh는 `export SWB_LIVE_HOSTS=live.example.com`, PowerShell은 `$env:SWB_LIVE_HOSTS = "live.example.com"`, cmd는 `set SWB_LIVE_HOSTS=live.example.com`. 사용 중인 Claude Code 버전의 설정에 `env` 항목이 있다면 거기에 적어도 됩니다.
+2. Claude Code를 다시 시작합니다. 이미 실시간 보기가 떠 있었다면 `/swb live stop` 뒤 `/swb live`를 다시 실행하세요. 실행 중인 서버는 시작할 때의 목록을 그대로 씁니다.
+
+**앞단의 리버스 프록시.** 서버는 `127.0.0.1`에서 평문 HTTP만 하므로, 프록시는 같은 머신에서 돌거나 터널로 닿아야 합니다. 스트림은 Server-Sent Events이므로 버퍼링하지 말고 열어 두어야 합니다.
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:4317;
+  proxy_set_header Host $host;       # SWB_LIVE_HOSTS에 적은 이름
+  proxy_http_version 1.1;
+  proxy_buffering off;               # 이벤트를 붙잡아 두지 않게
+  proxy_read_timeout 3600s;          # 스트림은 오래 열려 있음
+}
+```
+
+서버는 이미 `X-Accel-Buffering: no`를 보내고 15초마다 `: ping` 주석 줄을 보내므로, 대부분의 프록시가 스트림을 버퍼링하거나 유휴 연결로 닫는 것을 막아 줍니다.
+
+**보안.** 실시간 서버에는 자체 로그인이 없습니다. 목록에 적은 이름으로 접속할 수 있는 사람은 화면에 보이는 모든 것을 봅니다. 프롬프트(한 건당 2000자까지, 비밀은 휴리스틱으로 가림), 서브에이전트에게 준 브리프와 돌려받은 결과, 명령 요약, Codex 작업 문구가 그것입니다. 앞단에 접근 제어(VPN, 인증이 있는 프록시, 신원 기반 터널)를 두고, 직접 관리하는 이름만 적으세요. 프롬프트가 머신 밖으로 나가면 안 된다면 `/swb live --no-prompts`로 시작하세요. 남에게 보여 주기 곤란한 저장소에서는 보기를 띄워 두지 마세요.
+
+**동작하지 않을 때.**
+
+- 페이지가 `403`: 브라우저가 보낸 `Host`가 목록에 없습니다. 그 머신에서 `curl -s -o /dev/null -w "%{http_code}\n" -H "Host: live.example.com" http://127.0.0.1:4317/`로 확인하세요(목록에 있으면 `200`).
+- 페이지는 열리는데 `● 대기`에서 멈추거나 이벤트가 안 옴: 프록시가 스트림을 버퍼링하거나 닫고 있거나(위 nginx 설정), 플러그인이 피드를 기록하지 못하는 경우입니다("live feed cannot be written" 알림과 `/swb live`를 보세요).
+- 변수를 설정했는데 그대로: 서버가 설정 전에 떠 있었거나, 변수가 없는 셸에서 Claude Code를 띄운 것입니다. Claude Code와 실시간 보기를 다시 시작하세요.
 
 ### 프로젝트 Guard 파일
 
