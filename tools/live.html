@@ -718,8 +718,8 @@ function handle(ev){
     case 'turn':
       S.turn++;
       var pct = typeof ev.contextPercent === 'number' ? ev.contextPercent : (typeof ev.contextTokens === 'number' && ev.contextWindow > 0 ? Math.round(ev.contextTokens / ev.contextWindow * 100) : null);
-      S.ctx = { p: pct == null ? null : Math.max(0, Math.min(100, Math.round(pct))), tokens: typeof ev.contextTokens === 'number' ? ev.contextTokens : null, window: typeof ev.contextWindow === 'number' ? ev.contextWindow : null };
-      if (S.ctx.p != null) { S.ctxHist.push(S.ctx.p); if (S.ctxHist.length > 30) S.ctxHist.shift(); }
+      if (pct != null || typeof ev.contextTokens === 'number' || typeof ev.contextWindow === 'number') S.ctx = { p: pct == null ? null : Math.max(0, Math.min(100, Math.round(pct))), tokens: typeof ev.contextTokens === 'number' ? ev.contextTokens : null, window: typeof ev.contextWindow === 'number' ? ev.contextWindow : null };
+      if (S.ctx && S.ctx.p != null && pct != null) { S.ctxHist.push(S.ctx.p); if (S.ctxHist.length > 30) S.ctxHist.shift(); }
       addTokens(ev);
       addLog(at, 'turn', 'c-guard', [ev.aborted ? L('turn aborted (Esc)', '턴 중단 (Esc)') : L('turn done', '턴 완료')], ev.aborted ? 'block' : '', ev.aborted ? 'ABORT' : 'DONE', ev.aborted ? 'block' : 'info');
       break;

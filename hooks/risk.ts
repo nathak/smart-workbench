@@ -29,11 +29,16 @@ const SECRET_NAME = String.raw`(?:\w*(?:TOKEN|SECRET|PASSWORD|PASSWD)|(?:\w*_)?(
 // does not look secret (DB=xyz) and a bare pasted token without a known prefix stay visible.
 export function redact(text: string): string {
   return text
-    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g, '[private key]')
-    .replace(/(\b[a-z][\w+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, '$1***@')
-    .replace(/\b(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 ***')
-    .replace(/\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35})/g, '***')
-    .replace(new RegExp(String.raw`\b(${SECRET_NAME})(\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;]+)`, 'gi'), '$1$2***')
+    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|$)/g, '[private key]')
+    .replace(/(\b[a-z][\w+.-]{0,31}:\/\/)[^\s/:@]+:[^\s/]+@/gi, '$1***@')
+    // The token must hold a digit, so "Basic authentication" stays and "Bearer abc123xyz9" does not.
+    .replace(/\b(Bearer|Basic)\s+(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{8,}/gi, '$1 ***')
+    .replace(
+      /\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}|(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|npm_[A-Za-z0-9]{30,}|hf_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})/g,
+      '***',
+    )
+    // The name may be quoted, as in JSON: "api_key": "abc".
+    .replace(new RegExp(String.raw`\b(${SECRET_NAME})(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;]+)`, 'gi'), '$1$2***')
 }
 
 // stripped: also read the command with its command substitutions removed, so "rm $(x) -rf d" is seen while the flags
