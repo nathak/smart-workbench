@@ -167,10 +167,13 @@ describe('failure keys', () => {
 
 describe('image run check', () => {
   test('lists the paths git reports and the ones an image run should not have written', async () => {
-    expect(codex.porcelainPaths(' M src/a.ts\0?? assets/x.png\0R  new.png\0old.png\0')).toEqual(['src/a.ts', 'assets/x.png', 'new.png'])
+    expect(codex.porcelainPaths(' M src/a.ts\0?? assets/x.png\0R  new.png\0old.png\0 R moved.ts\0was.ts\0?? last.ts\0')).toEqual(['src/a.ts', 'assets/x.png', 'new.png', 'moved.ts', 'last.ts'])
     expect(codex.isImagePath('assets/x.png')).toBe(true)
     expect(codex.isImagePath('public/img/a-b.JPG')).toBe(true)
     for (const bad of ['src/a.ts', 'assets/x.svg', 'assets/../src/x.png', 'docs/x.png', 'assets/a b.png']) expect(codex.isImagePath(bad)).toBe(false)
-    expect(codex.strayWrites(['src/a.ts'], ['src/a.ts', 'assets/x.png', 'src/b.ts'])).toEqual(['src/b.ts'])
+    const before = new Map([['src/a.ts', '10:1'], ['README.md', '5:1']])
+    const after = new Map([['src/a.ts', '10:1'], ['README.md', '7:2'], ['assets/x.png', '900:3'], ['src/b.ts', '3:3']])
+    // New files, and a file that was already modified and was edited again, count; the picture does not.
+    expect(codex.strayWrites(before, after)).toEqual(['README.md', 'src/b.ts'])
   })
 })

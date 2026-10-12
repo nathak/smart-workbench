@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { get } from 'node:http'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -74,7 +74,7 @@ try {
   for (let i = 0; i < 40 && !first.out.stdout.includes('SmartWorkbench live:'); i++) await sleep(100)
   check(first.out.stdout.includes('SmartWorkbench live:'), 'starts and prints its address')
   check(existsSync(feed), 'creates the feed after listening')
-  check(readFileSync(join(dir, '.claude', 'smartworkbench-live.pid'), 'utf8') === String(first.child.pid), 'names its process beside the feed')
+  check(readFileSync(join(dir, '.claude', 'smartworkbench-live.pid'), 'utf8') === `${hostname()} ${first.child.pid}`, 'names its host and process beside the feed')
 
   appendFileSync(feed, '{"kind":"a"}\n{"kind":"b"}\n')
   await sleep(400)
