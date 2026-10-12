@@ -131,10 +131,12 @@ async function appendLine($: $, path: string, text: string): Promise<void> {
 }
 
 // The text a prompt event carries for the live view's per-segment list: secrets masked, cut, with its real length.
+// Only the first PROMPT_SCAN characters are scanned for secrets, so a huge paste cannot make the masking slow; nothing past PROMPT_MAX is kept.
 const PROMPT_MAX = 2000
+const PROMPT_SCAN = 8000
 
 function promptOf(live: Live, text: string): Record<string, unknown> {
-  return live.livePrompts === false ? {} : { prompt: model.cut(redact(text), PROMPT_MAX), promptLength: text.length }
+  return live.livePrompts === false ? {} : { prompt: model.cut(redact(text.slice(0, PROMPT_SCAN)), PROMPT_MAX), promptLength: text.length }
 }
 
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
@@ -1793,7 +1795,7 @@ export const register: Register = on => {
     // Own work only, for checking the performance targets with --debug.
     $.ui.log(`SmartWorkbench timing: prompt.submit ${(await $.clock.now()) - startedAt}ms before the prompt went on`, { to: 'debug' })
 
-    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(e.text).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
+    await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(e.text.slice(0, PROMPT_SCAN)).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
 
     const all = [...blocks, ...loopBlocks]
 
