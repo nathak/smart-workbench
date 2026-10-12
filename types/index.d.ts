@@ -226,6 +226,8 @@ export type LoopState = {
   // When the current pass began, and how many passes in a row changed no file.
   passAt?: number
   idle?: number
+  // Hash of the git working tree when the last pass ended (infinite loops in a git repository only), to see edits made by shell commands.
+  treeHash?: string
 }
 
 export type SessionAllow = { key: string; label: string; at: number }

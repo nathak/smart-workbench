@@ -243,6 +243,16 @@ async function gitPaths($: $): Promise<string[] | undefined> {
   return ran?.exitCode === 0 ? codex.porcelainPaths(ran.stdout) : undefined
 }
 
+// A fingerprint of the git working tree (changed paths and their diff), or undefined outside a repository or when git fails.
+async function workTreeHash($: $): Promise<string | undefined> {
+  const status = await $.process.run(['git', 'status', '--porcelain=v1', '-z', '-uall']).catch(() => undefined)
+  if (status?.exitCode !== 0) return undefined
+  const diff = await $.process.run(['git', 'diff', '-U0', '--no-color', '--no-ext-diff', 'HEAD']).catch(() => undefined)
+  if (diff?.exitCode !== 0) return undefined
+
+  return loop.treeHash(`${status.stdout}\0${diff.stdout}`)
+}
+
 async function refreshUsage($: $): Promise<ContextNumbers> {
   const { context } = await $.session.usage()
   const numbers: ContextNumbers = { contextPercent: context.percent, contextTokens: context.tokens, contextWindow: context.window }
@@ -948,7 +958,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     }
 
     if (live.loop) return { text: 'A loop is already running. /swb loop stop first.' }
-    const started = loop.begin(command.items, command.limit, await $.clock.now())
+    const started = { ...loop.begin(command.items, command.limit, await $.clock.now()), ...(command.limit === null ? { treeHash: await workTreeHash($) } : {}) }
     await setLive($, current => ({ ...current, loop: started }))
 
     // The host refuses a prompt from inside a command; the first pass goes out when this command's turn completes.
@@ -2221,7 +2231,10 @@ export const register: Register = on => {
     if (!running || running.pending) return result
 
     const lastEdit = lastAnyEdit(wb.changed)
-    const step = loop.advance(running, lastEdit !== undefined && lastEdit >= (running.passAt ?? 0), await $.clock.now())
+    // An infinite loop that only edits through the shell still counts as working when the git working tree changed.
+    const hash = running.limit === null ? await workTreeHash($) : undefined
+    const isTreeChanged = hash !== undefined && running.treeHash !== undefined && hash !== running.treeHash
+    const step = loop.advance(running, (lastEdit !== undefined && lastEdit >= (running.passAt ?? 0)) || isTreeChanged, await $.clock.now(), hash)
     // A /swb loop stop that came in while this hook awaited must stay stopped.
     let isGone = false
     await setLive($, current => {

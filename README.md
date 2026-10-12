@@ -183,7 +183,7 @@ Choices are kept per project. The tab also shows the session's current model set
 - `/swb loop 5 fix the lint errors; run the tests` runs five passes; `inf` (or `forever`, `무한`) runs until stopped. A count is 1 to 1000. Items split on `;` and are all done, in order, on every pass.
 - A pass counts when the turn really ends: the loop uses the same Stop hold as team mode's final check, so with team mode on a pass that changed code goes through the Opus final check first, then the next pass starts.
 - `/swb loop status` shows the passes done; `/swb loop stop` ends it after the current turn. A prompt you type yourself also ends it, so you always take the session back.
-- To stop an `inf` loop: `/swb loop stop`, or press Esc and type any prompt. An `inf` loop also ends by itself after 3 passes in a row that change no file with Edit, Write, MultiEdit or NotebookEdit; changes made only by shell commands do not count. Each pass costs a full turn (and, with team mode, an Opus final check when code changed), so prefer a count unless you are watching.
+- To stop an `inf` loop: `/swb loop stop`, or press Esc and type any prompt. An `inf` loop also ends by itself after 3 passes in a row that change no file: no Edit, Write, MultiEdit or NotebookEdit edit and, in a git repository, no change to the working tree (so edits made by shell commands count there; outside git they do not). The tree is compared by hash with two read-only git calls at the end of each pass of an `inf` loop. Build output that is not git-ignored and changes every pass keeps an `inf` loop alive until you stop it. Each pass costs a full turn (and, with team mode, an Opus final check when code changed), so prefer a count unless you are watching.
 - Loop state lives in the session only; a restart never resumes one. The audit log records `loop.start`, `loop.pass`, `loop.done`, `loop.stop` and `loop.cancel`.
 
 ### Built-in guard rules (Balanced)
@@ -498,7 +498,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - `/swb loop 5 린트 오류 고치기; 테스트 실행` 은 5회 반복하고, `inf`(또는 `forever`, `무한`)는 멈출 때까지 반복합니다. 횟수는 1~1000입니다. 항목은 `;` 로 나누며, 매 회차에 순서대로 모두 수행합니다.
 - 회차는 턴이 실제로 끝날 때 셉니다. 팀 모드의 최종 점검과 같은 Stop 지점을 쓰므로, 팀 모드에서는 코드를 바꾼 회차가 Opus 최종 점검을 먼저 거친 뒤 다음 회차가 시작됩니다.
 - `/swb loop status` 로 진행 횟수를 보고, `/swb loop stop` 으로 현재 턴이 끝난 뒤 종료합니다. 직접 프롬프트를 입력해도 종료되어 세션은 항상 사용자에게 돌아옵니다.
-- `inf` 루프를 멈추려면 `/swb loop stop`, 또는 Esc 를 누르고 아무 프롬프트나 입력하세요. `inf` 루프는 Edit·Write·MultiEdit·NotebookEdit 로 파일을 바꾸지 않은 회차가 3번 이어지면 스스로 끝납니다(셸 명령으로만 바꾼 것은 세지 않습니다). 한 회차가 한 턴 분량의 비용(팀 모드에서 코드를 바꾸면 Opus 최종 점검 포함)이므로 지켜보지 않을 때는 횟수를 지정하세요.
+- `inf` 루프를 멈추려면 `/swb loop stop`, 또는 Esc 를 누르고 아무 프롬프트나 입력하세요. `inf` 루프는 파일을 바꾸지 않은 회차가 3번 이어지면 스스로 끝납니다. 편집 도구(Edit·Write·MultiEdit·NotebookEdit)로 바꾼 것이 없고, git 저장소라면 작업 트리도 그대로일 때입니다(git 저장소에서는 셸 명령으로 고친 것도 변경으로 칩니다. git이 아니면 세지 않습니다). `inf` 루프는 매 회차 끝에 읽기 전용 git 명령 2번으로 작업 트리를 해시로 비교합니다. `.gitignore`에 없는 빌드 산출물이 매 회차 바뀌면 `inf` 루프는 멈추기 전까지 계속됩니다. 한 회차가 한 턴 분량의 비용(팀 모드에서 코드를 바꾸면 Opus 최종 점검 포함)이므로 지켜보지 않을 때는 횟수를 지정하세요.
 - 루프 상태는 세션에만 있어 재시작해도 이어지지 않습니다. 감사 로그에 `loop.start`·`loop.pass`·`loop.done`·`loop.stop`·`loop.cancel` 이 남습니다.
 
 ### 기본 Guard 규칙 (Balanced)

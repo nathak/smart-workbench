@@ -656,6 +656,32 @@ test('a loop in team mode runs the Opus final check on a later pass before the n
   expect(after.block).not.toContain('pass')
 })
 
+const TREE_STATUS = 'git status --porcelain=v1 -z -uall'
+const TREE_DIFF = 'git diff -U0 --no-color --no-ext-diff HEAD'
+
+async function inifiniteLoopWithTrees($: Parameters<Parameters<typeof test>[1]>[0], on: On, trees: string[]) {
+  world(on, { commands: { [TREE_STATUS]: trees.map(stdout => ({ exitCode: 0, stdout })), [TREE_DIFF]: { exitCode: 0, stdout: '' } } })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'loop inf tidy', ...COMMAND })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
+
+test('an infinite loop that only edits through the shell keeps going while the git working tree changes', async ($, on) => {
+  await inifiniteLoopWithTrees($, on, [' M a\0', ' M a\0 M b\0', ' M a\0 M b\0 M c\0', ' M a\0 M b\0 M c\0 M d\0', ' M a\0 M b\0 M c\0 M d\0 M e\0'])
+  for (let pass = 2; pass <= 5; pass++) expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain(`pass ${pass}`)
+})
+
+test('an infinite loop whose working tree stays the same ends after the idle limit', async ($, on) => {
+  await inifiniteLoopWithTrees($, on, [' M a\0'])
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('pass 2')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('pass 3')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+  expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('No loop is running')
+})
+
 test('the command\'s own stop is not a pass, and a slash command neither ends nor consumes the loop', async ($, on) => {
   world(on)
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
