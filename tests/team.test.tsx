@@ -3,6 +3,7 @@ import type { On } from 'claude-code'
 
 import type { Workbench } from '../types'
 import { workflowLabel, workflowOf } from '../hooks/workflow'
+import * as crew from '../hooks/crew'
 
 const CWD = '/work'
 const PLUGIN = 'smartworkbench'
@@ -1006,6 +1007,13 @@ test('the live feed turn line carries the context and the turn tokens; --no-prom
   const prompt = feedLines(writes).filter(one => one.kind === 'prompt').at(-1)
   expect(prompt?.text).toBe('secret plan')
   expect(prompt?.prompt).toBeUndefined()
+})
+
+test('the Team tab names the version an alias usually stands for and leaves other values alone', () => {
+  expect(crew.withVersion('opus')).toBe('opus (claude-opus-5-5)')
+  expect(crew.withVersion('opus[1m]')).toBe('opus[1m] (claude-opus-5-5)')
+  expect(crew.withVersion('inherit')).toBe('inherit')
+  expect(crew.withVersion('claude-opus-5-5')).toBe('claude-opus-5-5')
 })
 
 test('a Workflow call is shown by the name and description its script states, with the script as input; ok means started, not finished', async ($, on) => {

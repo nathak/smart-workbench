@@ -20,6 +20,23 @@ export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export const LEAD_EFFORTS = ['default', ...EFFORTS] as const
 export const AGENT_MODELS = ['haiku', 'sonnet', 'opus', 'fable', 'inherit'] as const
 
+// The version each alias stands for at the time of writing. Claude Code decides what an alias resolves to, so this is
+// only a hint for the Team tab: a model that is not here (or an alias that moved on) is shown as the alias alone.
+export const ALIAS_VERSIONS: Readonly<Record<string, string>> = {
+  haiku: 'claude-haiku-5-5',
+  sonnet: 'claude-sonnet-5-5',
+  opus: 'claude-opus-5-5',
+  fable: 'claude-fable-5-1',
+}
+
+// "opus" -> "opus (claude-opus-5-5)"; a value with a suffix such as "opus[1m]" keeps it; unknown values stay as they are.
+export function withVersion(model: string): string {
+  const alias = /^([a-z]+)(\[.*\])?$/.exec(model)
+  const version = alias ? ALIAS_VERSIONS[alias[1] ?? ''] : undefined
+
+  return version ? `${model} (${version})` : model
+}
+
 export function roleOf(team: TeamConfig | undefined, role: TeamRoleName): TeamRole {
   return team?.[role] ?? DEFAULT_ROLES[role]
 }
