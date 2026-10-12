@@ -896,6 +896,22 @@ test('the live feed masks secrets in a command summary and a token cut by the sc
   expect(feedLines(writes).filter(one => one.kind === 'prompt').at(-1)?.prompt).toBeUndefined()
 })
 
+test('the live feed says whether a prompt was cut or only partly scanned, not by guessing from lengths', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: `${'word '.repeat(300)}API_KEY=${'z'.repeat(1000)}`, ...COMPOSER })
+  await $.prompt.submit({ text: 'word '.repeat(1500), ...COMPOSER })
+  await $.prompt.submit({ text: 'word '.repeat(2000) + 'tail '.repeat(1000), ...COMPOSER })
+
+  const [masked, cut, scanned] = feedLines(writes).filter(one => one.kind === 'prompt')
+  expect(masked?.promptCut).toBeUndefined()
+  expect(cut?.promptCut).toBe(true)
+  expect(cut?.promptScanned).toBeUndefined()
+  expect(scanned?.promptScanned).toBe(8000)
+})
+
 test('the live feed carries the brief of an Agent call and the text of a Codex task, not of other calls', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { files: { ...FEED_FILES, ...CODEX_FILES }, commands: { ...FEED_RUNS, ...CODEX_RUNS }, processed: writes })

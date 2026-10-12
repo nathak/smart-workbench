@@ -67,6 +67,7 @@ body.ready .box{transition:box-shadow .2s}
 #flow .edge{fill:none;stroke:var(--faint);stroke-width:1.2;stroke-dasharray:4 4}
 #flow .edge.hot{stroke:var(--fg);stroke-width:2;stroke-dasharray:none}
 #flow .hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:pointer}
+#flow .hit:focus-visible{stroke:var(--dim);stroke-opacity:.35;outline:none}
 #flow .ec{fill:var(--dim);font-size:10px;text-anchor:start}
 #flow .pk{stroke:var(--win);stroke-width:1.5;fill:var(--fg)}
 #flow .pk.allow{fill:var(--allow)}#flow .pk.ask{fill:var(--ask)}#flow .pk.block{fill:var(--block)}#flow .pk.hold{fill:var(--hold)}#flow .pk.loop{fill:var(--loop)}#flow .pk.codex{fill:var(--codex)}
@@ -265,7 +266,7 @@ var NODE_NAME = { u: ['user', '사용자'], l: ['Sonnet lead', 'Sonnet 리드'],
 var EDGES = { 'u-l': ['u', 'l', 'v'], 'l-g': ['l', 'g', 'v'], 'g-d': ['g', 'd', 'v'], 'd-e': ['d', 'e', 'v'],
   'g-w': ['g', 'w', 'gl', 0.75, 0.5, 0], 'p-l': ['p', 'l', 'gr', 0.5, 0.5, 0], 'g-o': ['o', 'g', 'h', 0.5, 0.3, 4], 'x-g': ['x', 'g', 'h', 0.5, 0.6, 8] };
 var CLS = Object.assign(Object.create(null), { allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop', info: 'info' });
-var MAX_LIVE = 16, MAX_QUEUE = 50, MAX_PACKETS = 300, HOP_MS = 450, MAX_PROMPTS = 100;
+var MAX_LIVE = 16, MAX_QUEUE = 50, MAX_PACKETS = 300, HOP_MS = 450, MAX_PROMPTS = 100, MAX_INFLIGHT = 200;
 var NS = 'http://www.w3.org/2000/svg';
 var motion = true, speed = 1, packetSeq = 0;
 var E, P, PR, R, live, queue, parked, edgeEl = {}, countEl = {}, boxes = {};
@@ -338,7 +339,7 @@ function flowBuild(){
   Object.keys(NODES).forEach(function(n){ boxes[n] = $(NODES[n]); });
   Object.keys(EDGES).forEach(function(id){
     edgeEl[id] = svg.appendChild(sv('path', { 'class': 'edge' }));
-    var hit = svg.appendChild(sv('path', { 'class': 'hit', 'data-edge': id }));
+    var hit = svg.appendChild(sv('path', { 'class': 'hit', 'data-edge': id, tabindex: '0', role: 'button' }));
     edgeEl[id].hitEl = hit;
     countEl[id] = svg.appendChild(sv('text', { 'class': 'ec' }));
   });
@@ -490,7 +491,7 @@ function flow(ev){
   var routes = routeOf(ev, ctx);
   if (typeof ev.prompt === 'string' && ev.prompt) {
     var tag = ev.kind === 'prompt' ? (ev.loop ? 'LOOP' : ev.origin === 'plugin' ? 'PLUGIN' : 'PROMPT') : ev.codex ? 'CODEX' : cut(String(ev.subagent || 'agent').replace(/^.*:/, ''), 12);
-    PR.push({ at: ev.at || Date.now(), tag: tag, loop: !!ev.loop, paths: routes.map(function(r){ return r.path; }), prompt: ev.prompt, len: typeof ev.promptLength === 'number' ? ev.promptLength : ev.prompt.length });
+    PR.push({ at: ev.at || Date.now(), tag: tag, loop: !!ev.loop, cut: ev.promptCut === true || (ev.promptCut === undefined && ev.promptLength > 2000 && ev.prompt.length >= 2000), scanned: typeof ev.promptScanned === 'number' ? ev.promptScanned : 0, paths: routes.map(function(r){ return r.path; }), prompt: ev.prompt, len: typeof ev.promptLength === 'number' ? ev.promptLength : ev.prompt.length });
     if (PR.length > MAX_PROMPTS) PR.shift();
   }
   routes.forEach(function(route){
@@ -664,7 +665,7 @@ function handle(ev){
       var row = addLog(at, who, whoClass, [cut(ev.tool, 40), ' ', ['i', cut(ev.summary, 80)]], kind, String(ev.policy).toUpperCase(), ev.policy);
       entry.row = row;
       if (typeof ev.prompt === 'string' && ev.prompt) expandable(row, ev.prompt);
-      if (ev.policy !== 'block') inflight.set(String(ev.id), entry);
+      if (ev.policy !== 'block') { inflight.set(String(ev.id), entry); if (inflight.size > MAX_INFLIGHT) inflight.delete(inflight.keys().next().value); }
       break;
     }
     case 'tool.end': {
@@ -862,7 +863,7 @@ function drawRefresh(){
     prow.appendChild(el('span', 'tm', clock(r.at)));
     prow.appendChild(el('span', 'tag ' + (r.loop ? 'loop' : ''), r.tag));
     prow.appendChild(el('span', 'm', cut(r.prompt, 100)));
-    prow.appendChild(el('span', 'w', r.len + L(' chars', ' 자') + (r.len > 2000 ? L(' · cut at 2000', ' · 2000자에서 잘림') : '')));
+    prow.appendChild(el('span', 'w', r.len + L(' chars', ' 자') + (r.cut ? L(' · cut at 2000', ' · 2000자에서 잘림') : '') + (r.scanned ? L(' · only the first ' + r.scanned + ' characters were scanned for secrets', ' · 앞 ' + r.scanned + '자만 비밀 검사') : '')));
     var full = el('pre', 'full', keep(r.prompt));
     full.hidden = true;
     prow.onclick = function(){ full.hidden = !full.hidden; };
@@ -914,6 +915,10 @@ function uiBuild(){
     if (id) openDrawer({ type: 'edge', id: id }, null);
     else if (n) openDrawer({ type: 'node', id: n }, boxes[n]);
   });
+  grid.addEventListener('keydown', function(e){
+    var id = e.target.getAttribute && e.target.getAttribute('data-edge');
+    if (id && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openDrawer({ type: 'edge', id: id }, e.target); }
+  });
   Object.keys(boxes).forEach(function(n){
     boxes[n].tabIndex = 0;
     boxes[n].setAttribute('role', 'button');
@@ -949,6 +954,7 @@ function translate(){
   $('lang').textContent = lang === 'ko' ? 'EN' : '한국어';
   $('lang').title = lang === 'ko' ? 'Switch to English' : '한글로 보기';
   $('title').textContent = connected ? 'swb live — ' + location.host : L('swb live — connecting', 'swb live — 연결 중');
+  Object.keys(edgeEl).forEach(function(id){ if (edgeEl[id].hitEl) edgeEl[id].hitEl.setAttribute('aria-label', edgeLabel(id)); });
   syncTools();
   $('state').textContent = connected ? '● LIVE' : (everOpened ? L('● disconnected', '● 끊김') : L('● waiting', '● 대기'));
 }

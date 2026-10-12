@@ -141,7 +141,16 @@ function scanned(text: string): string {
 }
 
 function promptOf(live: Live, text: string): Record<string, unknown> {
-  return live.livePrompts === false ? {} : { prompt: model.cut(redact(scanned(text)), PROMPT_MAX), promptLength: text.length }
+  if (live.livePrompts === false) return {}
+  const masked = redact(scanned(text))
+
+  return {
+    prompt: model.cut(masked, PROMPT_MAX),
+    promptLength: text.length,
+    // Masking alone can shorten a text, so "cut" and "only the start was scanned" are sent as facts, not guessed from lengths.
+    ...(masked.length > PROMPT_MAX ? { promptCut: true } : {}),
+    ...(text.length > PROMPT_SCAN ? { promptScanned: PROMPT_SCAN } : {}),
+  }
 }
 
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
@@ -779,6 +788,8 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   let output = ''
   const handle = { url, stop: () => void Promise.resolve(iterator.return?.()).catch(() => undefined) }
 
+  // The first of "the server printed its address" and "3 seconds passed" decides, so a late address cannot revive a start that was reported as failed.
+  let isSettled = false
   const started = new Promise<boolean>(resolve => {
     void (async () => {
       try {
@@ -786,7 +797,8 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
           const step = await iterator.next()
           if (step.done) break
           output += step.value.text
-          if (output.includes('SmartWorkbench live:')) {
+          if (!isSettled && output.includes('SmartWorkbench live:')) {
+            isSettled = true
             liveServer = handle
             resolve(true)
           }
@@ -798,7 +810,16 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
       resolve(false)
     })()
   })
-  const timeout = $.clock.sleep(3000).then(() => false, () => false)
+  const timeout = $.clock.sleep(3000).then(
+    () => {
+      isSettled = true
+      return false
+    },
+    () => {
+      isSettled = true
+      return false
+    },
+  )
 
   if (await Promise.race([started, timeout])) {
     return { text: `Live view: ${url}\nOpen it in a browser. /swb live stop to end it. The feed holds prompts up to 2000 characters with secrets masked (a heuristic); /swb live --no-prompts keeps only their first 120 characters. Do not commit .claude/smartworkbench-live.jsonl.` }

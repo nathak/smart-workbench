@@ -48,6 +48,7 @@ export const EXPLORER_SPEC = {
     'Answer exactly the question you were given by reading files, searching code and, when asked, reading documentation.',
     'Report findings, not narration: file paths with line numbers, short quotes of the relevant code, and what you could not find.',
     'Keep it under 300 words unless the question needs a list. Never edit files and never guess at code you did not read.',
+    'If you have used about 15 tool calls, stop reading and answer from what you found, saying what is still unchecked.',
   ].join('\n'),
   tools: ['Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch'],
   model: 'haiku',
@@ -74,10 +75,11 @@ export const ADVISOR_SPEC = {
     'RISKS: what could still go wrong, most likely first.',
     'MISSING: requirements, edge cases, tests or done conditions not covered.',
     'Be specific and brief; skip praise and restating the brief.',
+    'If you have used about 20 tool calls, stop reading and deliver your answer from what you have verified, marking the rest UNVERIFIED.',
   ].join('\n'),
   tools: ['Read', 'Grep', 'Glob', 'LS'],
   model: 'opus',
-  maxTurns: 25,
+  maxTurns: 35,
 } as const
 
 // An edit this small needs no design; the limits also cap many small edits adding up to a big one.
