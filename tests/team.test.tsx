@@ -1053,6 +1053,20 @@ test('the workflow name is read from the script text without running it', () => 
   const started = Date.now()
   workflowOf({ script: 'x'.repeat(300000) })
   expect(Date.now() - started).toBeLessThan(200)
+  const hostile = `export const meta = {${"name:'".repeat(400)}`
+  const t2 = Date.now()
+  workflowOf({ script: hostile })
+  expect(Date.now() - t2).toBeLessThan(200)
+  expect(workflowOf({ scriptPath: '/p/a.mjs', args: { k: 1 } }).text).toBe('args: {\n  "k": 1\n}')
+})
+
+test('a Workflow call that errors or is blocked does not claim to have started', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, fail: command => command === 'Workflow' })
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Workflow', name: 'nightly' } as unknown as Parameters<typeof $.tool.call>[0])
+  const ends = feedLines(writes).filter(one => one.kind === 'tool.end')
+  expect(ends.some(one => one.workflowBg === true)).toBe(false)
 })
 
 test('a live feed that cannot be written is reported once, shown by /swb live, and a line says when writing works again', async ($, on) => {

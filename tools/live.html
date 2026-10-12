@@ -513,7 +513,7 @@ var EDIT = Object.assign(Object.create(null), { Edit: 1, Write: 1, NotebookEdit:
 function plain(o){ return Object.assign(Object.create(null), o); }
 var TAGS = plain({ allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop' });
 function reset(){
-  S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, codexReviews: 0, codexTasks: 0, codexBg: 0, codexOn: null, expCalls: 0, subCalls: 0, wfRuns: 0, wfBg: 0, leadCalls: 0,
+  S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, codexReviews: 0, codexTasks: 0, codexBg: 0, codexOn: null, expCalls: 0, subCalls: 0, wfRuns: 0, leadCalls: 0,
     edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '', ctx: null, ctxHist: [], tok: plain({}) };
   inflight = new Map();
   flowReset();
@@ -702,7 +702,6 @@ function handle(ev){
         line.appendChild(el('i', null, ev.workflowBg ? L('→ started · runs in background, its end is not shown here', '→ 시작됨 · 백그라운드 실행, 끝은 여기 표시되지 않음') : '→ ' + cut(ev.outcome, 20)));
         if (ev.outcome === 'error') c.row.className += ' block';
       }
-      if (ev.workflowBg) S.wfBg++;
       inflight.delete(String(ev.id));
       break;
     }
