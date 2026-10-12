@@ -25,6 +25,17 @@ const WHOLE_TREE = String.raw`(?:["']?\.(?:\/+\.?)*\/*["']?|["']?:\/["']?)`
 const CMD = String.raw`(?:^|[;&|(\`]\s*|\b(?:sudo|exec|nohup|time|env)\s+(?:-\S+\s+)*)(?:\S*\/)?`
 const SECRET_NAME = String.raw`(?:\w*(?:TOKEN|SECRET|PASSWORD|PASSWD)|(?:\w*_)?(?:API_?)?KEY)`
 
+// Hides what looks like a secret in text that leaves for the live feed. A heuristic, not a guarantee: a value under a name that
+// does not look secret (DB=xyz) and a bare pasted token without a known prefix stay visible.
+export function redact(text: string): string {
+  return text
+    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g, '[private key]')
+    .replace(/(\b[a-z][\w+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi, '$1***@')
+    .replace(/\b(Bearer|Basic|token)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 ***')
+    .replace(/\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35})/g, '***')
+    .replace(new RegExp(String.raw`\b(${SECRET_NAME})(\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;]+)`, 'gi'), '$1$2***')
+}
+
 // stripped: also read the command with its command substitutions removed, so "rm $(x) -rf d" is seen while the flags
 // inside "rm -f $(ls -tr)" are not taken for rm's own.
 type Rule = { category: string; risk: Risk; policy: Policy; pattern: RegExp; reason: string; raw?: true; stripped?: true }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { classify, commandPrefix, decide, normalisePath, sessionScope } from '../hooks/risk'
+import { classify, commandPrefix, decide, normalisePath, redact, sessionScope } from '../hooks/risk'
 
 describe('risk rules', () => {
   test('destructive git and recursive delete are blocked', async () => {
@@ -305,5 +305,16 @@ describe('paths and command wrappers', () => {
     expect(commandPrefix('timeout .5 pytest')).toBe('pytest')
     expect(commandPrefix('sudo --strange-flag git push')).toBe('git push')
     expect(commandPrefix('timeout 60 npm test')).not.toBe(commandPrefix('timeout 60 pytest'))
+  })
+})
+
+describe('redact', () => {
+  test('masks keys, tokens, credentials in URLs, auth headers and private keys, and leaves plain text', async () => {
+    expect(redact('export API_KEY=abc123 and DB_PASSWORD: "hunter 2"')).toBe('export API_KEY=*** and DB_PASSWORD: ***')
+    expect(redact('use ghp_' + 'a'.repeat(30) + ' or sk-ant-' + 'b'.repeat(20))).toBe('use *** or ***')
+    expect(redact('git clone https://user:pw@example.com/x.git')).toBe('git clone https://***@example.com/x.git')
+    expect(redact('curl -H "Authorization: Bearer abcdefgh12345"')).toContain('Bearer ***')
+    expect(redact('-----BEGIN PRIVATE KEY-----\nzzz\n-----END PRIVATE KEY-----')).toBe('[private key]')
+    expect(redact('fix the login page and run the tests')).toBe('fix the login page and run the tests')
   })
 })

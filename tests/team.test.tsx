@@ -38,6 +38,8 @@ type WorldOptions = {
   processed?: Array<{ argv: string[]; stdin?: string }>
   // Makes these commands fail as a non-zero exit would.
   fail?: (command: string) => boolean
+  // What the engine reports as the session's context use; the default is only the window.
+  context?: { tokens?: number; window: number; percent?: number }
 }
 
 function world(on: On, options: WorldOptions = {}) {
@@ -59,7 +61,7 @@ function world(on: On, options: WorldOptions = {}) {
   })
   on('session.cwd', () => ({ value: CWD }))
   on('session.id', () => ({ value: 'session-a' }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: options.context ?? { window: 200000 }, rateLimits: [] } }))
   on('fs.read', ($, e) => {
     const name = fileAt(e.path)
     if (name === undefined) throw new Error(`ENOENT: ${e.path}`)
@@ -843,6 +845,69 @@ test('the live feed falls back to node when tee is missing or fails, as on Windo
   expect(JSON.parse(viaNode[0]?.stdin ?? '{}')).toMatchObject({ kind: 'prompt', text: 'fix the login' })
   // tee is tried once; after it failed the session stays on node.
   expect(writes.filter(one => one.argv[0] === 'tee').length).toBe(1)
+})
+
+const FEED_FILES = { '.claude/smartworkbench-live.jsonl': '' }
+const FEED_RUNS = { [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } }
+const feedLines = (writes: Array<{ argv: string[]; stdin?: string }>) => writes.filter(one => one.argv[0] === 'tee').map(one => JSON.parse(one.stdin ?? '{}') as Record<string, unknown>)
+
+test('the live feed carries a prompt up to 2000 characters with secrets masked, and the real length', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: `deploy\nAPI_KEY=abc123 ghp_${'x'.repeat(30)}\n-----BEGIN RSA PRIVATE KEY-----\nzzz\n-----END RSA PRIVATE KEY-----`, ...COMPOSER })
+  await $.prompt.submit({ text: 'long '.repeat(1000), ...COMPOSER })
+
+  const prompts = feedLines(writes).filter(one => one.kind === 'prompt')
+  const first = prompts[0] as { text: string; prompt: string }
+  expect(first.prompt).toContain('\n')
+  for (const secret of ['abc123', 'ghp_x', 'zzz']) {
+    expect(first.prompt).not.toContain(secret)
+    expect(first.text).not.toContain(secret)
+  }
+  expect(first.prompt).toContain('[private key]')
+  expect(first.prompt).toContain('***')
+  const long = prompts[1] as { prompt: string; promptLength: number }
+  expect(long.prompt.length).toBe(2000)
+  expect(long.prompt.endsWith('…')).toBe(true)
+  expect(long.promptLength).toBe(5000)
+})
+
+test('the live feed carries the brief of an Agent call and the text of a Codex task, not of other calls', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: { ...FEED_FILES, ...CODEX_FILES }, commands: { ...FEED_RUNS, ...CODEX_RUNS }, processed: writes })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  await $.tool.call({ ...advisorCall, prompt: 'check the plan' })
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/a.ts` })
+  await $.tool.call({ tool: 'Bash', command: `node ${CODEX_DIR}/scripts/codex-companion.mjs task "why does login fail"` })
+
+  const starts = feedLines(writes).filter(one => one.kind === 'tool.start')
+  expect(starts.find(one => one.tool === 'Agent')).toMatchObject({ prompt: 'check the plan', subagent: ADVISOR })
+  expect(starts.find(one => one.tool === 'Read')?.prompt).toBeUndefined()
+  expect(String(starts.find(one => one.codex === 'task')?.prompt)).toContain('why does login fail')
+})
+
+test('the live feed turn line carries the context and the turn tokens; --no-prompts keeps only the start of a prompt', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, context: { tokens: 84000, window: 200000, percent: 42 } })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 90, cache_creation_input_tokens: 0, model: 'claude-sonnet-x' } })
+  const turn = feedLines(writes).find(one => one.kind === 'turn')
+  expect(turn).toMatchObject({ contextPercent: 42, contextTokens: 84000, contextWindow: 200000, tokensIn: 100, tokensOut: 5, model: 'claude-sonnet-x' })
+
+  await $.command.run({ command: 'swb', args: 'live 4400 --no-prompts', ...COMMAND })
+  await $.prompt.submit({ text: 'secret plan', ...COMPOSER })
+  const prompt = feedLines(writes).filter(one => one.kind === 'prompt').at(-1)
+  expect(prompt?.text).toBe('secret plan')
+  expect(prompt?.prompt).toBeUndefined()
 })
 
 test('the live feed stays untouched when no server keeps the feed file', async ($, on) => {
