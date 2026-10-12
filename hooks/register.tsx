@@ -1020,7 +1020,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     await openPane($, 'team')
     const wb = await read($, wbAtom)
     const track = (await read($, liveAtom)).track ?? crew.EMPTY_TRACK
-    const roles = crew.ROLES.map(one => `${one} ${crew.roleOf(wb.team, one).model} (${crew.roleOf(wb.team, one).effort})`).join(' · ')
+    const roles = crew.ROLES.map(one => `${one} ${crew.withVersion(crew.roleOf(wb.team, one).model)} (${crew.roleOf(wb.team, one).effort})`).join(' · ')
 
     return {
       text: `Team mode ${wb.team?.enabled ? 'on' : 'off'}: ${roles}. Opus reviews this session: ${track.advisorRuns}.\n/swb team on|off · /swb team <lead|explorer|advisor> <model> [effort]`,
@@ -1740,7 +1740,7 @@ async function teamTab($: $, { els, wb, live, width }: View): Promise<RenderElem
   const leadModels = row && row.options.length > 0 ? row.options : ['sonnet', 'opus', 'haiku', 'fable']
   const optionsFor = (role: TeamRoleName, current: string) => {
     const list: readonly string[] = role === 'lead' ? leadModels : crew.AGENT_MODELS
-    return (list.includes(current) ? list : [current, ...list]).map(value => ({ value }))
+    return (list.includes(current) ? list : [current, ...list]).map(value => ({ value, label: crew.withVersion(value) }))
   }
   const toast = (text: string) => $.ui.toast(`SmartWorkbench: ${text}`)
 

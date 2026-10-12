@@ -9,6 +9,7 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 - Live view: `Workflow` calls are shown with the name and description their script states and the script as input; the end of a call is marked as started in the background.
 
 ### Changed
+- Team tab: the model lists show the version each alias usually stands for (`opus (claude-opus-5-5)`); the hint is a fixed table, since Claude Code decides what an alias resolves to.
 - README: command entries for `/swb live`, `/swb loop` and `/swb team codex`, a reference section (environment variables, files written, troubleshooting) and a detailed `SWB_LIVE_HOSTS` section.
 
 ## [0.14.0] - 2026-10-12
