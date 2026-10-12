@@ -821,6 +821,30 @@ test('the live feed appends through tee with the line on stdin, and only while t
   expect(writes.some(one => one.argv[0] === 'sh')).toBe(false)
 })
 
+test('the live feed falls back to node when tee is missing or fails, as on Windows', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const FEED = `${CWD}/.claude/smartworkbench-live.jsonl`
+  world(on, {
+    files: { '.claude/smartworkbench-live.jsonl': '' },
+    commands: {
+      [`tee -a ${FEED}`]: { exitCode: 127, stdout: '' },
+      [`node -e require('fs').appendFileSync(process.argv[1], require('fs').readFileSync(0)) ${FEED}`]: { exitCode: 0, stdout: '' },
+    },
+    processed: writes,
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the login', ...COMPOSER })
+  await $.prompt.submit({ text: 'and again', ...COMPOSER })
+
+  const viaNode = writes.filter(one => one.argv[0] === 'node' && one.argv[1] === '-e')
+  expect(viaNode.length).toBeGreaterThan(1)
+  expect(viaNode[0]?.argv.at(-1)).toBe(FEED)
+  expect(JSON.parse(viaNode[0]?.stdin ?? '{}')).toMatchObject({ kind: 'prompt', text: 'fix the login' })
+  // tee is tried once; after it failed the session stays on node.
+  expect(writes.filter(one => one.argv[0] === 'tee').length).toBe(1)
+})
+
 test('the live feed stays untouched when no server keeps the feed file', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { processed: writes })
