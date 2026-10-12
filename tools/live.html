@@ -26,6 +26,15 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.55 var(--mon
 .head{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:baseline;margin-bottom:4px;font-size:.92rem;letter-spacing:.03em}
 .head b{color:var(--sonnet);font-weight:600}
 .head .m{font-size:.8rem}
+.ctx{margin-left:auto;display:inline-flex;gap:8px;align-items:center;font-size:.74rem;color:var(--dim)}
+.cbar{display:inline-block;width:90px;height:8px;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.cbar i{display:block;height:100%;width:0;background:var(--faint)}
+.cbar i.allow{background:var(--allow)}.cbar i.ask{background:var(--ask)}.cbar i.block{background:var(--block)}
+#ctx-spark{letter-spacing:0;color:var(--faint)}
+pre.full{margin:0;padding:6px 8px;font:inherit;font-size:.72rem;white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:4px;color:var(--fg)}
+.row pre.full{grid-column:1/-1}
+.row.prm{cursor:pointer}
+#dw-prompts h5{margin:10px 0 4px;font-size:.74rem;font-weight:400;color:var(--dim)}
 .legend{display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--dim);font-size:.74rem;padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}
 .sq{display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:0}
 .c-opus{color:var(--opus)}.c-sonnet{color:var(--sonnet)}.c-haiku{color:var(--haiku)}.c-guard{color:var(--guard)}.c-loop{color:var(--loop)}
@@ -105,6 +114,7 @@ button.on,button[aria-pressed=true]{color:var(--fg);border-color:var(--fg)}
 #dw-links{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 button.pkt{display:grid;grid-template-columns:54px 58px minmax(0,1fr) auto;gap:8px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:5px 2px;color:var(--fg);align-items:baseline}
 button.pkt .tm{color:var(--faint)}button.pkt .m{overflow-wrap:anywhere}button.pkt .w{color:var(--dim)}
+button.pkt.prm{grid-template-columns:54px 76px minmax(0,1fr) auto}
 dl.detail{margin:0;padding:4px 6px 8px;font-size:.72rem;display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
 dl.detail dt{color:var(--dim)}dl.detail dd{margin:0;overflow-wrap:anywhere}
 button{font:inherit;font-size:.72rem;background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:3px;padding:1px 9px;cursor:pointer}
@@ -123,7 +133,8 @@ button:hover{color:var(--fg)}
     <span class="t" id="title"></span><span class="live off" id="state"></span></div>
   <div class="body">
     <div class="head"><b>SMARTWORKBENCH FLOW</b>
-      <span class="m c-opus">◆ OPUS · ON CALL</span><span class="m c-sonnet">◆ SONNET · LEAD</span><span class="m c-haiku">◆ HAIKU · SWARM</span></div>
+      <span class="m c-opus">◆ OPUS · ON CALL</span><span class="m c-sonnet">◆ SONNET · LEAD</span><span class="m c-haiku">◆ HAIKU · SWARM</span>
+      <span class="ctx" id="ctx"><span class="cbar"><i id="ctx-f"></i></span><span id="ctx-t"></span><span id="ctx-spark"></span></span></div>
     <div class="legend">
       <span><span class="sq opus"></span><span data-i="lg-advisor"></span></span><span><span class="sq sonnet"></span><span data-i="lg-lead"></span></span>
       <span><span class="sq haiku"></span><span data-i="lg-sub"></span></span><span><span class="sq guard"></span><span data-i="lg-guard"></span></span><span><span class="sq codex"></span>codex</span>
@@ -210,12 +221,12 @@ button:hover{color:var(--fg)}
 
     <aside id="drawer" role="dialog" aria-modal="false" aria-labelledby="dw-title" hidden>
       <button id="dw-close" aria-label="close">✕</button>
-      <h3 id="dw-title"></h3><div id="dw-stats"></div><div id="dw-links"></div><div id="dw-list"></div>
+      <h3 id="dw-title"></h3><div id="dw-stats"></div><div id="dw-links"></div><div id="dw-prompts" hidden></div><div id="dw-list"></div>
     </aside>
     <div id="tip" hidden></div>
     <section class="panel"><h4>── flags · ask · block · hold ──</h4><div class="flags" id="flags"></div></section>
     <section class="panel"><h4>── session log ──</h4><div class="log" id="log"></div></section>
-    <div class="cmd"><span class="r" id="count">0 events</span><b id="cwd">~/project $</b> swb live &nbsp;<span id="status-line" data-i="tagline"></span></div>
+    <div class="cmd"><span class="r" id="count">0 events</span><span class="r" id="tok"></span><b id="cwd">~/project $</b> swb live &nbsp;<span id="status-line" data-i="tagline"></span></div>
   </div>
  </div>
 </div>
@@ -254,10 +265,10 @@ var NODE_NAME = { u: ['user', '사용자'], l: ['Sonnet lead', 'Sonnet 리드'],
 var EDGES = { 'u-l': ['u', 'l', 'v'], 'l-g': ['l', 'g', 'v'], 'g-d': ['g', 'd', 'v'], 'd-e': ['d', 'e', 'v'],
   'g-w': ['g', 'w', 'gl', 0.75, 0.5, 0], 'p-l': ['p', 'l', 'gr', 0.5, 0.5, 0], 'g-o': ['o', 'g', 'h', 0.5, 0.3, 4], 'x-g': ['x', 'g', 'h', 0.5, 0.6, 8] };
 var CLS = Object.assign(Object.create(null), { allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop', info: 'info' });
-var MAX_LIVE = 16, MAX_QUEUE = 50, MAX_PACKETS = 300, HOP_MS = 450;
+var MAX_LIVE = 16, MAX_QUEUE = 50, MAX_PACKETS = 300, HOP_MS = 450, MAX_PROMPTS = 100;
 var NS = 'http://www.w3.org/2000/svg';
 var motion = true, speed = 1, packetSeq = 0;
-var E, P, R, live, queue, parked, edgeEl = {}, countEl = {}, boxes = {};
+var E, P, PR, R, live, queue, parked, edgeEl = {}, countEl = {}, boxes = {};
 
 // What one feed event moves: a list of routes, each {path: [node ids], cls, park?, tail?}. Pure, so it can be tested alone.
 function routeOf(ev, ctx){
@@ -303,6 +314,18 @@ function hopOf(a, b){
   }
   return null;
 }
+function crosses(path, id){
+  for (var i = 0; i + 1 < path.length; i++) { var h = hopOf(path[i], path[i + 1]); if (h && h.id === id) return true; }
+  return false;
+}
+// Does a path pass through this box, or use this link?
+function promptHits(path, f){
+  return f.type === 'node' ? path.indexOf(f.id) >= 0 : crosses(path, f.id);
+}
+// green under 60 %, amber under 80 %, red above; none while the engine has not reported a number.
+function ctxLevel(p){
+  return p == null ? 'none' : p < 60 ? 'allow' : p < 80 ? 'ask' : 'block';
+}
 // flow:end
 
 function sv(tag, attrs){
@@ -322,7 +345,7 @@ function flowBuild(){
   svg.appendChild(sv('g', { id: 'pk' }));
 }
 function flowReset(){
-  E = {}; P = []; R = new Map(); live = []; queue = []; parked = new Map();
+  E = {}; P = []; PR = []; R = new Map(); live = []; queue = []; parked = new Map();
   Object.keys(EDGES).forEach(function(id){ E[id] = { n: 0, by: {}, last: null }; if (countEl[id]) countEl[id].textContent = ''; });
   if ($('pk')) $('pk').textContent = '';
   if (boxes.g) boxes.g.classList.remove('waiting');
@@ -464,7 +487,13 @@ function flow(ev){
     return;
   }
   if (ev.kind === 'turn') unparkAll();
-  routeOf(ev, ctx).forEach(function(route){
+  var routes = routeOf(ev, ctx);
+  if (typeof ev.prompt === 'string' && ev.prompt) {
+    var tag = ev.kind === 'prompt' ? (ev.loop ? 'LOOP' : ev.origin === 'plugin' ? 'PLUGIN' : 'PROMPT') : ev.codex ? 'CODEX' : cut(String(ev.subagent || 'agent').replace(/^.*:/, ''), 12);
+    PR.push({ at: ev.at || Date.now(), tag: tag, loop: !!ev.loop, paths: routes.map(function(r){ return r.path; }), prompt: ev.prompt, len: typeof ev.promptLength === 'number' ? ev.promptLength : ev.prompt.length });
+    if (PR.length > MAX_PROMPTS) PR.shift();
+  }
+  routes.forEach(function(route){
     if (R.size > 500) R.delete(R.keys().next().value);
     if (ev.kind === 'tool.start' && ev.id != null) R.set(String(ev.id), { full: route.full, tool: cut(ev.tool, 40), summary: cut(ev.summary, 120) });
     send(route, metaOf(ev, {}));
@@ -476,7 +505,7 @@ function plain(o){ return Object.assign(Object.create(null), o); }
 var TAGS = plain({ allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop' });
 function reset(){
   S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, codexReviews: 0, codexTasks: 0, codexBg: 0, codexOn: null, expCalls: 0, subCalls: 0, leadCalls: 0,
-    edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '' };
+    edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '', ctx: null, ctxHist: [], tok: plain({}) };
   inflight = new Map();
   flowReset();
   $('log').textContent = '';
@@ -497,6 +526,21 @@ function clock(at){ return new Date(at).toTimeString().slice(0, 8); }
 function cut(s, n){
   s = String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim();
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+// Like cut() but whole: keeps line breaks and length, drops only control and bidi characters.
+function keep(s){
+  return String(s == null ? '' : s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ');
+}
+// A log row that opens the full prompt under it; text goes in with textContent only.
+function expandable(row, text){
+  var full = el('pre', 'full', keep(text));
+  full.hidden = true;
+  row.appendChild(full);
+  row.classList.add('prm');
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  row.onclick = function(e){ if (e.target.closest && e.target.closest('pre.full')) return; full.hidden = !full.hidden; };
+  row.onkeydown = function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); full.hidden = !full.hidden; } };
 }
 var replaying = false;
 function fresh(){ return !replaying && Date.now() - loadedAt > 1500 ? ' new' : ''; }
@@ -565,8 +609,16 @@ function render(){
   $('p-state').textContent = S.pass ? L('[ looping ]', '[ 반복 중 ]') : L('[ idle ]', '[ 대기 ]');
   $('b-loop').classList.toggle('busy', !!S.pass);
   $('count').textContent = S.events + L(' events', '개 이벤트');
+  var cx = S.ctx, lvl = ctxLevel(cx ? cx.p : null);
+  $('ctx-f').style.width = (cx && cx.p != null ? cx.p : 0) + '%';
+  $('ctx-f').className = lvl;
+  $('ctx-t').textContent = cx && cx.p != null ? L('ctx ', '컨텍스트 ') + cx.p + '%' + (cx.tokens != null && cx.window ? ' · ' + k(cx.tokens) + '/' + k(cx.window) : '')
+    : cx && cx.window ? L('ctx — / ', '컨텍스트 — / ') + k(cx.window) : L('ctx — (after the first reply)', '컨텍스트 — (첫 응답 후 표시)');
+  $('ctx-spark').textContent = S.ctxHist.map(function(p){ return '▁▂▃▄▅▆▇█'.charAt(Math.min(7, Math.floor(p * 8 / 100))); }).join('');
+  $('ctx').title = L('context per lead turn; subagents are not measured', '리드 턴 기준 컨텍스트 · 서브에이전트는 측정되지 않음');
+  $('tok').textContent = Object.keys(S.tok).map(function(m){ return m + ' ' + L('in ', '입력 ') + k(S.tok[m].i) + ' · ' + L('out ', '출력 ') + k(S.tok[m].o); }).join('  |  ');
   queueLayout();
-  if (!$('drawer').hidden && !replaying && !$('drawer').contains(document.activeElement) && !$('dw-list').querySelector('.detail:not([hidden])')) drawRefresh();
+  if (!$('drawer').hidden && !replaying && !$('drawer').contains(document.activeElement) && !$('dw-list').querySelector('.detail:not([hidden])') && !$('dw-prompts').querySelector('.full:not([hidden])')) drawRefresh();
 }
 
 var HOLD = {
@@ -574,6 +626,15 @@ var HOLD = {
   'team.plan-review-required': ['plan', 'plan → Opus review first', '계획 → Opus 검토 먼저'],
   'team.final-check-required': ['final', 'final check before finishing', '종료 전 최종 점검']
 };
+
+function addTokens(ev){
+  if (typeof ev.model !== 'string' || !ev.model) return;
+  var name = cut(ev.model.replace(/^claude-/, ''), 24);
+  var t = S.tok[name] || (S.tok[name] = { i: 0, o: 0 });
+  if (typeof ev.tokensIn === 'number') t.i += ev.tokensIn;
+  if (typeof ev.tokensOut === 'number') t.o += ev.tokensOut;
+}
+function k(n){ return n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n); }
 
 function handle(ev){
   var at = ev.at || Date.now();
@@ -584,7 +645,8 @@ function handle(ev){
       S.team = !!ev.team;
       S.codexOn = ev.codex === true;
       S.userText = ev.text;
-      addLog(at, 'user', 'c-guard', [cut(ev.text, 110)].concat(ev.loop ? [' ', ['i', L('(loop pass)', '(루프 회차)')]] : []), '', ev.origin === 'plugin' ? 'PLUGIN' : 'PROMPT', 'info');
+      var prow = addLog(at, 'user', 'c-guard', [cut(ev.text, 110)].concat(ev.loop ? [' ', ['i', L('(loop pass)', '(루프 회차)')]] : []), '', ev.origin === 'plugin' ? 'PLUGIN' : 'PROMPT', 'info');
+      if (typeof ev.prompt === 'string' && ev.prompt) expandable(prow, ev.prompt);
       break;
     case 'tool.start': {
       var sub = String(ev.subagent || '');
@@ -601,6 +663,7 @@ function handle(ev){
       var kind = ev.policy === 'ask' ? 'ask' : ev.policy === 'block' ? 'block' : '';
       var row = addLog(at, who, whoClass, [cut(ev.tool, 40), ' ', ['i', cut(ev.summary, 80)]], kind, String(ev.policy).toUpperCase(), ev.policy);
       entry.row = row;
+      if (typeof ev.prompt === 'string' && ev.prompt) expandable(row, ev.prompt);
       if (ev.policy !== 'block') inflight.set(String(ev.id), entry);
       break;
     }
@@ -649,8 +712,15 @@ function handle(ev){
       addLog(at, 'loop', 'c-loop', [end + (ev.done != null ? ' · ' + cut(ev.done, 8) + L(' passes', '회') : '')], '', 'LOOP', 'loop');
       break;
     }
+    case 'turn.agent':
+      addTokens(ev);
+      break;
     case 'turn':
       S.turn++;
+      var pct = typeof ev.contextPercent === 'number' ? ev.contextPercent : (typeof ev.contextTokens === 'number' && ev.contextWindow > 0 ? Math.round(ev.contextTokens / ev.contextWindow * 100) : null);
+      S.ctx = { p: pct == null ? null : Math.max(0, Math.min(100, Math.round(pct))), tokens: typeof ev.contextTokens === 'number' ? ev.contextTokens : null, window: typeof ev.contextWindow === 'number' ? ev.contextWindow : null };
+      if (S.ctx.p != null) { S.ctxHist.push(S.ctx.p); if (S.ctxHist.length > 30) S.ctxHist.shift(); }
+      addTokens(ev);
       addLog(at, 'turn', 'c-guard', [ev.aborted ? L('turn aborted (Esc)', '턴 중단 (Esc)') : L('turn done', '턴 완료')], ev.aborted ? 'block' : '', ev.aborted ? 'ABORT' : 'DONE', ev.aborted ? 'block' : 'info');
       break;
     default:
@@ -661,7 +731,7 @@ function handle(ev){
 
 // ---- ui: pause, replay, speed, filters, and the detail drawer ----
 var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null;
-var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id'];
+var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id', 'promptLength', 'contextPercent', 'tokensIn', 'tokensOut', 'model'];
 function store(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
 function stored(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
 function nodeName(n){ return NODE_NAME[n] ? NODE_NAME[n][lang === 'ko' ? 1 : 0] : n; }
@@ -746,10 +816,6 @@ function applyFilter(){
 }
 
 // ---- drawer: what moved through a box or a link, newest first. Every value goes in with textContent. ----
-function crosses(path, id){
-  for (var i = 0; i + 1 < path.length; i++) { var h = hopOf(path[i], path[i + 1]); if (h && h.id === id) return true; }
-  return false;
-}
 function packetsOf(f){
   return P.filter(function(r){ return f.type === 'node' ? r.path.indexOf(f.id) >= 0 : crosses(r.path, f.id); });
 }
@@ -785,6 +851,23 @@ function drawRefresh(){
     var b = el('button', null, edgeLabel(id) + ' (' + E[id].n + ')');
     b.onclick = function(){ openDrawer({ type: 'edge', id: id }, lastTrigger); };
     links.appendChild(b);
+  });
+  var pl = $('dw-prompts');
+  pl.textContent = '';
+  var hits = PR.filter(function(r){ return r.paths.some(function(p){ return promptHits(p, f); }); }).slice(-20).reverse();
+  pl.hidden = !hits.length;
+  if (hits.length) pl.appendChild(el('h5', null, L('prompts that crossed here', '여기를 지난 프롬프트') + ' (' + hits.length + ')'));
+  hits.forEach(function(r){
+    var prow = el('button', 'pkt prm');
+    prow.appendChild(el('span', 'tm', clock(r.at)));
+    prow.appendChild(el('span', 'tag ' + (r.loop ? 'loop' : ''), r.tag));
+    prow.appendChild(el('span', 'm', cut(r.prompt, 100)));
+    prow.appendChild(el('span', 'w', r.len + L(' chars', ' 자') + (r.len > 2000 ? L(' · cut at 2000', ' · 2000자에서 잘림') : '')));
+    var full = el('pre', 'full', keep(r.prompt));
+    full.hidden = true;
+    prow.onclick = function(){ full.hidden = !full.hidden; };
+    pl.appendChild(prow);
+    pl.appendChild(full);
   });
   var out = $('dw-list');
   out.textContent = '';
