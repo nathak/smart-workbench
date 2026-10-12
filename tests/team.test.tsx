@@ -858,6 +858,7 @@ test('the live feed carries a prompt up to 2000 characters with secrets masked, 
   await $.session.start(start)
   await $.prompt.submit({ text: `deploy\nAPI_KEY=abc123 ghp_${'x'.repeat(30)}\n-----BEGIN RSA PRIVATE KEY-----\nzzz\n-----END RSA PRIVATE KEY-----`, ...COMPOSER })
   await $.prompt.submit({ text: 'long '.repeat(1000), ...COMPOSER })
+  await $.prompt.submit({ text: 'a'.repeat(300000), ...COMPOSER })
 
   const prompts = feedLines(writes).filter(one => one.kind === 'prompt')
   const first = prompts[0] as { text: string; prompt: string }
