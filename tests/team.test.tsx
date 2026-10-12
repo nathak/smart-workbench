@@ -38,6 +38,8 @@ type WorldOptions = {
   processed?: Array<{ argv: string[]; stdin?: string }>
   // Makes these commands fail as a non-zero exit would.
   fail?: (command: string) => boolean
+  // Collects the toasts shown.
+  toasts?: string[]
   // What the engine reports as the session's context use; the default is only the window.
   context?: { tokens?: number; window: number; percent?: number }
 }
@@ -85,7 +87,10 @@ function world(on: On, options: WorldOptions = {}) {
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('tool.register', ($, e) => ({ value: { tool: `mcp__smartworkbench__${e.name}` } }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    options.toasts?.push(String((e as { text?: unknown }).text ?? ''))
+    return { value: undefined }
+  })
   on('ui.log', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('tool.call', ($, e) => {
@@ -946,6 +951,36 @@ test('the live feed turn line carries the context and the turn tokens; --no-prom
   const prompt = feedLines(writes).filter(one => one.kind === 'prompt').at(-1)
   expect(prompt?.text).toBe('secret plan')
   expect(prompt?.prompt).toBeUndefined()
+})
+
+test('a live feed that cannot be written is reported once, shown by /swb live, and a line says when writing works again', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const toasts: string[] = []
+  const FEED = `${CWD}/.claude/smartworkbench-live.jsonl`
+  const APPEND = "require('fs').appendFileSync(process.argv[1], require('fs').readFileSync(0))"
+  const commands: Record<string, Run> = {
+    [`tee -a ${FEED}`]: { exitCode: 1, stdout: '' },
+    [`node -e ${APPEND} ${FEED}`]: { exitCode: 1, stdout: '', stderr: 'EACCES: permission denied' },
+  }
+  world(on, { files: FEED_FILES, commands, processed: writes, toasts })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'live 4400', ...COMMAND })
+  await $.prompt.submit({ text: 'one', ...COMPOSER })
+  await $.prompt.submit({ text: 'two', ...COMPOSER })
+  expect(toasts.filter(one => one.includes('cannot be written')).length).toBe(1)
+  expect((await $.command.run({ command: 'swb', args: 'live', ...COMMAND })).text).toContain('not writing (EACCES')
+
+  commands[`node -e ${APPEND} ${FEED}`] = { exitCode: 0, stdout: '' }
+  await $.prompt.submit({ text: 'three', ...COMPOSER })
+  const recovered = writes.filter(one => one.argv[0] === 'node' && one.argv[1] === '-e').map(one => JSON.parse(one.stdin ?? '{}') as Record<string, unknown>).filter(one => one.kind === 'feed.recovered')
+  expect(recovered.length).toBe(1)
+  expect((recovered[0]?.missed as number) > 0).toBe(true)
+  expect((await $.command.run({ command: 'swb', args: 'live', ...COMMAND })).text).not.toContain('not writing')
 })
 
 test('the live feed stays untouched when no server keeps the feed file', async ($, on) => {

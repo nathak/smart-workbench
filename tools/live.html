@@ -227,7 +227,7 @@ button:hover{color:var(--fg)}
     <div id="tip" hidden></div>
     <section class="panel"><h4>── flags · ask · block · hold ──</h4><div class="flags" id="flags"></div></section>
     <section class="panel"><h4>── session log ──</h4><div class="log" id="log"></div></section>
-    <div class="cmd"><span class="r" id="count">0 events</span><span class="r" id="tok"></span><b id="cwd">~/project $</b> swb live &nbsp;<span id="status-line" data-i="tagline"></span></div>
+    <div class="cmd"><span class="r" id="count">0 events</span><span class="r" id="tok"></span><span class="r" id="last"></span><b id="cwd">~/project $</b> swb live &nbsp;<span id="status-line" data-i="tagline"></span></div>
   </div>
  </div>
 </div>
@@ -610,6 +610,7 @@ function render(){
   $('p-state').textContent = S.pass ? L('[ looping ]', '[ 반복 중 ]') : L('[ idle ]', '[ 대기 ]');
   $('b-loop').classList.toggle('busy', !!S.pass);
   $('count').textContent = S.events + L(' events', '개 이벤트');
+  showLast();
   var cx = S.ctx, lvl = ctxLevel(cx ? cx.p : null);
   $('ctx-f').style.width = (cx && cx.p != null ? cx.p : 0) + '%';
   $('ctx-f').className = lvl;
@@ -628,6 +629,16 @@ var HOLD = {
   'team.final-check-required': ['final', 'final check before finishing', '종료 전 최종 점검']
 };
 
+// When the last event came, so an idle session and a feed that stopped being written are told apart by the person reading.
+function showLast(){
+  var n = $('last');
+  if (!n) return;
+  if (!S.lastAt) { n.textContent = ''; return; }
+  var s = Math.max(0, Math.round((Date.now() - S.lastAt) / 1000));
+  var ago = s >= 5 ? ' (' + (s >= 120 ? Math.round(s / 60) + L(' min', '분') : s + L(' s', '초')) + L(' ago', ' 전') + ')' : '';
+  n.textContent = L('last event ', '마지막 이벤트 ') + clock(S.lastAt) + ago;
+}
+setInterval(function(){ if (!replaying) showLast(); }, 5000);
 function addTokens(ev){
   if (typeof ev.model !== 'string' || !ev.model) return;
   var name = cut(ev.model.replace(/^claude-/, ''), 24);
@@ -640,6 +651,7 @@ function k(n){ return n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replac
 function handle(ev){
   var at = ev.at || Date.now();
   S.events++;
+  S.lastAt = at;
   try { flow(ev); } catch (e) {}
   switch (ev.kind) {
     case 'prompt':
@@ -713,6 +725,9 @@ function handle(ev){
       addLog(at, 'loop', 'c-loop', [end + (ev.done != null ? ' · ' + cut(ev.done, 8) + L(' passes', '회') : '')], '', 'LOOP', 'loop');
       break;
     }
+    case 'feed.recovered':
+      addFlag(at, 'ask', 'FEED', [cut(ev.missed, 8) + L(' events were not written to the feed', '개 이벤트가 피드에 기록되지 못했습니다')]);
+      break;
     case 'turn.agent':
       addTokens(ev);
       break;

@@ -127,8 +127,13 @@ async function appendLine($: $, path: string, text: string): Promise<void> {
     if (ran?.exitCode === 0) return
     appender = 'node'
   }
-  await $.process.run(['node', '-e', APPEND_SCRIPT, path], { stdin: text })
+  const ran = await $.process.run(['node', '-e', APPEND_SCRIPT, path], { stdin: text })
+  if (ran.exitCode !== 0) throw new Error(ran.stderr.trim().split('\n').pop() || `node exited with ${ran.exitCode}`)
 }
+
+// Feed writes that failed since the last good one; the person is told once per session, and the page gets a line when writes work again.
+let feedMissed = 0
+let isFeedNoted = false
 
 // The text a prompt event carries for the live view's per-segment list: secrets masked, cut, with its real length.
 // Only the first PROMPT_SCAN characters are scanned for secrets, so a huge paste cannot make the masking slow; nothing past PROMPT_MAX is kept.
@@ -160,8 +165,27 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
     const session = (await read($, liveAtom)).sessionId
     // Every text the feed carries is masked here, so a command summary or a URL cannot carry a secret around the prompt masking.
     const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? redact(scanned(value)) : value]))
-    const line = JSON.stringify({ at: await $.clock.now(), kind, ...(session ? { session } : {}), ...masked })
-    await appendLine($, path, `${line}\n`)
+    const at = await $.clock.now()
+    const line = JSON.stringify({ at, kind, ...(session ? { session } : {}), ...masked })
+    try {
+      await appendLine($, path, `${line}\n`)
+    } catch (error) {
+      feedMissed++
+      if (!isFeedNoted) {
+        isFeedNoted = true
+        const why = model.cut(error instanceof Error ? error.message : String(error), 120)
+        $.ui.toast(`SmartWorkbench: the live feed cannot be written (${why}); the live view will miss events.`)
+        await setLive($, current => ({ ...current, feedError: why })).catch(() => undefined)
+      }
+      return
+    }
+    if (feedMissed > 0) {
+      const missed = feedMissed
+      feedMissed = 0
+      await appendLine($, path, `${JSON.stringify({ at, kind: 'feed.recovered', missed })}\n`).catch(() => undefined)
+      isFeedNoted = false
+      await setLive($, current => ({ ...current, feedError: undefined })).catch(() => undefined)
+    }
   } catch {
     // The feed is optional.
   }
@@ -762,6 +786,13 @@ function statusText(wb: Workbench, live: Live): string {
 // The live view's web server (tools/live.mjs), a child of this session: it ends with /swb live stop, the session or a reload.
 let liveServer: { url: string; stop: () => void } | undefined
 
+// A line for /swb live when the feed cannot be written, so the page's silence is not mistaken for an idle session.
+async function feedNote($: $): Promise<string> {
+  const why = (await read($, liveAtom)).feedError
+
+  return why ? `\nLive feed: not writing (${why}); the live view is missing events.` : ''
+}
+
 async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   const noPrompts = /(?:^|\s)--no-prompts\b/.test(rest)
   const arg = rest.replace(/(?:^|\s)--no-prompts\b/, ' ').trim().toLowerCase()
@@ -781,7 +812,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
       return { text: `Live view: ${liveServer.url}\nFrom now on the feed keeps only the first 120 characters of a prompt (lines already written stay).` }
     }
 
-    return { text: `Live view: ${liveServer.url}\n/swb live stop to end it.` }
+    return { text: `Live view: ${liveServer.url}\n/swb live stop to end it.${await feedNote($)}` }
   }
 
   const port = arg === '' ? 4317 : Number(arg)
@@ -1741,6 +1772,8 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     appender = 'tee'
+    feedMissed = 0
+    isFeedNoted = false
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
     const argumentHint = '[new|team|advise|loop|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'

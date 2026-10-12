@@ -190,6 +190,8 @@ export type Live = {
   contextPercent?: number
   contextTokens?: number
   contextWindow?: number
+  // Why the live feed could not be written, while it cannot; session-only.
+  feedError?: string
   // /swb live --no-prompts: the feed keeps only the 120-character start of a prompt, not its text.
   livePrompts?: false
   pinWarnings: string[]
