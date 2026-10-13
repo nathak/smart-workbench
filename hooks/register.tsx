@@ -956,7 +956,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   isFeedNoted = false
   await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined, feedError: undefined }))
   const url = `http://127.0.0.1:${port}`
-  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--port', String(port)] })
+  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--port', String(port), '--watch-parent'] })
   const iterator = child[Symbol.asyncIterator]()
   let output = ''
   const handle = { url, stop: () => void Promise.resolve(iterator.return?.()).catch(() => undefined) }

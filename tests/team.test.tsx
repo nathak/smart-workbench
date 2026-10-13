@@ -853,7 +853,7 @@ test('an infinite loop that only edits notebooks or docs is not stopped as idle'
 test('/swb live starts the web server as a child, reports its address, and stop ends it', async ($, on) => {
   world(on)
   on('process.spawn', async function* (_$, e) {
-    expect(e.argv.slice(2)).toEqual([CWD, '--port', '4400'])
+    expect(e.argv.slice(2)).toEqual([CWD, '--port', '4400', '--watch-parent'])
     yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400  (project /work)\n' }
     await new Promise(() => undefined)
   })

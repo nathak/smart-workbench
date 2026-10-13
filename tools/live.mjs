@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SmartWorkbench live view: tails .claude/smartworkbench-live.jsonl of a project and streams it to a web page.
-// Usage: node live.mjs [projectDir] [--port 4317]
+// Usage: node live.mjs [projectDir] [--port 4317] [--watch-parent]
 // The plugin writes the feed only while this file exists, so stopping the server (which removes it) stops the writes.
 import { createServer } from 'node:http'
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
@@ -114,15 +114,18 @@ const timer = setInterval(pump, 150)
 // A comment line now and then keeps an idle stream from being closed by a proxy's read timeout (often 60 s) and shows a dead client early.
 const PING_MS = Number(process.env.SWB_LIVE_PING_MS) || 15000
 // A session that ends without stopping its child (a crash, a kill on Windows, where signals do not reach node) must not leave a server and a feed behind.
+// Only when the plugin started it (--watch-parent): a view started by hand and left running in the background keeps running.
 const parent = process.ppid
-const watcher = setInterval(() => {
-  try {
-    process.kill(parent, 0)
-  } catch {
-    stop()
-  }
-}, 2000)
-watcher.unref?.()
+if (args.includes('--watch-parent')) {
+  const watcher = setInterval(() => {
+    try {
+      process.kill(parent, 0)
+    } catch {
+      stop()
+    }
+  }, 2000)
+  watcher.unref?.()
+}
 const pinger = setInterval(() => {
   for (const res of clients) res.write(': ping\n\n')
 }, PING_MS)
