@@ -82,6 +82,8 @@ try {
   check(events.body.split('data: ').length === 3, 'replays each appended line once')
   check((await request('/', `evil.test:${port}`)).status === 403, 'refuses a foreign Host header')
   check((await request('/', `127.0.0.1:${port}`)).status === 200, 'serves the page on a loopback Host')
+  const info = JSON.parse((await request('/info', `127.0.0.1:${port}`)).body || '{}')
+  check(info.pid > 0 && typeof info.linesRead === 'number' && typeof info.startedAt === 'number' && info.feed.endsWith('smartworkbench-live.jsonl') && (await request('/info', `evil.test:${port}`)).status === 403, 'reports where the feed is and how many lines it read, and only to a trusted Host')
   check(await headerOf('/', 'content-security-policy').then(value => value?.includes("default-src 'none'")), 'sends a content security policy with the page')
 
   const second = launch()

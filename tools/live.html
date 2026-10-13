@@ -226,7 +226,9 @@ button:hover{color:var(--fg)}
     <span class="muted" id="last"></span>
     <span class="badge hold" id="b-paused" hidden></span>
     <span class="muted mono" id="sess"></span>
+    <span class="muted mono" id="srv"></span>
     <span id="notices"></span>
+    <span class="badge warn" id="srv-warn" hidden role="status"></span>
     <span class="badge bad" id="errs" hidden role="status"></span>
     <span class="grow">
       <span class="muted mono" id="title"></span>
@@ -2131,6 +2133,26 @@ function drawKpis(){
 }
 setInterval(function(){ if (!replaying && !playback && !document.hidden) { queueKpi(); if (tab === 'guard') queueView(); } }, 1000);
 
+// ---- the server's own count of what it read, against what this page received ----
+var srv = null, srvBase = 0;
+function pollInfo(){
+  if (typeof fetch !== 'function') return;
+  fetch('/info', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(info){ srv = info; drawSrv(); }).catch(function(){});
+}
+function drawSrv(){
+  var box = $('srv');
+  if (!srv) { box.textContent = ''; return; }
+  var name = String(srv.project || '').split(/[\\/]/).filter(Boolean).pop() || '';
+  box.textContent = cut(name, 24);
+  box.title = L('project ', '프로젝트 ') + srv.project + '\n' + L('feed ', '피드 ') + srv.feed + '\n' + L('server started ', '서버 시작 ') + clock(srv.startedAt) + ' (pid ' + srv.pid + ')\n' + L('lines read ', '읽은 줄 ') + srv.linesRead + ' · ' + L('page events ', '화면 이벤트 ') + S.events;
+  var expected = Math.min(srv.linesRead - srvBase, 2000), got = events.length;
+  var bad = !paused && !playback && expected - got > 5;
+  var w = $('srv-warn');
+  w.hidden = !bad;
+  if (bad) w.textContent = L('⚠ the server read ' + (srv.linesRead - srvBase) + ' lines, this page has ' + got, '⚠ 서버는 ' + (srv.linesRead - srvBase) + '줄을 읽었는데 화면에는 ' + got + '개');
+}
+setInterval(pollInfo, 10000);
+
 // ---- tabs: roving tabindex, the choice kept in the address and in storage ----
 var TABS = ['timeline', 'guard', 'agents', 'flow'], tab = 'timeline';
 function showTab(name, focusIt){
@@ -2197,15 +2219,16 @@ $('lang').onclick = function(){
   try { localStorage.setItem('swb-lang', lang); } catch (e) {}
   replay();
 };
-$('clear').onclick = function(){ events = []; pending = []; replay(); resetViews(); };
+$('clear').onclick = function(){ events = []; pending = []; srvBase = srv ? srv.linesRead : 0; replay(); resetViews(); drawSrv(); };
 
 var connected = false, everOpened = false;
 var es = new EventSource('/events');
-es.onopen = function(){ if (everOpened) { events = []; pending = []; replay(); resetViews(); } connected = true; everOpened = true; translate(); };
+es.onopen = function(){ srvBase = 0; setTimeout(pollInfo, 1500); if (everOpened) { events = []; pending = []; replay(); resetViews(); } connected = true; everOpened = true; translate(); };
 es.onerror = function(){ connected = false; translate(); };
 es.onmessage = function(m){
   try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) { pageError('event', e); }
 };
+pollInfo();
 flowBuild();
 uiBuild();
 timelineBuild();

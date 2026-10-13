@@ -33,6 +33,9 @@ const recent = []
 const FEED_CAP = 8 * 1024 * 1024
 let offset = 0
 let rest = ''
+// What this server has read, so the page can tell whether it received all of it.
+let linesRead = 0
+const startedAt = Date.now()
 
 function pump() {
   try {
@@ -54,6 +57,7 @@ function pump() {
     const lines = (rest + buffer.toString('utf8')).split('\n')
     rest = lines.pop() ?? ''
     for (const line of lines.filter(Boolean)) {
+      linesRead++
       recent.push(line)
       if (recent.length > RECENT_MAX) recent.shift()
       for (const res of clients) res.write(`data: ${line}\n\n`)
@@ -96,6 +100,12 @@ const server = createServer((req, res) => {
     for (const line of recent) res.write(`data: ${line}\n\n`)
     clients.add(res)
     res.on('close', () => clients.delete(res))
+    return
+  }
+  if (req.url === '/info') {
+    // Where the feed is and how much this server has read: the page compares it with what it received.
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify({ project, feed, pid: process.pid, startedAt, linesRead, kept: recent.length, clients: clients.size, feedSize: existsSync(feed) ? statSync(feed).size : null }))
     return
   }
   if (req.url === '/' || req.url?.startsWith('/?')) {
