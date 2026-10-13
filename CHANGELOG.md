@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-13
+
 ### Added
 - Live feed: what a subagent answered is recorded on the end of the Agent call that ran it and listed with the prompts per box and link. `--no-prompts` drops these results.
 - Live view: `Workflow` calls are shown with the name and description their script states and the script as input; the end of a call is marked as started in the background.
@@ -107,5 +109,3 @@ Not itemised per version.
 ## Initial release - 2026-10-07
 
 - The panel with Intent, Context, Run and Evidence tabs, the guard profiles, and the locked contract added to every prompt (P0).
-
-[Unreleased]: https://github.com/nathak/smart-workbench/compare/c71dc50...HEAD
