@@ -524,13 +524,13 @@ function ingest(tr, ev){
     case 'turn': case 'turn.agent':
       if (ev.kind === 'turn.agent') { if (ev.agent) addTok(tr.agentTok[ev.agent] || (tr.agentTok[ev.agent] = Object.create(null)), ev); addTok(tr.tok, ev); break; }
       t = tr.turns[tr.turns.length - 1];
-      // A turn line that arrives after its turn was already closed (by the next prompt) only adds its numbers; it makes no turn of its own.
+      // A second turn line for a turn that is already closed only refreshes its numbers; it makes no turn of its own.
       var closed = !!t && t.end !== null;
       if (!t) t = turnOf(tr, at, { early: true });
       if (!closed) { t.end = at; t.aborted = ev.aborted === true; }
       t.tokIn = typeof ev.tokensIn === 'number' ? ev.tokensIn : 0; t.tokOut = typeof ev.tokensOut === 'number' ? ev.tokensOut : 0;
       if (ev.model) addTok(t.models, ev);
-      addTok(tr.tok, ev);
+      if (!closed) addTok(tr.tok, ev);
       var pct = typeof ev.contextPercent === 'number' ? ev.contextPercent : (typeof ev.contextTokens === 'number' && ev.contextWindow > 0 ? Math.round(ev.contextTokens / ev.contextWindow * 100) : null);
       if (pct != null || typeof ev.contextTokens === 'number' || typeof ev.contextWindow === 'number') {
         tr.ctx = { p: pct == null ? null : Math.max(0, Math.min(100, Math.round(pct))), tokens: typeof ev.contextTokens === 'number' ? ev.contextTokens : null, window: typeof ev.contextWindow === 'number' ? ev.contextWindow : null };
@@ -1150,7 +1150,7 @@ function render(){
   var bp = $('b-paused');
   bp.hidden = !paused && !playback;
   if (!pending.length) heldAsk = 0;
-  bp.textContent = playback ? L('▶ replaying', '▶ 다시보기 중') : L('‖ paused', '‖ 일시정지') + (pending.length ? ' · +' + pending.length : '') + (heldAsk ? ' · ⚠ ' + L(heldAsk + ' ask or block held', '확인·차단 ' + heldAsk + '건 대기') : '');
+  bp.textContent = (playback ? L('▶ replaying', '▶ 다시보기 중') : L('‖ paused', '‖ 일시정지')) + (pending.length ? ' · +' + pending.length : '') + (heldAsk ? ' · ⚠ ' + L(heldAsk + ' ask or block held', '확인·차단 ' + heldAsk + '건 대기') : '');
   showLast();
   queueKpi();
   var cx = S.ctx, lvl = ctxLevel(cx ? cx.p : null);
@@ -1272,7 +1272,7 @@ function quiet(list){ replaying = true; try { list.forEach(take); } finally { re
 // While paused the tiles and tables stand still, but a call that waits on you or a block is still spoken and counted in the status bar.
 function holdBack(ev){
   pending.push(ev); if (pending.length > 2000) pending.shift();
-  if ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block') { heldAsk++; alertNow(ev); }
+  if ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block') { heldAsk++; alertNow(ev, true); }
   syncTools(); render();
 }
 
@@ -1894,8 +1894,8 @@ function announce(){
   if (dn <= 0 && df <= 0) return;
   $('live-polite').textContent = L(Math.max(0, dn) + ' new calls' + (df > 0 ? ', ' + df + ' failed' : ''), '새 호출 ' + Math.max(0, dn) + '개' + (df > 0 ? ', 실패 ' + df + '개' : ''));
 }
-function alertNow(ev){
-  if (replaying || playback || Date.now() - loadedAt < 1500 || (ev.at && Date.now() - ev.at > 15000)) return;
+function alertNow(ev, held){
+  if (replaying || (playback && !held) || Date.now() - loadedAt < 1500 || (ev.at && Date.now() - ev.at > 15000)) return;
   var what = ev.kind === 'guard.block' ? L('Blocked: ', '차단됨: ') + cut(ev.input || ev.tool, 80) : L('Waiting for your answer in the terminal: ', '터미널에서 답을 기다리는 중: ') + cut(ev.summary || ev.tool, 80);
   // A sentence that repeats is spoken again only if the region is emptied first.
   $('live-assertive').textContent = '';
