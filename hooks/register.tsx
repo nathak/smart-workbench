@@ -299,7 +299,7 @@ async function treeState($: $): Promise<TreeState | undefined> {
   }
   // The mod's own files change whenever it works (the live feed on every event, the audit log on every pass): they are not the task's work.
   const auditPath = (await read($, liveAtom)).policy?.audit?.path
-  const own = [LIVE_FILE, PID_FILE, HANDOFF_PATH, SHARE_PATH, AUDIT_PATH, ...(auditPath ? [auditPath] : [])].flatMap(one => [one, `${one}.1`])
+  const own = [LIVE_FILE, PID_FILE, HANDOFF_PATH, AUDIT_PATH, ...(auditPath ? [auditPath] : [])].flatMap(one => [one, `${one}.1`])
   const isOwn = (path: string) => own.some(one => path === one || path.endsWith(`/${one}`))
   const paths = codex.porcelainPaths(status.stdout).filter(path => !path.includes('\n') && !isOwn(path))
   const stats = new Map(paths.map(path => [path, ''] as const))
@@ -2297,7 +2297,8 @@ export const register: Register = on => {
 
     return ran
     } catch {
-      // The call already ran; a failure in the records after it must not run it a second time.
+      // The call already ran; a failure in the records after it must not run it a second time. The live view is told it ended.
+      await emit($, 'tool.end', { id: call.id, outcome: ran.deny === undefined && ran.isError !== true ? 'ok' : 'error', ms: 0 }).catch(() => undefined)
       return ran
     }
   }).catch(($, e, next) => {

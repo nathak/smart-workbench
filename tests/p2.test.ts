@@ -163,10 +163,10 @@ describe('allow for session', () => {
     expect(scope('git push origin feature')?.key).toBe('bash:external-send:git push')
     expect(scope('git push && curl -X POST https://x')?.key).toBe('bash:external-send:curl POST && git push')
     expect(scope('echo {} > .claude/smartworkbench.json')).toBe(undefined)
-    expect(risk.sessionScope('Edit', { file_path: '/w/.env' }, risk.classify('Edit', { file_path: '/w/.env' }))).toEqual({
-      key: 'edit:/w/.env',
-      label: 'edits of /w/.env',
-    })
+    // Editing a secrets file is asked each time, and so is reading one through Grep or Glob.
+    expect(risk.sessionScope('Edit', { file_path: '/w/.env' }, risk.classify('Edit', { file_path: '/w/.env' }))).toBe(undefined)
+    expect(risk.sessionScope('Grep', { pattern: 'x', path: '/w/.env' }, risk.classify('Grep', { pattern: 'x', path: '/w/.env' }))).toBe(undefined)
+    expect(risk.sessionScope('Edit', { file_path: '/w/src/a.ts' }, risk.classify('Edit', { file_path: '/w/src/a.ts' }))).toEqual({ key: 'edit:/w/src/a.ts', label: 'edits of /w/src/a.ts' })
     // Commands the guard now blocks have no session key, so allowing "git push" never covers them.
     expect(scope('git push -fu origin main')).toBe(undefined)
     expect(scope('git -C d push -f')).toBe(undefined)

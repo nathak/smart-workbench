@@ -539,7 +539,7 @@ function ingest(tr, ev){
       sp.output = typeof ev.output === 'string' ? ev.output : ''; sp.workflowBg = ev.workflowBg === true; sp.endEv = ev;
       tr.pendingAsk.delete(id);
       if (ev.agentRun) {
-        sp.agentRun = String(ev.agentRun);
+        sp.agentRun = clean(ev.agentRun, 40);
         tr.runOf.set(sp.agentRun, sp.id);
         (tr.byAgent.get(sp.agentRun) || []).forEach(function(c){ c.parent = sp.id; c.est = false; });
       }
@@ -551,7 +551,7 @@ function ingest(tr, ev){
       if (ev.id != null) tr.pendingAsk.delete(String(ev.id));
       break;
     case 'turn': case 'turn.agent':
-      if (ev.kind === 'turn.agent') { if (ev.agent) addTok(tr.agentTok[ev.agent] || (tr.agentTok[ev.agent] = Object.create(null)), ev); addTok(tr.tok, ev); break; }
+      if (ev.kind === 'turn.agent') { if (ev.agent) { var ak = clean(ev.agent, 40); addTok(tr.agentTok[ak] || (tr.agentTok[ak] = Object.create(null)), ev); } addTok(tr.tok, ev); break; }
       t = tr.turns[tr.turns.length - 1];
       // A second turn line for a turn that is already closed only refreshes its numbers; it makes no turn of its own.
       var closed = !!t && t.end !== null;

@@ -465,6 +465,8 @@ export function sessionScope(tool: string, input: unknown, verdict: Verdict): Se
     return { key: `bash:${verdict.category}:${unique.join(' && ')}`, label: unique.join(' && ') }
   }
 
+  // A secrets check of Grep, Glob or Read is asked each time: a key by tool or by path would let one answer open the next file too.
+  if (verdict.category === 'secret-output' || verdict.category === 'secret-file') return undefined
   const rawPath = args.file_path ?? args.notebook_path
   const path = typeof rawPath === 'string' ? normalisePath(rawPath) : rawPath
   if (typeof path === 'string' && path !== '') {
