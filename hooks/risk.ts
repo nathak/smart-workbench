@@ -83,7 +83,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     stripped: true,
-    pattern: re(String.raw`${AT}(?<!\bgit\s+)rm["']?\s+${FLAT_ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
+    pattern: re(String.raw`${AT}(?<!\bgit[ \t]+)rm["']?\s+${FLAT_ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
     reason: 'recursive delete',
   },
   {
