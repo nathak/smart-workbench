@@ -2,7 +2,7 @@
 // Smoke test for tools/live.mjs using only node built-ins: node tools/live-check.mjs
 import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { get } from 'node:http'
+import { get, request as httpRequest } from 'node:http'
 import { hostname, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -200,6 +200,108 @@ try {
   first?.child.kill('SIGTERM')
   rmSync(dir, { recursive: true, force: true })
 }
+// ---- the shared hub: several sessions, one port ----
+{
+  const home = mkdtempSync(join(tmpdir(), 'swb-hub-'))
+  const base = join(home, 'reg')
+  mkdirSync(base, { mode: 0o700 })
+  const env = { ...process.env, SWB_LIVE_HOME: base, SWB_LIVE_IDLE_MS: '1500', SWB_LIVE_STALE_MS: '1500', SWB_LIVE_BEAT_MS: '300' }
+  const hubPort = port + 10
+  const projectA = mkdtempSync(join(tmpdir(), 'swb-hub-a-'))
+  const projectB = mkdtempSync(join(tmpdir(), 'swb-hub-b-'))
+  const join_ = (project, id, extra = []) => {
+    const child = spawn('node', [server, project, '--join', '--session', id, '--port', String(hubPort), ...extra], { stdio: ['ignore', 'pipe', 'pipe'], env })
+    const out = { stdout: '', stderr: '', code: undefined }
+    child.stdout.on('data', chunk => (out.stdout += chunk))
+    child.stderr.on('data', chunk => (out.stderr += chunk))
+    child.on('exit', code => (out.code = code ?? -1))
+    return { child, out }
+  }
+  const getJson = (path, host = `127.0.0.1:${hubPort}`, method = 'GET') =>
+    new Promise(done => {
+      const req = httpRequest({ host: '127.0.0.1', port: hubPort, path, method, headers: { host } }, res => {
+        let text = ''
+        res.on('data', chunk => (text += chunk))
+        res.on('end', () => done({ status: res.statusCode, body: text }))
+      })
+      req.on('error', () => done({ status: 0, body: '' }))
+      req.end()
+    })
+  const until = async (test, tries = 60) => {
+    for (let i = 0; i < tries; i++) {
+      if (await test()) return true
+      await sleep(100)
+    }
+    return false
+  }
+  const a = join_(projectA, 'a')
+  const b = join_(projectB, 'b')
+  try {
+    check(await until(() => a.out.stdout.includes(`http://127.0.0.1:${hubPort}/#s=a`) && b.out.stdout.includes('#s=b'), 100), 'two sessions on one port both print their address with their own tab')
+    const info = JSON.parse((await getJson('/info')).body || '{}')
+    check(info.hub === 'smartworkbench' && info.pid !== a.child.pid && info.pid !== b.child.pid, 'the hub is a process of its own')
+    check(statSync(base).mode % 0o1000 === 0o700 && statSync(join(base, String(hubPort))).mode % 0o1000 === 0o700 && statSync(join(base, String(hubPort), 'a.json')).mode % 0o1000 === 0o600, 'the registry is private to the user')
+    appendFileSync(join(projectA, '.claude', 'smartworkbench-live.jsonl'), '{"kind":"prompt","text":"from a"}\n')
+    appendFileSync(join(projectB, '.claude', 'smartworkbench-live.jsonl'), '{"kind":"prompt","text":"from b"}\n')
+    await sleep(600)
+    const list = JSON.parse((await getJson('/sessions')).body)
+    check(list.sessions.length === 2 && list.sessions.every(one => one.alive && one.linesRead === 1), 'the hub lists both sessions and has read a line from each')
+    const mine = await new Promise(done => {
+      let text = ''
+      const req = get({ host: '127.0.0.1', port: hubPort, path: '/events?session=a', headers: { host: `127.0.0.1:${hubPort}` } }, res => res.on('data', chunk => (text += chunk)))
+      req.on('error', () => undefined)
+      setTimeout(() => {
+        req.destroy()
+        done(text)
+      }, 500)
+    })
+    check(mine.includes('from a') && !mine.includes('from b'), 'a session stream carries only its own lines')
+    const all = await new Promise(done => {
+      let text = ''
+      const req = get({ host: '127.0.0.1', port: hubPort, path: '/events?all=1', headers: { host: `127.0.0.1:${hubPort}` } }, res => res.on('data', chunk => (text += chunk)))
+      req.on('error', () => undefined)
+      setTimeout(() => {
+        req.destroy()
+        done(text)
+      }, 500)
+    })
+    check(all.includes('event: sessions') && all.includes('{"s":"a","e":{"kind":"prompt","text":"from a"}}') && all.includes('{"s":"b","e":'), 'the combined stream tags each line with its session')
+    check((await getJson('/events?session=nope')).status === 404 && (await getJson('/events?session=..%2Fx')).status === 404, 'an unknown session is 404')
+    check((await getJson('/sessions', 'evil.test')).status === 403 && (await getJson('/info', 'evil.test')).status === 403, 'the hub refuses a Host that is not loopback')
+    check((await getJson('/sessions', undefined, 'POST')).status === 405, 'the hub answers GET only')
+    // A joiner that is killed hard (as on Windows) leaves its registration: it expires by its heartbeat.
+    b.child.kill('SIGKILL')
+    check(await until(async () => JSON.parse((await getJson('/sessions')).body).sessions.find(one => one.id === 'b')?.alive === false, 80), 'a session that vanished without cleaning up is marked ended')
+    a.child.kill('SIGTERM')
+    check(await until(() => !existsSync(join(projectA, '.claude', 'smartworkbench-live.jsonl')) && !existsSync(join(base, String(hubPort), 'a.json'))), 'leaving removes the feed, the note and the registration')
+    check(await until(async () => (await getJson('/info')).status === 0, 80), 'the hub ends by itself once no session is left')
+    // Planted registrations are ignored.
+    const plant = (name, body) => writeFileSync(join(base, String(hubPort), name), typeof body === 'string' ? body : JSON.stringify(body))
+    const c = join_(projectA, 'c')
+    check(await until(() => c.out.stdout.includes('#s=c')), 'a new session starts a new hub')
+    const victim = join(home, 'victim.jsonl')
+    writeFileSync(victim, '{"kind":"secret"}\n')
+    const linked = mkdtempSync(join(tmpdir(), 'swb-hub-l-'))
+    mkdirSync(join(linked, '.claude'))
+    symlinkSync(victim, join(linked, '.claude', 'smartworkbench-live.jsonl'))
+    writeFileSync(join(linked, '.claude', 'smartworkbench-live.pid'), `${hostname()} ${process.pid}`)
+    plant('evil.json', { v: 1, id: 'evil', project: linked, host: hostname(), pid: process.pid, startedAt: 1 })
+    plant('other.json', { v: 1, id: 'mismatch', project: projectA, host: hostname(), pid: process.pid, startedAt: 1 })
+    plant('rel.json', { v: 1, id: 'rel', project: 'relative/path', host: hostname(), pid: process.pid, startedAt: 1 })
+    plant('big.json', ' '.repeat(5000))
+    await sleep(1800)
+    const seen = JSON.parse((await getJson('/sessions')).body).sessions.map(one => one.id)
+    check(seen.join() === 'c', `registrations that break a rule are not listed (saw ${seen.join()})`)
+    c.child.kill('SIGTERM')
+  } finally {
+    for (const one of [a, b]) one.child.kill('SIGKILL')
+    await sleep(2500)
+    rmSync(home, { recursive: true, force: true })
+    rmSync(projectA, { recursive: true, force: true })
+    rmSync(projectB, { recursive: true, force: true })
+  }
+}
+
 // Feed text must only reach the page through textContent.
 const page = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'live.html'), 'utf8')
 check(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write|\beval\(|new Function/.test(page), 'the page never builds markup or code from feed text')

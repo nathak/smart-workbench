@@ -59,7 +59,7 @@ It reads no environment variable except `CLAUDE_CONFIG_DIR` and `HOME` (through 
 | `node -e <appendFileSync>` | live feed writes, only where `tee` is missing or fails |
 | `gh issue view …` | `/swb issue #n` |
 | `tee -a <project>/.claude/smartworkbench-live.jsonl` (the line goes in on stdin) | each event, only while the live feed file exists |
-| `node <plugin>/tools/live.mjs <project> --port <n> --watch-parent` (writes `.claude/smartworkbench-live.pid`, "<host> <pid>", beside the feed and removes both on exit; with `--watch-parent` it ends when the session that started it is gone) | `/swb live`; kept as a child and ended by `/swb live stop`, the end of the session or a reload. Where signals do not reach node (Windows) it is ended hard and the plugin removes the files |
+| `node <plugin>/tools/live.mjs <project> --join --session <id> --port <n> [--auto] --watch-parent` (owns the feed and writes the note; registers the session in `<home>/.claude/smartworkbench-live/<port>/<id>.json`, mode 600, and keeps it fresh; starts the hub below if none runs). The hub: `node <plugin>/tools/live.mjs --hub --port <n>`, started detached by the first session, outlives it, reads the registrations and each project's own feed (only if the project's note names that session and neither the feed nor `.claude` is a link), serves the page, and ends about 30 s after the last session leaves. The single-project form: `node <plugin>/tools/live.mjs <project> --port <n> --watch-parent` (writes `.claude/smartworkbench-live.pid`, "<host> <pid>", beside the feed and removes both on exit; with `--watch-parent` it ends when the session that started it is gone) | `/swb live`; kept as a child and ended by `/swb live stop`, the end of the session or a reload. Where signals do not reach node (Windows) it is ended hard and the plugin removes the files |
 
 ### Network
 
@@ -130,7 +130,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 | `node -e <appendFileSync>` | 실시간 피드 기록. `tee`가 없거나 실패할 때만 |
 | `gh issue view …` | `/swb issue #n` |
 | `tee -a <프로젝트>/.claude/smartworkbench-live.jsonl`(한 줄을 stdin으로 전달) | 이벤트마다, 실시간 피드 파일이 있을 때만 |
-| `node <플러그인>/tools/live.mjs <프로젝트> --port <n> --watch-parent`(피드 옆에 `.claude/smartworkbench-live.pid`를 쓰고 종료 때 둘 다 지움. `--watch-parent`면 시작한 세션이 사라질 때 스스로 끝남) | `/swb live`. 자식 프로세스로 두고 `/swb live stop`, 세션 종료, 리로드 때 끝남. 신호가 닿지 않는 Windows에서는 강제 종료되고 플러그인이 파일을 지웁니다 |
+| `node <플러그인>/tools/live.mjs <프로젝트> --join --session <id> --port <n> [--auto] --watch-parent`(피드와 프로세스 메모를 소유하고, 세션을 `<홈>/.claude/smartworkbench-live/<포트>/<id>.json`(권한 600)에 등록해 갱신하며, 허브가 없으면 아래 허브를 띄움). 허브: `node <플러그인>/tools/live.mjs --hub --port <n>`, 첫 세션이 분리 실행하며 그 세션보다 오래 살고, 등록 파일과 각 프로젝트의 자기 피드만 읽고(프로젝트의 메모가 그 세션을 가리키고 피드와 `.claude`가 링크가 아닐 때만) 페이지를 내보내며 마지막 세션이 떠나고 약 30초 뒤 끝남. 프로젝트 하나짜리 형태: `node <플러그인>/tools/live.mjs <프로젝트> --port <n> --watch-parent`(피드 옆에 `.claude/smartworkbench-live.pid`를 쓰고 종료 때 둘 다 지움. `--watch-parent`면 시작한 세션이 사라질 때 스스로 끝남) | `/swb live`. 자식 프로세스로 두고 `/swb live stop`, 세션 종료, 리로드 때 끝남. 신호가 닿지 않는 Windows에서는 강제 종료되고 플러그인이 파일을 지웁니다 |
 
 ### 네트워크
 
