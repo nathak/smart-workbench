@@ -358,8 +358,9 @@ export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolea
   // Off: nothing the built-in rules find is stopped. What a project rule asked for still holds, so does the pause switch,
   // and a change to the guard file is still asked (or the rules could be deleted without anyone seeing it).
   if (profile === 'off') {
-    if (verdict.rule !== undefined) return verdict.rule
+    // First, so a rule inside the guard file cannot allow edits of the guard file.
     if (verdict.category === 'guard-policy') return 'ask'
+    if (verdict.rule !== undefined) return verdict.rule
 
     return isPaused && verdict.risk !== 'low' ? 'ask' : 'allow'
   }
