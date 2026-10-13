@@ -1,5 +1,5 @@
 import type { AuditConfig, EvidenceKind, GuardProfile, Policy, ProjectPolicy, ProjectRule, TeamTemplate } from '../types'
-import { normalisePath, type Verdict } from './risk'
+import { ALWAYS_ASK, normalisePath, type Verdict } from './risk'
 
 export const POLICY_PATH = '.claude/smartworkbench.json'
 export const AUDIT_PATH = '.claude/smartworkbench-audit.jsonl'
@@ -198,7 +198,7 @@ export function repoPath(path: string, cwd: string): string | undefined {
 
 // A path outside the repository still has its dots folded, so a rule on /etc/** is not dodged by /repo/../etc/hosts.
 function relative(path: string, cwd: string): string {
-  if (/^[A-Za-z]:[\\/]/.test(path)) return path
+  if (/^[A-Za-z]:[\\/]/.test(path)) return normalisePath(path)
 
   return repoPath(path, cwd) ?? normalisePath(path.startsWith('/') ? path : `${cwd}/${path}`)
 }
@@ -219,7 +219,7 @@ export function matchRule(rules: readonly ProjectRule[], tool: string, input: un
 }
 
 // Built-in checks a checked-in file may tighten but never relax.
-const UNRELAXABLE = new Set(['secret-output', 'secret-file', 'guard-policy', 'codex-send', 'codex-write', 'codex-transfer'])
+const UNRELAXABLE = ALWAYS_ASK
 
 // A project rule may tighten anything, but cannot loosen a built-in block or a protected check.
 export function applyRule(builtIn: Verdict, rule: ProjectRule | undefined): Verdict {
@@ -231,6 +231,11 @@ export function applyRule(builtIn: Verdict, rule: ProjectRule | undefined): Verd
     return builtIn
   }
   const risk = rule.policy === 'block' ? 'high' : rule.policy === 'ask' && builtIn.risk === 'low' ? 'medium' : builtIn.risk
+  // A rule that asks about what is already asked, as protected checks are, keeps the built-in category, so the permissive
+  // profile and "Allow for session" still treat it as the check it is.
+  if (rule.policy === builtIn.policy && UNRELAXABLE.has(builtIn.category)) {
+    return { ...builtIn, reason: rule.reason ?? builtIn.reason }
+  }
 
   return {
     category: 'project-rule',

@@ -303,7 +303,7 @@ test('"Allow for session" stops asking for the same command until revoked, pause
   await $.tool.call({ tool: 'Bash', command: 'git push origin main' })
   expect(asked.length).toBe(3)
   await ui.press({ key: 'pause' })
-  await ui.press({ key: 'revoke-bash:git push' })
+  await ui.press({ key: 'revoke-bash:external-send:git push' })
   await $.tool.call({ tool: 'Bash', command: 'git push origin main' })
   expect(asked.length).toBe(4)
   await ui.unmount()
@@ -1138,12 +1138,12 @@ test('an image run that changed files outside the image folders is warned about,
   await $.tool.call({ tool: 'Bash', command: imageRun() })
 
   const warning = toasts.find(one => one.includes('outside the image folders')) ?? ''
-  // A new file, a renamed one, and a file that was already modified and edited again are all reported; the untouched one and the picture are not.
+  // A new file, a renamed one (both its paths), and a file that was already modified and edited again are all reported; the untouched one and the picture are not.
   for (const path of ['src/new.ts', 'img/b.png', 'README.md']) expect(warning).toContain(path)
   expect(warning).not.toContain('assets/gear.png')
   expect(warning).not.toContain('src/a.ts')
   const checks = feedLines(writes).filter(one => one.kind === 'codex.write-check')
-  expect(checks[0]?.count).toBe(3)
+  expect(checks[0]?.count).toBe(4)
 })
 
 test('an image run in a folder that is not a git repository, or one that only wrote the picture, raises no warning', async ($, on) => {
