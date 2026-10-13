@@ -221,7 +221,7 @@ for (const theme of ['dark', 'light']) {
 
 // ---- the data model: pure, so it runs here on synthetic events ----
 const modelCode = page.slice(page.indexOf('// model:begin'), page.indexOf('// model:end'))
-const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns }`)()
+const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf }`)()
 const feedOf = list => { const tr = M.newTrace(); let at = 1000; for (const ev of list) { at += 100; M.ingest(tr, { at, ...ev }) } return tr }
 const tr1 = feedOf([
   { kind: 'tool.start', id: 'x0', tool: 'Read', policy: 'allow' }, { kind: 'tool.end', id: 'x0', outcome: 'ok', ms: 30 },
@@ -288,5 +288,19 @@ const trW = feedOf([{ kind: 'prompt', text: 'p' }, ...[1, 2, 3].flatMap(i => [{ 
 check(M.turnWarns(trW.turns[0]).map(w => w.kind).join() === 'repeat,errors', 'the same call three times in a row, and three failures, each raise a note on the turn')
 check(M.turnWarns(feedOf([{ kind: 'prompt', text: 'p' }, { kind: 'tool.start', id: 'q1', tool: 'Bash', summary: 'a' }, { kind: 'tool.start', id: 'q2', tool: 'Bash', summary: 'b' }, { kind: 'tool.start', id: 'q3', tool: 'Bash', summary: 'a' }]).turns[0]).length === 0, 'different calls in a row raise no note')
 check(page.includes('role="tree"') && page.includes("'treeitem'"), 'the timeline is a tree of tree items')
+
+const q1 = M.parseQuery('tool:Bash -policy:allow "npm test" ms:>500 foo is:fail bogus:x')
+check(q1.terms.length === 7 && q1.terms[0].field === 'tool' && q1.terms[1].neg && q1.terms[1].field === 'policy' && q1.terms[2].val === 'npm test' && q1.terms[3].cmp.op === '>' && q1.terms[3].cmp.n === 500 && q1.terms[5].field === 'is' && q1.terms[6].field === null && q1.terms[6].val === 'bogus:x', 'the query parser reads fields, exclusions, phrases, comparisons and keeps an unknown field as plain text')
+check(M.parseQuery('ms:abc').terms[0].field === null && M.parseQuery('   ').terms.length === 0 && M.parseQuery('x'.repeat(1000)).text.length === 300, 'a bad comparison is plain text, a blank query is empty, a long one is cut')
+const sp1 = trW.spans.get('r1'), sp9 = tr1.spans.get('c')
+const m = (text, sp, now = 99999) => M.matchQuery(M.parseQuery(text), sp, now)
+check(m('tool:bash', sp1) && !m('tool:read', sp1) && m('npm', sp1) && m('"npm test" is:fail', sp1) && !m('-npm', sp1) && m('outcome:error', sp1) && m('ms:>5', sp1) && !m('ms:>10', sp1), 'search matches tool, text, outcome, phrase and duration, ANDs the words and honours exclusion')
+check(m('policy:ask', sp9) && m('is:ask -is:fail', sp9) && m('turn:1', sp9) && !m('turn:>1', sp9), 'search matches policy, the ask flag and the turn')
+check(M.marksOf('Run npm test, npm run', M.parseQuery('npm -run tool:x')).join('|') === '4,7|14,17', 'highlights cover the plain words, merged, ignoring exclusions and fields')
+const spn = (id, s, e) => ({ id, at: s, end: e })
+const cp = M.criticalPath([spn('a', 0, 100), spn('b', 10, 50), spn('c', 100, 300), spn('d', 120, 200)], 999)
+check(Object.keys(cp).sort().join() === 'a,c' && M.criticalPath([], 9) !== null, 'the critical path follows the latest finisher back through what ended before it started')
+check(M.runsOf([{ tool: 'B', summary: 'x' }, { tool: 'B', summary: 'x' }, { tool: 'B', summary: 'x' }, { tool: 'R', summary: 'y' }]).map(r => (r.run ? 'run' + r.run.length : 'one')).join() === 'run3,one' && M.runsOf([{ tool: 'B', summary: 'x' }, { tool: 'B', summary: 'x' }]).every(r => r.one), 'three or more neighbours that are the same call fold into a run; two do not')
+check(page.includes('id="mini"') && page.includes('id="tl-q"') && page.includes('type="search"'), 'the timeline has an overview strip and a search box')
 
 process.exit(failed === 0 ? 0 : 1)
