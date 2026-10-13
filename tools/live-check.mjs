@@ -184,4 +184,39 @@ const samples = [
 const missingHops = samples.flatMap(ev => routeOf(ev, { looping: true }).flatMap(route => route.path.slice(1).map((to, i) => [route.path[i], to])).filter(([a, b]) => hopOf(a, b) === null).map(([a, b]) => `${ev.kind}:${a}>${b}`))
 check(missingHops.length === 0, `every hop of every route is a drawn link${missingHops.length ? ' (missing ' + missingHops.join(', ') + ')' : ''}`)
 
+// ---- page structure: translations, ids, external resources, contrast ----
+const dictBody = /var DICT = \{([\s\S]*?)\n\};/.exec(page)?.[1] ?? ''
+const dict = new Function(`return {${dictBody}}`)()
+check(Object.keys(dict).length > 20 && Object.entries(dict).every(([, v]) => Array.isArray(v) && v.length === 2 && v[0] && v[1]), 'every DICT entry has an English and a Korean text')
+const usedKeys = [...page.matchAll(/data-i="([^"]+)"/g)].map(m => m[1]).concat([...page.matchAll(/\bT\('([^']+)'\)/g)].map(m => m[1]))
+const missingKeys = [...new Set(usedKeys)].filter(key => !(key in dict))
+check(missingKeys.length === 0, `every data-i and T() key is in DICT${missingKeys.length ? ' (missing ' + missingKeys.join(', ') + ')' : ''}`)
+const ids = [...page.slice(0, page.indexOf('<script>')).matchAll(/\bid="([^"]+)"/g)].map(m => m[1])
+const dupes = ids.filter((id, i) => ids.indexOf(id) !== i)
+check(dupes.length === 0, `no id appears twice${dupes.length ? ' (' + [...new Set(dupes)].join(', ') + ')' : ''}`)
+check(!/\bsrc=|href="https?:|@import|url\(/.test(page), 'the page loads nothing from outside')
+check(!/\son[a-z]+=/.test(page.slice(0, page.indexOf('<script>'))), 'no inline event handler attributes')
+check(page.includes('role="tablist"') && page.includes('role="tab"') && page.includes('role="tabpanel"'), 'the views are tabs with tab and tabpanel roles')
+
+const tokens = theme => {
+  const block = theme === 'dark' ? /:root\{([\s\S]*?)\n\}/.exec(page)?.[1] : /:root\[data-theme=light\]\{([\s\S]*?)\n\}/.exec(page)?.[1]
+  return Object.fromEntries([...(block ?? '').matchAll(/--([a-z0-9-]+):(#[0-9a-fA-F]{6})/g)].map(m => [m[1], m[2]]))
+}
+const lum = hex => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05) }
+for (const theme of ['dark', 'light']) {
+  const t = tokens(theme)
+  const bad = []
+  for (const bg of ['bg', 'surface', 'surface-2']) {
+    for (const fg of ['fg', 'fg-muted']) if (ratio(t[fg], t[bg]) < 4.5) bad.push(`${fg} on ${bg}`)
+    for (const c of ['ok', 'warn', 'bad', 'hold', 'loop', 'opus', 'sonnet', 'haiku', 'codex', 'guard']) if (ratio(t[c], t[bg]) < 4.5) bad.push(`${c} on ${bg}`)
+  }
+  for (const [c, bg] of [['ok', 'ok-bg'], ['warn', 'warn-bg'], ['bad', 'bad-bg'], ['hold', 'hold-bg'], ['loop', 'loop-bg']]) if (ratio(t[c], t[bg]) < 4.5) bad.push(`${c} on ${bg}`)
+  for (const bg of ['bg', 'surface']) for (const c of ['border-strong', 'focus']) if (ratio(t[c], t[bg]) < 3) bad.push(`${c} on ${bg}`)
+  check(Object.keys(t).length >= 20 && bad.length === 0, `${theme} theme text is 4.5:1 and controls 3:1 against their backgrounds${bad.length ? ' (' + bad.join(', ') + ')' : ''}`)
+}
+
 process.exit(failed === 0 ? 0 : 1)
