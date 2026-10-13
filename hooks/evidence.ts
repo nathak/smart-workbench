@@ -43,7 +43,7 @@ function maskText(command: string): string {
 }
 
 // Flags that make a tool exit 0 without running its check (version, dry run, list only, format only, skipped tests).
-const NO_CHECK = /(?:^|\s)(?:--version|--help|--init|--showConfig|--no-run|--collect-only|--co|--listTests|--dry-run|--just-print|-DskipTests|-Dmaven\.test\.skip(?:=true)?)(?=\s|=|$)|^ruff\s+format\b|^make\s+(?:\S+\s+)*-[a-zA-Z]*n\b/
+const NO_CHECK = /(?:^|\s)(?:--version|--help|--init|--showConfig|--no-run|--collect-only|--co|--listTests|--dry-run|--just-print|-DskipTests|-Dmaven\.test\.skip(?:=true)?|--passWithNoTests|-list)(?=\s|=|$)|(?:^|\s)ruff\s+format\b|^make\s+(?:\S+\s+)*-[a-zA-Z]*n\b/
 
 type Segment = { text: string; op: string | undefined }
 

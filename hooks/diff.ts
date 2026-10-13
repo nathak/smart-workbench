@@ -120,16 +120,20 @@ export function coverageOf(changed: Changed, evidence: readonly EvidenceRecord[]
     }
 
     const after = evidence.filter(one => one.at >= editedAt && one.ok !== null)
-    const latest = after[after.length - 1]
+    // The latest result of each kind of check: a passing lint run does not hide a failing test run.
+    const latestByKind = new Map<string, EvidenceRecord>()
+    for (const one of after) latestByKind.set(one.kind, one)
+    const failing = [...latestByKind.values()].filter(one => one.ok === false).sort((a, b) => a.at - b.at)
     const provenBy = [...after].reverse().find(one => one.ok === true)
-    const state = latest === undefined ? 'unproven' : latest.ok ? 'proven' : 'failing'
+    const failedBy = failing[failing.length - 1]
+    const state = after.length === 0 ? 'unproven' : failing.length > 0 ? 'failing' : 'proven'
 
     return {
       path,
       hunks,
       editedAt,
       ...(provenBy ? { provenBy } : {}),
-      ...(latest && !latest.ok ? { failedBy: latest } : {}),
+      ...(failedBy ? { failedBy } : {}),
       state,
     }
   })

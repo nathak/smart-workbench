@@ -6,7 +6,7 @@ import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
 import { PROPOSE_TOOL } from './intent'
-import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, type Injection, type PinContent } from './context'
+import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
 import { checkOutcome, completionOf, evidenceKindsOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
@@ -37,11 +37,15 @@ const HELP = [
   'SmartWorkbench commands:',
   '  /smartworkbench            open the panel',
   '  /smartworkbench new        start a new task contract',
+  '  /smartworkbench intent     open the Intent tab',
   '  /smartworkbench context    open the Context tab',
   '  /smartworkbench run        open the Run tab',
-  '  /smartworkbench verify     open the Evidence tab',
+  '  /smartworkbench verify     open the Evidence tab (also: evidence)',
   '  /smartworkbench lock | unlock   lock the contract (added to every prompt) or unlock it to edit',
   '  /smartworkbench team [on|off]   team mode: Opus designs and reviews, Sonnet builds, Haiku explores',
+  '  /smartworkbench team <lead|explorer|advisor> <model> [effort]   set a role\'s model and effort',
+  '  /smartworkbench team codex on|off|check|review on|off|rescue on|off   optional Codex second opinion',
+  '  /smartworkbench live [port|stop] [--no-prompts]   live web view of the request flow (stop: off)',
   '  /smartworkbench advise [topic]  ask the Opus advisor now',
   '  /smartworkbench loop <count|inf> <item>[; <item>...]   repeat a task; works with team mode (loop stop | loop status)',
   '  /smartworkbench status     text summary (works without UI)',
@@ -66,6 +70,7 @@ const badgesAtom = atom({ plugin: 'smartworkbench', key: 'badges' } as const, {}
 const MAX_BADGES = 200
 const MAX_SNAPSHOT = 64 * 1024
 const HANDOFF_PATH = '.claude/smartworkbench-handoff.md'
+const EDIT_TOOL_NAMES = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 
 // ---- state: $.state for drawing, $.store (per project) to survive restarts
 
@@ -753,11 +758,13 @@ async function snapshotPin($: $, pin: ContextPin): Promise<void> {
     $.ui.toast(`SmartWorkbench: cannot read ${pin.path}`)
     return
   }
-  if (text.length > MAX_SNAPSHOT) {
-    $.ui.toast(`SmartWorkbench: ${pin.path} is over 64 KB; pin a line range to snapshot it`)
+  // Only the pinned range is kept (and measured), so a range of a large file can be frozen.
+  const kept = sliceLines(text, pin.lines)
+  if (kept.length > MAX_SNAPSHOT) {
+    $.ui.toast(`SmartWorkbench: ${pin.path}${pin.lines ? ' in that range' : ''} is over ${MAX_SNAPSHOT.toLocaleString('en-US')} characters; ${pin.lines ? 'pin a smaller line range' : 'pin a line range'} to snapshot it`)
     return
   }
-  const snapshot = { text, sha256: await sha256(text), at: await $.clock.now() }
+  const snapshot = { text: kept, sha256: await sha256(kept), at: await $.clock.now(), ...(pin.lines ? { sliced: true as const } : {}) }
   await mutate($, wb => model.setPinMode(wb, pin.id, snapshot))
 }
 
@@ -792,11 +799,23 @@ async function savedNames($: $, prefix: 'set:' | 'tpl:'): Promise<string[]> {
   return (await $.store.keys()).filter(key => key.startsWith(prefix)).map(key => key.slice(prefix.length))
 }
 
-async function exportHandoff($: $, path: string): Promise<string> {
-  const target = path.trim() || HANDOFF_PATH
-  await $.fs.write(target, handoffMarkdown(await read($, wbAtom), await $.clock.now()))
+// A file the person names is written only inside the project and never over a file that already exists (the default path is ours to rewrite).
+async function writableTarget($: $, path: string, fallback: string): Promise<string | { refused: string }> {
+  const target = path.trim() || fallback
+  if (target === fallback) return target
+  if (repoPath(target, await $.session.cwd()) === undefined) return { refused: `${target} is outside the project; give a path inside it.` }
+  if (await $.fs.exists(target).catch(() => false)) return { refused: `${target} already exists; give another name or delete it first.` }
 
   return target
+}
+
+async function exportHandoff($: $, path: string): Promise<{ written: string } | { refused: string }> {
+  const target = await writableTarget($, path, HANDOFF_PATH)
+  if (typeof target !== 'string') return target
+  // The handoff is meant to be read by someone else, so a command with a token in it is masked.
+  await $.fs.write(target, redact(handoffMarkdown(await read($, wbAtom), await $.clock.now())))
+
+  return { written: target }
 }
 
 // The line a tool row gets under it, from the call's record and any evidence it produced.
@@ -805,6 +824,13 @@ async function badge($: $, call: ToolCallRecord): Promise<void> {
   const text = badgeOf(call, wb.evidence.find(one => one.id === call.id), wb)
   if (text === undefined) return
   await update($, badgesAtom, all => Object.fromEntries([...Object.entries(all), [call.id, text]].slice(-MAX_BADGES)))
+}
+
+// A task with anything in it (not only a goal) is lost by new, load and pickup, so those ask first.
+function isTaskInUse(wb: Workbench): boolean {
+  const task = wb.task
+
+  return task.goal.trim() !== '' || task.constraints.length > 0 || task.nonGoals.length > 0 || task.doneConditions.length > 0 || wb.evidence.length > 0
 }
 
 // Re-reads the checked-in guard file; no file means the person's own profile and the built-in rules.
@@ -1016,7 +1042,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
 
   if (word === 'new') {
     const wb = await read($, wbAtom)
-    if (wb.task.goal.trim() !== '') {
+    if (isTaskInUse(wb)) {
       const answer = await $.ui
         .ask('Start a new task? The current contract and its evidence are replaced.', ['Start new', 'Keep current'])
         .catch(() => 'Keep current')
@@ -1047,8 +1073,8 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     // /swb team <lead|explorer|advisor> <model> [effort], or an effort alone
     const role = crew.ROLES.find(one => one === verb)
     if (role && first) {
-      const isEffort = (value: string) => ((role === 'lead' ? crew.LEAD_EFFORTS : crew.EFFORTS) as readonly string[]).includes(value)
-      const change = isEffort(first) ? { effort: first } : { model: first, ...(second && isEffort(second) ? { effort: second } : {}) }
+      const isEffort = (value: string) => ((role === 'lead' ? crew.LEAD_EFFORTS : crew.EFFORTS) as readonly string[]).includes(value.toLowerCase())
+      const change = isEffort(first) ? { effort: first.toLowerCase() } : { model: first, ...(second && isEffort(second) ? { effort: second.toLowerCase() } : {}) }
       return { text: await changeRole($, role, change, true) }
     }
 
@@ -1149,7 +1175,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
       return { text: `No template "${name}". Templates: ${all.length > 0 ? all.join(', ') : 'none'}` }
     }
     const wb = await read($, wbAtom)
-    if (wb.task.goal.trim() !== '') {
+    if (isTaskInUse(wb)) {
       const answer = await $.ui
         .ask(`Replace the current task with template "${name}"? Its evidence is cleared.`, ['Load template', 'Keep current'])
         .catch(() => 'Keep current')
@@ -1186,7 +1212,8 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   if (word === 'share') {
-    const target = name || SHARE_PATH
+    const target = await writableTarget($, name, SHARE_PATH)
+    if (typeof target !== 'string') return { text: target.refused }
     const live = await read($, liveAtom)
     await $.fs.write(target, shareText(await read($, wbAtom), await $.clock.now(), live.user))
     await audit($, 'task.share', { path: target })
@@ -1201,7 +1228,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     const shared = readShare(text)
     if ('error' in shared) return { text: `${target}: ${shared.error}` }
     const wb = await read($, wbAtom)
-    if (wb.task.goal.trim() !== '') {
+    if (isTaskInUse(wb)) {
       const answer = await $.ui
         .ask(`Replace the current task with the one shared${shared.sharedBy ? ` by ${shared.sharedBy}` : ''} at ${shared.sharedAt}?`, ['Pick up', 'Keep current'])
         .catch(() => 'Keep current')
@@ -1240,9 +1267,9 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   if (word === 'export') {
-    const target = await exportHandoff($, name)
+    const done = await exportHandoff($, name)
 
-    return { text: `Handoff written to ${target}.` }
+    return { text: 'refused' in done ? done.refused : `Handoff written to ${done.written}.` }
   }
 
   return { text: HELP }
@@ -1734,7 +1761,7 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
           key="export"
           hotkey="x"
           label="Export handoff"
-          onPress={() => void exportHandoff($, '').then(target => $.ui.toast(`SmartWorkbench: handoff written to ${target}`))}
+          onPress={() => void exportHandoff($, '').then(done => $.ui.toast(`SmartWorkbench: ${'refused' in done ? done.refused : `handoff written to ${done.written}`}`))}
         />
       </Box>
     </Box>
@@ -1914,7 +1941,7 @@ export const register: Register = on => {
     isFeedNoted = false
     treeRoot = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
-    const argumentHint = '[new|team|advise|loop|lock|unlock|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
@@ -2215,7 +2242,8 @@ export const register: Register = on => {
         })
       }
 
-      return path && isOk ? model.observe(updated, e.tool, path, endedAt) : updated
+      // A file outside the project is neither pinned nor counted as the task's change: it must not trigger the final check or stale a passing test.
+      return path && isOk && (inRepo !== undefined || !EDIT_TOOL_NAMES.has(e.tool)) ? model.observe(updated, e.tool, path, endedAt) : updated
     })
 
     if (isTeam && isOk && e.agentId === undefined && inRepo !== undefined && model.isEditTool(e.tool)) {
