@@ -12,7 +12,8 @@ const re = (source: string, flags = ''): RegExp => new RegExp(source, flags)
 
 // git with its global options skipped (git -C dir push, git -c k=v reset). A value never starts with "-" and every dash
 // word has one reading, so the pattern cannot backtrack exponentially.
-const GIT = String.raw`\bgit(?:\s+(?:-[Cc]\s+[^\s-]\S*|--(?:git-dir|work-tree|namespace|exec-path|super-prefix|config-env)\s+[^\s-]\S*|-[\w-]*(?:=\S*)?))*\s+`
+const GIT_VALUE = String.raw`(?:"[^"]*"|'[^']*'|(?:\\.|[^\s"'\\-])(?:\\.|[^\s\\])*)`
+const GIT = String.raw`\bgit(?:\s+(?:-[Cc]\s+${GIT_VALUE}|--(?:git-dir|work-tree|namespace|exec-path|super-prefix|config-env)\s+${GIT_VALUE}|-[\w-]*(?:=\S*)?))*\s+`
 // Where a command can start: after whitespace, a separator, a quote or a path (/bin/rm, \rm).
 const AT = String.raw`(?:^|[\s;&|(\`"'/\\])`
 // Any arguments before the one we look for, within the same simple command.
@@ -40,6 +41,8 @@ export function redact(text: string): string {
     )
     // The name may be quoted, as in JSON: "api_key": "abc".
     .replace(new RegExp(String.raw`\b(${SECRET_NAME})(["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;]+)`, 'gi'), '$1$2***')
+    // A flag that carries the secret as the next word: --password hunter2, --token=abc.
+    .replace(/(\s--?(?:password|passwd|pass|token|secret|api-?key|auth)(?:\s+|=))("[^"\n]*"|'[^'\n]*'|[^\s;|&]+)/gi, '$1***')
 }
 
 // stripped: also read the command with its command substitutions removed, so "rm $(x) -rf d" is seen while the flags
@@ -71,7 +74,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     pattern: re(
-      String.raw`${GIT}(?:reset\s+[^;&|\n]*--hard|clean\s+[^;&|\n]*-[a-z]*f|checkout\s+[^;&|\n]*--\s+${WHOLE_TREE}${WORD_END}|checkout\s+${ARGS}${WHOLE_TREE}${WORD_END}|restore\s+(?!(?=${ARGS}(?:--staged\b|-[a-zA-Z]*S))(?!${ARGS}(?:--worktree\b|-[a-zA-Z]*W)))${ARGS}${WHOLE_TREE}${WORD_END}|stash\s+clear\b|branch\s+(?:${ARGS}-[a-zA-Z]*D|(?=${ARGS}(?:--delete\b|-[a-zA-Z]*d))(?=${ARGS}(?:--force\b|-[a-zA-Z]*f))))`,
+      String.raw`${GIT}(?:reset\s+[^;&|\n]*--hard|checkout\s+${ARGS}(?:-[a-zA-Z]*f\b|--force\b)|switch\s+${ARGS}(?:--discard-changes\b|-[a-zA-Z]*f\b)|clean\s+[^;&|\n]*-[a-z]*f|checkout\s+[^;&|\n]*--\s+${WHOLE_TREE}${WORD_END}|checkout\s+${ARGS}${WHOLE_TREE}${WORD_END}|restore\s+(?!(?=${ARGS}(?:--staged\b|-[a-zA-Z]*S))(?!${ARGS}(?:--worktree\b|-[a-zA-Z]*W)))${ARGS}${WHOLE_TREE}${WORD_END}|stash\s+clear\b|branch\s+(?:${ARGS}-[a-zA-Z]*D|(?=${ARGS}(?:--delete\b|-[a-zA-Z]*d))(?=${ARGS}(?:--force\b|-[a-zA-Z]*f))))`,
     ),
     reason: 'destructive git command discards work',
   },
@@ -80,7 +83,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     stripped: true,
-    pattern: re(String.raw`${AT}rm["']?\s+${FLAT_ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
+    pattern: re(String.raw`${AT}(?<!\bgit\s+)rm["']?\s+${FLAT_ARGS}(?:-[a-zA-Z]*[rR]|--recursive\b)|\bfind\b[^;&|\n]*\s-delete\b`),
     reason: 'recursive delete',
   },
   {
@@ -97,7 +100,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'ask',
     pattern: re(
-      String.raw`\b(?:curl|wget)\b[^;\n]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:ba|z|da|k)?sh\b|\b(?:(?:ba|z|da|k)?sh\s+(?:-\S+\s+)*|eval\s+)["']?(?:\$\(|<\()\s*(?:curl|wget)\b|(?:\bsource|${AT}\.)\s+<\(\s*(?:curl|wget)\b`,
+      String.raw`\b(?:curl|wget)\b[^;\n]*\|\s*(?:(?:sudo|env|exec|command)\s+(?:-\S+(?:\s+[^\s|;&-]\S*)?\s+)*)?(?:\S*\/)?(?:(?:ba|z|da|k)?sh\b|(?:python[\d.]*|perl|ruby|node)(?=\s*(?:-\s*)?(?:$|[;&|)])))|\b(?:ba|z|da|k)?sh\s*<\s*<\(\s*(?:curl|wget)\b|\b(?:(?:ba|z|da|k)?sh\s+(?:-\S+\s+)*|eval\s+)["']?(?:\$\(|<\()\s*(?:curl|wget)\b|(?:\bsource|${AT}\.)\s+<\(\s*(?:curl|wget)\b`,
     ),
     reason: 'runs a script downloaded from the network',
   },
@@ -115,7 +118,7 @@ const BASH_RULES: readonly Rule[] = [
     policy: 'ask',
     raw: true,
     pattern: re(
-      String.raw`(^|[;&|]\s*)(env|printenv|set)\s*($|[;&|])|\b(cat|less|head|tail|grep)\b[^;&|\n]*((^|[^\w.])\.env(?!\.(example|sample|template)\b)(\.[\w-]+)?(?=$|[^\w-])|credentials|\.npmrc|\.netrc|id_rsa|\.pem\b)|\$\{?${SECRET_NAME}|\bprintenv\s+(?:-\S+\s+)*${SECRET_NAME}|\bgh\s+auth\s+token\b`,
+      String.raw`(^|[;&|]\s*)(env|printenv|set)\s*($|[;&|])|\b(cat|less|head|tail|grep)\b[^;&|\n]*((^|[^\w.])\.env(?!\.(example|sample|template)\b)(\.[\w-]+)?(?=$|[^\w-])|credentials|\.npmrc|\.netrc|id_(?:rsa|dsa|ecdsa|ed25519)|\.git-credentials|\.envrc|\.pgpass|\.pypirc|\.pem\b)|\$\{?${SECRET_NAME}|\bprintenv\s+(?:-\S+\s+)*${SECRET_NAME}|\bgh\s+auth\s+token\b`,
       'i',
     ),
     reason: 'may print secrets',
@@ -125,7 +128,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'medium',
     policy: 'ask',
     raw: true,
-    pattern: /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+transfer\b/,
+    pattern: /\bnode\b[^;&|\n]*?codex-companion\.mjs["']?\s+transfer\b/,
     reason: 'sends this Claude session transcript to OpenAI Codex',
   },
   {
@@ -133,7 +136,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'medium',
     policy: 'ask',
     raw: true,
-    pattern: /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+task\b[\s\S]*?(?:^|[\s"'])--?w\\?r\\?i\\?t\\?e\b/,
+    pattern: /\bnode\b[^;&|\n]*?codex-companion\.mjs["']?\s+task\b[\s\S]*?(?:^|[\s"'])--?w\\?r\\?i\\?t\\?e\b/,
     reason: 'lets Codex edit files outside the guard',
   },
   {
@@ -141,7 +144,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'medium',
     policy: 'ask',
     raw: true,
-    pattern: /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+(?:review|adversarial-review|task)\b/,
+    pattern: /\bnode\b[^;&|\n]*?codex-companion\.mjs["']?\s+(?:review|adversarial-review|task)\b/,
     reason: "sends this repository's code to OpenAI Codex",
   },
   {
@@ -149,7 +152,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'medium',
     policy: 'ask',
     pattern: re(
-      String.raw`${GIT}push\b|\bgh\s+(pr\s+(create|merge)|release|issue\s+(create|comment)|api\s+[^;&|\n]*-X\s*(POST|PUT|PATCH|DELETE))|\b(npm|pnpm|yarn|cargo)\s+publish\b|\bcurl\b[^;&|\n]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s(-d|--data|-F|--form)\b)|\b(scp|sftp)\b|\brsync\b[^;&|\n]*\S+:|\bkubectl\s+(apply|delete)|\b(vercel|netlify|fly|firebase)\s+deploy|\b(?:docker|podman)\s+(?:image\s+)?push\b|\bdocker\s+buildx\s+build\b[^;&|\n]*\s--push\b|\b(?:terraform|tofu)(?:\s+-\S+)*\s+(?:apply|destroy)\b|\bpulumi\s+(?:up|destroy)\b|(^|[;&|(\`]\s*|\$\()((sudo|env|time|exec|xargs|nohup|bash|sh|zsh|node|python3?|ruby|npx|make|(npm|pnpm|yarn|bun)(\s+run)?)\s+)*[\w./-]*deploy[\w.-]*(\s|$)`,
+      String.raw`${GIT}push\b|\bgh\s+(pr\s+(create|merge)|release|issue\s+(create|comment)|repo\s+(delete|create)|gist\s+create|api\s+[^;&|\n]*(?:-X\s*|--method[\s=])(POST|PUT|PATCH|DELETE))|\b(npm|pnpm|yarn|cargo)\s+publish\b|\bcurl\b[^;&|\n]*(\s-[a-zA-Z]*X\s*(POST|PUT|PATCH|DELETE)|\s--request[\s=](POST|PUT|PATCH|DELETE)|\s(-d|--data|-F|--form|-T|--upload-file|--json)\b)|\b(scp|sftp)\b|\brsync\b[^;&|\n]*\S+:|\bkubectl\s+(apply|delete)|\b(vercel|netlify|fly|firebase)\s+deploy|\b(?:docker|podman)\s+(?:image\s+)?push\b|\bdocker\s+buildx\s+build\b[^;&|\n]*\s--push\b|\b(?:terraform|tofu)(?:\s+-\S+)*\s+(?:apply|destroy)\b|\bpulumi\s+(?:up|destroy)\b|(^|[;&|(\`]\s*|\$\()((sudo|env|time|exec|xargs|nohup|bash|sh|zsh|node|python3?|ruby|npx|make|(npm|pnpm|yarn|bun)(\s+run)?)\s+)*[\w./-]*deploy[\w.-]*(\s|$)`,
     ),
     reason: 'sends to an external system',
   },
@@ -243,8 +246,11 @@ function maskData(command: string, hadContinuation = false): string {
 
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'WebSearch', 'WebFetch', 'ToolSearch', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'])
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
-const SECRET_PATH = /(^|\/)(\.env(\.[^/]*)?|\.npmrc|\.netrc|credentials(\.json)?|id_rsa[^/]*|[^/]*\.pem)$/
-const GUARD_FILE = /(^|\/)\.claude\/smartworkbench\.json$/
+// .env.example and its kin hold no secrets by convention. Keys and credential files of the usual tools are listed by name.
+const SECRET_PATH = /(^|\/)(\.env(?:\.(?!(?:example|sample|template|dist)$)[^/]*)?|\.envrc|\.npmrc|\.netrc|\.pgpass|\.pypirc|\.git-credentials|credentials(\.json)?|id_(?:rsa|dsa|ecdsa|ed25519)[^/]*|[^/]*\.(?:pem|pfx|p12)|\.kube\/config|\.ssh\/(?!known_hosts$|config$)[^/]+)$/i
+const GUARD_FILE = /(^|\/)\.claude\/smartworkbench\.json$/i
+// A glob that reaches for secrets files (**/.env*, **/id_*, *.pem).
+const SECRET_GLOB = /(^|[/*])\.env(?!\.(?:example|sample|template|dist)\b)|\.envrc|\.npmrc|\.netrc|\.pgpass|\.pypirc|\.git-credentials|credentials|id_(?:rsa|dsa|ecdsa|ed25519|\*)|\*\.(?:pem|pfx|p12)\b|\.ssh\/\*/i
 const SEND_TOOL = /(^|_)(send|post|publish|deploy|create_pr|create_pull_request|share|comment|reply|message)/i
 
 // MCP tools by what they touch, from the server and tool names: deploys and anything that
@@ -291,9 +297,11 @@ export function classify(tool: string, input: unknown): Verdict {
     // Bash joins a line only at an odd run of backslashes and never across \r, so a continuation is not trusted for pairing.
     const data = maskData(command, /\\\r?\n/.test(typed))
     const plain = withoutSubstitutions(data)
+    // The same command with its quotes and escapes removed, so "-rf", '-'r and git "push" read as the flags and words they become in the shell.
+    const unquoted = data.replace(/\\(?=\S)/g, '').replace(/["']/g, '')
     const rule = BASH_RULES.find(one => {
-      const text = one.raw ? command : data
-      return one.pattern.test(text) || (one.stripped === true && one.pattern.test(plain))
+      if (one.raw) return one.pattern.test(command)
+      return one.pattern.test(data) || one.pattern.test(unquoted) || (one.stripped === true && one.pattern.test(plain))
     })
 
     return rule
@@ -314,9 +322,11 @@ export function classify(tool: string, input: unknown): Verdict {
   }
 
   if (READ_TOOLS.has(tool)) {
-    const path = normalisePath(String(args.file_path ?? ''))
+    // Read names one file; Grep and Glob can point at a secrets file too, by path or by glob.
+    const named = [args.file_path, tool === 'Grep' || tool === 'Glob' ? args.path : undefined, tool === 'Grep' ? args.glob : tool === 'Glob' ? args.pattern : undefined]
+    const touchesSecret = named.some(one => typeof one === 'string' && (SECRET_PATH.test(normalisePath(one)) || (tool !== 'Read' && SECRET_GLOB.test(one))))
 
-    return tool === 'Read' && SECRET_PATH.test(path)
+    return (tool === 'Read' || tool === 'Grep' || tool === 'Glob') && touchesSecret
       ? { category: 'secret-output', risk: 'medium', policy: 'ask', reason: 'reads a secrets file' }
       : { category: 'read', ...LOW }
   }
@@ -329,7 +339,7 @@ export function classify(tool: string, input: unknown): Verdict {
 }
 
 // Asked even under the permissive profile.
-const ALWAYS_ASK = new Set(['secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec', 'codex-send', 'codex-write', 'codex-transfer'])
+export const ALWAYS_ASK = new Set(['project-rule', 'secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec', 'codex-send', 'codex-write', 'codex-transfer'])
 
 // Applies the profile and the pause switch on top of the default (balanced) rule set.
 export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolean): Policy {
@@ -369,8 +379,10 @@ const WRAPPERS = new Set(['sudo', 'env', 'command', 'nohup', 'time', 'exec', 'ti
 
 // Folds `.`, empty segments and `..` out of a path as text, so `.claude/./x` and `src/../secrets/k` cannot dodge a path rule.
 // No file system access: symlinks are not followed.
-export function normalisePath(path: string): string {
-  const absolute = path.startsWith('/')
+export function normalisePath(raw: string): string {
+  // A Windows path (C:\repo\.env) is read with its backslashes as separators, so path rules and secret names see it as they would a posix one.
+  const path = /^[A-Za-z]:[\\/]|^\\\\/.test(raw) ? raw.replace(/\\/g, '/') : raw
+  const absolute = path.startsWith('/') || /^[A-Za-z]:\//.test(path)
   const out: string[] = []
   for (const part of path.split('/')) {
     if (part === '' || part === '.') continue
@@ -438,11 +450,16 @@ export function sessionScope(tool: string, input: unknown, verdict: Verdict): Se
   const args = (input ?? {}) as Record<string, unknown>
 
   if (tool === 'Bash') {
-    const prefixes = splitCommand(String(args.command ?? '')).map(commandPrefix)
+    const text = String(args.command ?? '')
+    // A background "&", a command substitution or a subshell hides a second command that the prefix does not name.
+    if (/(?<![&>\d])&(?!&)|`|\$\(|[<>]\(|(^|[;&|]\s*)\(/.test(text.replace(/\d*[<>]&[\d-]*/g, ''))) return undefined
+    // What is asked about secrets is asked about each time: the key is the whole command.
+    if (verdict.category === 'secret-output' || verdict.category === 'secret-file') return { key: `bash:${verdict.category}:${text.trim()}`, label: text.trim().slice(0, 60) }
+    const prefixes = splitCommand(text).map(commandPrefix)
     if (prefixes.length === 0 || prefixes.some(one => one === undefined)) return undefined
     const unique = [...new Set(prefixes as string[])].sort()
 
-    return { key: `bash:${unique.join(' && ')}`, label: unique.join(' && ') }
+    return { key: `bash:${verdict.category}:${unique.join(' && ')}`, label: unique.join(' && ') }
   }
 
   const rawPath = args.file_path ?? args.notebook_path

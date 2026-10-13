@@ -27,7 +27,7 @@ const OPS: readonly string[] = ['review', 'adversarial-review', 'task', 'transfe
 
 // A Bash command that runs the plugin's companion script, and what it asks of it.
 export function codexCall(command: string): CodexCall | undefined {
-  const hit = /\bnode\s+["']?\S*codex-companion\.mjs["']?\s+([\w-]+)/.exec(command)
+  const hit = /\bnode\b[^;&|\n]*?codex-companion\.mjs["']?\s+([\w-]+)/.exec(command)
   if (!hit || !OPS.includes(hit[1] ?? '')) return undefined
 
   return { op: hit[1] as CodexOp, write: /(?:^|[\s"'])--?w\\?r\\?i\\?t\\?e\b/.test(command), background: /\s--background\b/.test(command) }
@@ -80,8 +80,12 @@ export function porcelainPaths(stdout: string): string[] {
     const entry = parts[i] ?? ''
     if (entry.length < 4) continue
     paths.push(entry.slice(3))
-    // A rename or copy is followed by its old path, whichever of the two columns says so.
-    if (/[RC]/.test(entry.slice(0, 2))) i++
+    // A rename or copy is followed by its old path, whichever of the two columns says so; the old path changed too.
+    if (/[RC]/.test(entry.slice(0, 2))) {
+      const old = parts[i + 1]
+      if (old) paths.push(old)
+      i++
+    }
   }
 
   return paths
@@ -89,11 +93,16 @@ export function porcelainPaths(stdout: string): string[] {
 
 // Paths that changed during an image run (new, or a different size or modification time than before) and are not pictures in an asset folder.
 export function strayWrites(before: ReadonlyMap<string, string>, after: ReadonlyMap<string, string>): string[] {
-  return [...after].filter(([path, stat]) => before.get(path) !== stat && !isImagePath(path)).map(([path]) => path)
+  // A path that was there before and is gone now (reverted, committed, moved) changed as well.
+  const paths = new Set([...before.keys(), ...after.keys()])
+
+  return [...paths].filter(path => before.get(path) !== after.get(path) && !isImagePath(path))
 }
 
 export function isImageTask(command: string, path: string): boolean {
   if (!isPlainInvocation(command, path, true)) return false
+  // A background run is not compared afterwards, so a brief that hides a second write would go unseen.
+  if (/(^|\s)--background\b/.test(command)) return false
   const hit = /^node[ \t]+\S+[ \t]+task((?:[ \t]+--(?:write|wait|background))*)[ \t]+("[^"]*"|'[^']*')$/.exec(command.trim().replace(/^node[ \t]+"([^"]*)"/, 'node $1'))
   if (!hit || !/--write/.test(hit[1] ?? '')) return false
   const brief = (hit[2] ?? '').slice(1, -1)

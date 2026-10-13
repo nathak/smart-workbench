@@ -232,7 +232,9 @@ async function audit($: $, event: string, detail: Record<string, unknown> = {}):
     const config = live.policy?.audit
     if (!config) return
     const at = new Date(await $.clock.now()).toISOString()
-    const line = auditLine({ at, event, ...(live.user ? { user: live.user } : {}), ...(live.sessionId ? { session: live.sessionId } : {}), ...detail })
+    // The log is committed by some teams: a command with a token in it must not reach it as typed.
+    const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? redact(value) : value]))
+    const line = auditLine({ at, event, ...(live.user ? { user: live.user } : {}), ...(live.sessionId ? { session: live.sessionId } : {}), ...masked })
     const { text, rotated } = appendAudit(await $.fs.read(config.path).catch(() => undefined), line)
     if (rotated !== undefined) {
       await $.fs.write(`${config.path}.1`, rotated)
@@ -801,8 +803,13 @@ async function loadPolicy($: $): Promise<void> {
   }
 }
 
+// A checked-in guard file may only tighten the person's own setting: the stricter of the two applies.
+const PROFILE_RANK: Record<GuardProfile, number> = { permissive: 0, balanced: 1, strict: 2 }
 function profileOf(wb: Workbench, live: Live): GuardProfile {
-  return live.policy?.profile ?? wb.execution.profile
+  const own = wb.execution.profile
+  const file = live.policy?.profile
+
+  return file !== undefined && PROFILE_RANK[file] > PROFILE_RANK[own] ? file : own
 }
 
 function policyText(live: Live): string {
