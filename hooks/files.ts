@@ -1,7 +1,7 @@
 import type { ContextPin, FileCategory, Observed } from '../types'
 
 const RULES: readonly { category: FileCategory; pattern: RegExp }[] = [
-  { category: 'secret', pattern: /(^|\/)(\.env(\.[^/]*)?|\.npmrc|\.netrc|credentials(\.json)?|id_rsa[^/]*|[^/]*\.(pem|key|p12))$/ },
+  { category: 'secret', pattern: /(^|\/)(\.env(?:\.(?!(?:example|sample|template|dist)$)[^/]*)?|\.envrc|\.npmrc|\.netrc|\.pgpass|\.pypirc|\.git-credentials|credentials(\.json)?|id_(?:rsa|dsa|ecdsa|ed25519)[^/]*|[^/]*\.(pem|key|p12|pfx)|\.kube\/config|\.ssh\/(?!known_hosts$|config$)[^/]+)$/i },
   {
     category: 'generated',
     pattern: /(^|\/)(dist|build|out|coverage|node_modules|\.next|target|vendor)\/|(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|Cargo\.lock|poetry\.lock|go\.sum)$|\.min\.(js|css)$|\.map$/,
@@ -10,14 +10,17 @@ const RULES: readonly { category: FileCategory; pattern: RegExp }[] = [
     category: 'test',
     pattern: /(^|\/)(tests?|__tests__|spec|e2e)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.(go|py)$|(^|\/)test_[^/]*\.py$|Test\.(java|kt|cs)$/,
   },
-  { category: 'docs', pattern: /(^|\/)docs?\/|\.(md|mdx|rst|txt|adoc)$|(^|\/)(LICENSE|CHANGELOG)[^/]*$/i },
+  { category: 'docs', pattern: /(^|\/)docs?\/|\.(md|mdx|rst|adoc)$|(?<!(?:^|\/)(?:requirements[\w.-]*|CMakeLists|constraints[\w.-]*))\.txt$|(^|\/)(LICENSE|CHANGELOG)[^/]*$/i },
   {
     category: 'config',
     pattern: /(^|\/)(package\.json|tsconfig[^/]*\.json|Dockerfile|Makefile|\.gitignore|\.editorconfig|CLAUDE\.md)$|(^|\/)\.(github|claude|vscode|husky)\/|\.config\.[cm]?[jt]s$|\.(ya?ml|toml|ini|cfg|conf|properties)$|(^|\/)\.[^/]*rc(\.json|\.js)?$/,
   },
 ]
 
-export function categoryOf(path: string): FileCategory {
+export function categoryOf(raw: string): FileCategory {
+  // A Windows path reads like a posix one, so the same names match.
+  const path = raw.includes('\\') ? raw.replace(/\\/g, '/') : raw
+
   return RULES.find(rule => rule.pattern.test(path))?.category ?? 'source'
 }
 

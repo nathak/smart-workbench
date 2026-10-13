@@ -1,6 +1,6 @@
 // Team features that touch no engine API: audit lines, CI results, issue refs and
 // the shared task file. register.tsx does the reading, writing and process runs.
-import type { ContextPin, EvidenceRecord, IssueRef, Task, Workbench } from '../types'
+import type { ContextPin, EvidenceKind, EvidenceRecord, IssueRef, Task, Workbench } from '../types'
 
 // ---- audit log
 
@@ -166,5 +166,35 @@ export function readShare(text: string): SharedTask | { error: string } {
     return { error: 'the task is missing or malformed' }
   }
 
-  return { ...(value as SharedTask), pins: Array.isArray(value.pins) ? value.pins : [] }
+  const isText = (one: unknown): one is string => typeof one === 'string'
+  const objects = (list: unknown): Record<string, unknown>[] => (Array.isArray(list) ? list.filter((one): one is Record<string, unknown> => typeof one === 'object' && one !== null) : [])
+  const task = value.task as unknown as Record<string, unknown>
+  // Every element is rebuilt from its known fields, so a damaged or hostile file cannot put a wrong shape into the panel or the prompt.
+  const safeTask: Task = {
+    ...(value.task as Task),
+    constraints: objects(task.constraints)
+      .filter(one => isText(one.text))
+      .map((one, i) => ({ id: isText(one.id) ? one.id : `c-${i + 1}`, text: String(one.text), priority: one.priority === 'soft' ? ('soft' as const) : ('hard' as const), isActive: one.isActive !== false })),
+    nonGoals: Array.isArray(task.nonGoals) ? task.nonGoals.filter(isText) : [],
+    doneConditions: objects(task.doneConditions)
+      .filter(one => isText(one.text))
+      .map((one, i) => ({
+        id: isText(one.id) ? one.id : `dc-${i + 1}`,
+        text: String(one.text),
+        ...(['test', 'build', 'typecheck', 'lint', 'ci'].includes(String(one.link)) ? { link: one.link as EvidenceKind } : {}),
+        ...(typeof one.manual === 'object' && one.manual !== null && ['verified', 'failed', 'waived'].includes(String((one.manual as { status?: unknown }).status))
+          ? { manual: { status: (one.manual as { status: 'verified' | 'failed' | 'waived' }).status, note: String((one.manual as { note?: unknown }).note ?? ''), at: Number((one.manual as { at?: unknown }).at) || 0 } }
+          : {}),
+      })),
+  }
+  const pins: ContextPin[] = objects(value.pins).flatMap((one, i): ContextPin[] => {
+    if (one.kind === 'note' && isText(one.text)) return [{ id: `p-${i + 1}`, kind: 'note', text: one.text }]
+    if (one.kind === 'file' && isText(one.path)) {
+      const lines = typeof one.lines === 'object' && one.lines !== null ? (one.lines as { from?: unknown; to?: unknown }) : undefined
+      return [{ id: `p-${i + 1}`, kind: 'file', path: one.path, mode: one.mode === 'snapshot' ? 'snapshot' : 'live', ...(lines && Number.isInteger(lines.from) && Number.isInteger(lines.to) ? { lines: { from: Number(lines.from), to: Number(lines.to) } } : {}) }]
+    }
+    return []
+  })
+
+  return { ...(value as SharedTask), task: safeTask, pins }
 }
