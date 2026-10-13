@@ -3,11 +3,38 @@ import { affectsChecks } from './files'
 
 export type ParsedDiff = { hunks: Record<string, Hunk[]>; added: number; removed: number }
 
+// git quotes a path with unusual characters in C style ("a\\303\\244.ts"): back to the real name.
+export function unquotePath(text: string): string {
+  if (text.length < 2 || !text.startsWith('"') || !text.endsWith('"')) return text
+  const body = text.slice(1, -1)
+  const bytes: number[] = []
+  const encoder = new TextEncoder()
+  for (let i = 0; i < body.length; i++) {
+    const c = body.charAt(i)
+    if (c !== '\\') {
+      bytes.push(...encoder.encode(c))
+      continue
+    }
+    const octal = /^[0-7]{1,3}/.exec(body.slice(i + 1))
+    if (octal) {
+      bytes.push(parseInt(octal[0], 8))
+      i += octal[0].length
+    } else {
+      const next = body.charAt(++i)
+      bytes.push(...encoder.encode(next === 'n' ? '\n' : next === 't' ? '\t' : next))
+    }
+  }
+
+  return new TextDecoder().decode(Uint8Array.from(bytes))
+}
+
 // Reads `git diff -U0` output: per file, each changed region in the new file's lines.
 export function parseDiff(text: string): ParsedDiff {
   const hunks: Record<string, Hunk[]> = {}
   let file: string | undefined
   let current: Hunk | undefined
+  // The ---/+++ lines name the files only before the first hunk; after it they are a deleted "-- x" or an added "++ x".
+  let inHeader = false
   let added = 0
   let removed = 0
 
@@ -15,15 +42,17 @@ export function parseDiff(text: string): ParsedDiff {
     if (line.startsWith('diff --git ')) {
       file = undefined
       current = undefined
-    } else if (line.startsWith('+++ ')) {
-      const target = line.slice(4).trim()
+      inHeader = true
+    } else if (inHeader && line.startsWith('+++ ')) {
+      const target = unquotePath(line.slice(4).trim().replace(/\t.*$/, ''))
       file = target === '/dev/null' ? undefined : target.replace(/^b\//, '')
       if (file) hunks[file] = hunks[file] ?? []
-    } else if (line.startsWith('--- ')) {
+    } else if (inHeader && line.startsWith('--- ')) {
       // The old side; a deleted file keeps its old name.
-      const source = line.slice(4).trim().replace(/^a\//, '')
+      const source = unquotePath(line.slice(4).trim().replace(/\t.*$/, '')).replace(/^a\//, '')
       if (source !== '/dev/null') file = source
     } else if (line.startsWith('@@')) {
+      inHeader = false
       const match = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line)
       if (!match || !file) continue
       const start = Number(match[2])

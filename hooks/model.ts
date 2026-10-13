@@ -20,6 +20,7 @@ import type {
 import { parsePinSpec, rangeLabel } from './context'
 import { lastCheckedEdit, type ParsedDiff } from './diff'
 import { completionOf, guessLink } from './evidence'
+import { categoryOf } from './files'
 
 export const MAX_CALLS = 100
 export const MAX_EVIDENCE = 200
@@ -178,18 +179,33 @@ export function toggleLock(wb: Workbench): Workbench {
   return { ...wb, task: { ...wb.task, locked: !wb.task.locked } }
 }
 
+// Open proposals name conditions by id, and ids start again with every task, so a new task starts with none.
 export function newTask(wb: Workbench): Workbench {
-  return { ...wb, task: emptyTask(), evidence: [], changed: emptyChanged() }
+  return { ...wb, task: emptyTask(), evidence: [], changed: emptyChanged(), proposals: [] }
 }
 
+// Team mode and its Codex consent belong to the person's setup, not to the task, and survive a clear.
 export function clearAll(wb: Workbench): Workbench {
-  return { ...emptyWorkbench(), execution: { ...wb.execution, recentCalls: [] } }
+  return { ...emptyWorkbench(), execution: { ...wb.execution, recentCalls: [] }, ...(wb.team ? { team: wb.team } : {}) }
+}
+
+// A pinned file goes into every prompt without a question, so it must be a path inside the project and not a secrets file.
+export function pinAllowed(path: string): boolean {
+  if (path === '' || /^([A-Za-z]:|[\\/])/.test(path)) return false
+  if (path.split(/[\\/]/).includes('..')) return false
+
+  return categoryOf(path) !== 'secret'
+}
+
+// Pins that come from a file or a template (not typed by the person now) are held to the same rule.
+function safePins(pins: readonly ContextPin[]): ContextPin[] {
+  return pins.filter(one => one.kind === 'note' || pinAllowed(one.path))
 }
 
 export function pinFile(wb: Workbench, spec: string): Workbench {
   const { path, lines } = parsePinSpec(spec)
   const same = (one: ContextPin) => one.kind === 'file' && one.path === path && rangeLabel(one.lines) === rangeLabel(lines)
-  if (path === '' || wb.context.pins.some(same)) {
+  if (!pinAllowed(path) || wb.context.pins.some(same)) {
     return wb
   }
   const pin: ContextPin = { id: newId('p'), kind: 'file', path, mode: 'live', ...(lines ? { lines } : {}) }
@@ -250,10 +266,11 @@ export function applyTemplate(wb: Workbench, template: Template): Workbench {
   return {
     ...wb,
     task,
-    context: { ...wb.context, pins: template.pins.map(one => ({ ...one, id: newId('p') })) },
+    context: { ...wb.context, pins: safePins(template.pins).map(one => ({ ...one, id: newId('p') })) },
     execution: { ...wb.execution, profile: template.profile },
     evidence: [],
     changed: emptyChanged(),
+    proposals: [],
   }
 }
 
@@ -261,7 +278,7 @@ export function applyTemplate(wb: Workbench, template: Template): Workbench {
 export function applySet(wb: Workbench, pins: readonly ContextPin[]): Workbench {
   const key = (one: ContextPin) => (one.kind === 'file' ? `f:${one.path}${rangeLabel(one.lines)}` : `n:${one.text}`)
   const have = new Set(wb.context.pins.map(key))
-  const added = pins.filter(one => !have.has(key(one))).map(one => ({ ...one, id: newId('p') }))
+  const added = safePins(pins).filter(one => !have.has(key(one))).map(one => ({ ...one, id: newId('p') }))
 
   return { ...wb, context: { ...wb.context, pins: [...wb.context.pins, ...added] } }
 }
@@ -279,7 +296,7 @@ export function applyTeamTemplate(wb: Workbench, template: TeamTemplate): Workbe
     }),
   }
 
-  return { ...wb, task, evidence: [], changed: emptyChanged() }
+  return { ...wb, task, evidence: [], changed: emptyChanged(), proposals: [] }
 }
 
 // The issue is part of the contract, so it changes only while unlocked.
@@ -293,9 +310,11 @@ export function setIssue(wb: Workbench, issue: IssueRef | undefined): Workbench 
 
 // A task shared from another machine: contract, manual marks and pins come over; checks are re-run here.
 export function applyShare(wb: Workbench, shared: { task: Task; pins: readonly ContextPin[] }): Workbench {
+  // A task that arrives from a file is never locked: a locked contract is injected into every prompt, so the person locks it after reading it.
   const task: Task = {
     ...emptyTask(),
     ...shared.task,
+    locked: false,
     constraints: Array.isArray(shared.task.constraints) ? shared.task.constraints : [],
     nonGoals: Array.isArray(shared.task.nonGoals) ? shared.task.nonGoals : [],
   }
@@ -303,9 +322,10 @@ export function applyShare(wb: Workbench, shared: { task: Task; pins: readonly C
   return {
     ...wb,
     task,
-    context: { ...wb.context, pins: shared.pins.map(one => ({ ...one, id: newId('p') })) },
+    context: { ...wb.context, pins: safePins(shared.pins).map(one => ({ ...one, id: newId('p') })) },
     evidence: [],
     changed: emptyChanged(),
+    proposals: [],
   }
 }
 

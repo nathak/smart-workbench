@@ -989,7 +989,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
 
   if (word === 'live') return liveCommand($, args.trim().slice(word.length))
 
-  if (word === '' || word in TAB_ARGS) {
+  if (word === '' || Object.hasOwn(TAB_ARGS, word)) {
     const isPlaced = await openPane($, TAB_ARGS[word])
 
     return { text: isPlaced ? 'SmartWorkbench opened.' : statusText(await read($, wbAtom), await read($, liveAtom)) }
@@ -2315,7 +2315,7 @@ export const register: Register = on => {
     }
 
     // Changed regions against HEAD, so the Evidence tab can say which ones a check has seen.
-    const diff = await $.process.run(['git', 'diff', '-U0', '--no-color', '--no-ext-diff', 'HEAD']).catch(() => undefined)
+    const diff = await $.process.run(['git', '-c', 'core.quotePath=false', 'diff', '-U0', '--relative', '--no-color', '--no-ext-diff', 'HEAD']).catch(() => undefined)
     if (diff?.exitCode === 0) {
       const parsed = parseDiff(diff.stdout)
       await mutate($, current => model.applyDiff(current, parsed))
