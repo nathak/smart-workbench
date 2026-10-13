@@ -15,6 +15,9 @@ describe('guard review fixes', () => {
 
   test('git rm is not rm; discarding checkouts are blocked', async () => {
     expect(policyOf('git rm -r --cached node_modules')).toBe('allow')
+    // A newline ends the git command: the rm on the next line is its own.
+    expect(policyOf('git status\nrm -rf build')).toBe('block')
+    expect(policyOf('git\nrm -rf build')).toBe('block')
     expect(policyOf('git checkout -f')).toBe('block')
     expect(policyOf('git switch --discard-changes main')).toBe('block')
   })
