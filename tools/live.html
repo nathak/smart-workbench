@@ -2222,6 +2222,7 @@ function drawSrv(){
   var bad = !paused && !playback && expected - got > 5;
   var w = $('srv-warn');
   w.hidden = !bad;
+  w.title = L('The server has read more lines than this page received. Reload the page; if it stays, something between the browser and the server (a reverse proxy) is holding the event stream back: see the README on proxy_buffering.', '서버가 읽은 줄보다 이 화면이 받은 줄이 적습니다. 페이지를 새로고침하세요. 계속되면 브라우저와 서버 사이의 리버스 프록시가 이벤트 스트림을 붙잡고 있는 것입니다. README의 proxy_buffering 항목을 보세요.');
   if (bad) w.textContent = L('⚠ the server read ' + (srv.linesRead - srvBase) + ' lines, this page has ' + got, '⚠ 서버는 ' + (srv.linesRead - srvBase) + '줄을 읽었는데 화면에는 ' + got + '개');
 }
 setInterval(pollInfo, 10000);
@@ -2301,7 +2302,7 @@ $('clear').onclick = function(){ events = []; pending = []; srvBase = srv ? srv.
 
 var connected = false, everOpened = false, es = null;
 // One page, many sessions: when the server is a hub, every session has its own buffer and a tab; the one shown is wired to the views above.
-var hubSync = false, hub = false, CTX = Object.create(null), ORDER = [], curId = null, closedIds = Object.create(null), badgeTimer = 0;
+var resync = false, hubSync = false, hub = false, CTX = Object.create(null), ORDER = [], curId = null, closedIds = Object.create(null), badgeTimer = 0;
 function ctxOf(id){
   var c = CTX[id];
   if (!c) { c = CTX[id] = { id: id, name: id, project: '', startedAt: 0, alive: true, events: [], pending: [], srv: null, srvBase: 0, badge: { n: 0, ask: 0 }, ui: { tab: null, sel: null, q: '' } }; }
@@ -2365,8 +2366,18 @@ function closeSession(id){
   }
   renderSessions();
 }
+function freshStart(){
+  if (!resync) return;
+  resync = false;
+  if (hub) {
+    Object.keys(CTX).forEach(function(id){ CTX[id].events = []; CTX[id].pending = []; CTX[id].srvBase = 0; CTX[id].badge = { n: 0, ask: 0 }; });
+    if (CTX[curId]) { events = CTX[curId].events; pending = CTX[curId].pending; } else { events = []; pending = []; }
+  } else { events = []; pending = []; }
+  replay(); resetViews();
+}
 function onSessions(m){
   try {
+    freshStart();
     var data = JSON.parse(m.data);
     var rows = data && Array.isArray(data.sessions) ? data.sessions : [];
     var seen = Object.create(null);
@@ -2389,6 +2400,7 @@ function onSessions(m){
 }
 function onHubLine(m){
   try {
+    freshStart();
     var f = JSON.parse(m.data), ev = f && f.e;
     if (!f || !ev || typeof ev !== 'object' || !/^[A-Za-z0-9_-]{1,64}$/.test(String(f.s)) || closedIds[f.s]) return;
     if (f.s === curId) { if (paused || playback) holdBack(ev); else take(ev); return; }
@@ -2404,17 +2416,16 @@ function openStream(){
   es = new EventSource(hub ? '/events?all=1' : '/events');
   es.onopen = function(){
     srvBase = 0; setTimeout(pollInfo, 1500);
-    if (hub) { hubSync = true; Object.keys(CTX).forEach(function(id){ CTX[id].events = []; CTX[id].pending = []; CTX[id].srvBase = 0; CTX[id].badge = { n: 0, ask: 0 }; }); }
-    if (everOpened) {
-      if (hub && CTX[curId]) { events = CTX[curId].events; pending = CTX[curId].pending; } else { events = []; pending = []; }
-      replay(); resetViews();
-    }
+    if (hub) hubSync = true;
+    // The server sends its whole buffer again on every connection. What the page shows is kept until that arrives, so a connection that
+    // opens but delivers nothing (a proxy holding the stream back) does not blank a screen that was fine a moment ago.
+    if (everOpened) resync = true;
     connected = true; everOpened = true; translate();
   };
   es.onerror = function(){ connected = false; translate(); };
   if (hub) { es.addEventListener('sessions', onSessions); es.addEventListener('line', onHubLine); es.addEventListener('ready', function(){ hubSync = false; renderSessions(); }); }
   else es.onmessage = function(m){
-    try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) { pageError('event', e); }
+    try { freshStart(); var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) { pageError('event', e); }
   };
 }
 window.addEventListener('hashchange', function(){ var w = parseHash(location.hash).s; if (hub && w && w !== curId && CTX[w]) switchTo(w); });
