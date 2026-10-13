@@ -178,7 +178,7 @@ function parseAudit(raw: unknown, errors: string[]): AuditConfig | undefined {
   if (raw === true) return { path: AUDIT_PATH }
 
   const path = (raw as { path?: unknown } | null)?.path
-  if (typeof path !== 'string' || path.trim() === '' || path.startsWith('/') || path.split('/').includes('..')) {
+  if (typeof path !== 'string' || path.trim() === '' || path.startsWith('/') || path.startsWith('\\') || /^[A-Za-z]:/.test(path) || path.split(/[\\/]/).includes('..')) {
     errors.push('audit must be true or { "path": "<relative path inside the repository>" }')
     return undefined
   }
