@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // SmartWorkbench live view: tails .claude/smartworkbench-live.jsonl of a project and streams it to a web page.
-// Usage: node live.mjs [projectDir] [--port 4317] [--watch-parent]
+// Usage: node live.mjs [projectDir] [--port 4317] [--auto] [--watch-parent]
+// --auto: when the port is taken (another session's view), the next free one is used, up to 20 further.
 // The plugin writes the feed only while this file exists, so stopping the server (which removes it) stops the writes.
 import { createServer } from 'node:http'
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
@@ -10,7 +11,9 @@ import { fileURLToPath } from 'node:url'
 
 const args = process.argv.slice(2)
 const portAt = args.indexOf('--port')
-const port = portAt >= 0 ? Number(args[portAt + 1]) : 4317
+let port = portAt >= 0 ? Number(args[portAt + 1]) : 4317
+const auto = args.includes('--auto')
+const LAST_TRY = port + 20
 const project = resolve(args.find((one, i) => !one.startsWith('--') && args[i - 1] !== '--port') ?? process.cwd())
 const feed = join(project, '.claude', 'smartworkbench-live.jsonl')
 // Names this process, so the plugin can tell a feed left behind by a killed server from one a running view keeps.
@@ -134,7 +137,7 @@ const pinger = setInterval(() => {
 // A page on another site can point its own hostname at 127.0.0.1 (DNS rebinding) and read the feed;
 // only a loopback Host header or a named host the owner trusts (a reverse proxy in front of this server) is served.
 const TRUSTED = (process.env.SWB_LIVE_HOSTS ?? '').split(',').map(one => one.trim().toLowerCase()).filter(Boolean)
-const HOSTS = new Set([`127.0.0.1:${port}`, `localhost:${port}`, ...TRUSTED.flatMap(name => [name, `${name}:80`, `${name}:443`])])
+const HOSTS = new Set(TRUSTED.flatMap(name => [name, `${name}:80`, `${name}:443`]))
 
 // The page is one file with inline script and style and talks only to this server; anything else it is tricked into loading is refused.
 const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -191,12 +194,24 @@ process.on('exit', () => {
 
 // Not "SmartWorkbench live:" — the plugin reads that prefix as a successful start.
 server.on('error', err => {
+  // Another session's view holds this port: the next one is tried (the project's own feed decides which view is whose, not the port).
+  if (auto && err.code === 'EADDRINUSE' && port < LAST_TRY && port < 65535) {
+    port++
+    listen()
+    return
+  }
   console.error(`Cannot listen on 127.0.0.1:${port}: ${err.code ?? err.message}`)
   process.exit(1)
 })
 
 // Local only: the feed holds prompts and commands.
-server.listen(port, '127.0.0.1', () => {
+function listen() {
+  server.listen(port, '127.0.0.1', onListening)
+}
+
+function onListening() {
+  HOSTS.add(`127.0.0.1:${port}`)
+  HOSTS.add(`localhost:${port}`)
   try {
     mkdirSync(dirname(feed), { recursive: true })
     // One view per project: a second server would empty the feed the first one is reading.
@@ -238,4 +253,6 @@ server.listen(port, '127.0.0.1', () => {
   }
   console.log(`SmartWorkbench live: http://127.0.0.1:${port}  (project ${project})`)
   console.log('Ctrl+C stops the view and the feed.')
-})
+}
+
+listen()
