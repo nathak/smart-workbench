@@ -4,6 +4,9 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+- Live view rewritten as a monitoring tool: a status bar and six tiles (calls per minute, latency p50 · p95, blocks + errors, asks waiting, context, tokens), a Timeline of turns with nested calls, duration bars, search, an overview strip, a critical path and folded repeats, a Guard tab, an Agents tab, light and dark themes, keyboard shortcuts with a help dialog, addresses that select a call, and screen reader announcements. The Flow picture is kept as a tab; the Log tab is replaced by the Timeline and the Guard tab.
+
 ## [0.15.0] - 2026-10-13
 
 ### Added
