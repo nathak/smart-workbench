@@ -79,3 +79,13 @@ describe('project guard file cannot loosen the guard', () => {
     expect(decide(verdict, 'permissive', false)).toBe('ask')
   })
 })
+
+describe('long commands', () => {
+  test('a 100 KB command with no spaces is classified in well under a second', async () => {
+    const command = `echo ${'a'.repeat(100000)} | base64 -d > f`
+    const started = Date.now()
+    classify('Bash', { command })
+    classify('Bash', { command: `${'x"'.repeat(30000)}` })
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+})

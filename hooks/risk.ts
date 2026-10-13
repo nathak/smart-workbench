@@ -204,13 +204,16 @@ function isPairingSafe(command: string, hadContinuation: boolean): boolean {
   if (hadContinuation) return false
   const outside = command.replace(QUOTED, ' ')
   if (/(^|[\s;&|()<>])#|<<|`|['"]/.test(outside) || command.includes("$'") || RUNNER.test(outside)) return false
-  if (/[\w.-]+\s*\(\s*\)|\bfunction\s/.test(outside)) return false
+  if (/(?<![\w.-])[\w.-]+\s*\(\s*\)|\bfunction\s/.test(outside)) return false
   const doubles = command.match(/"(?:[^"\\]|\\[\s\S])*"/g) ?? []
   return doubles.every(one => !/\$\(|\$\{|`/.test(one) || isCatHeredoc(one.slice(1, -1)))
 }
 
+// A command this long is not typed by a person: it is read as it stands (stricter) instead of spending seconds masking it inside a hook.
+const MASK_LIMIT = 20000
+
 function maskData(command: string, hadContinuation = false): string {
-  if (!isPairingSafe(command, hadContinuation)) return command
+  if (command.length > MASK_LIMIT || !isPairingSafe(command, hadContinuation)) return command
   // Same text with every quoted stretch overwritten by spaces: separators are found here, so a ; or | inside quotes
   // never starts a new command.
   const filled = command.replace(QUOTED, one => ' '.repeat(one.length))
