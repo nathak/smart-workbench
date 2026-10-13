@@ -35,6 +35,19 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 va
 .page{max-width:1240px;margin:0 auto;padding:0 var(--sp-5) var(--sp-6)}
 .mono,.tm,pre,dl.detail dd,.tag,.kv span:last-child{font-family:var(--mono)}
 
+/* KPI tiles */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:var(--sp-3);margin:var(--sp-4) 0}
+.tile{display:flex;flex-direction:column;gap:2px;align-items:flex-start;text-align:left;padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--fg);min-height:88px;position:relative}
+.tile:hover{border-color:var(--border-strong)}
+.tile .k-l{font-size:var(--fs-xs);color:var(--fg-muted);text-transform:uppercase;letter-spacing:.05em}
+.tile .k-v{font-size:var(--fs-xl);font-weight:600;line-height:1.2}
+.tile .k-s{font-size:var(--fs-xs);color:var(--fg-muted)}
+.tile svg.spark{position:absolute;right:var(--sp-3);bottom:var(--sp-3);width:64px;height:22px;opacity:.9}
+.tile svg.spark polyline{fill:none;stroke:var(--haiku);stroke-width:1.5}
+.tile.bad{border-color:var(--bad)}.tile.bad .k-v{color:var(--bad)}
+.tile.warn{border-color:var(--warn)}.tile.warn .k-v{color:var(--warn)}
+.tile.ok .k-v{color:var(--ok)}
+.tile .cbar{margin-top:2px}
 /* status bar and tabs */
 .topbar{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;padding:var(--sp-3) 0;background:var(--bg);border-bottom:1px solid var(--border);font-size:var(--fs-sm)}
 .topbar .brand{font-weight:600;font-size:var(--fs-md);letter-spacing:.02em}
@@ -167,6 +180,14 @@ button:hover{color:var(--fg)}
       <button id="clear" data-i="clear"></button>
     </span>
   </header>
+  <section class="kpis" id="kpis" aria-label="metrics">
+    <button class="tile" id="k-calls"><span class="k-l" data-i="k-calls"></span><span class="k-v" id="k-calls-v">0</span><span class="k-s" id="k-calls-s"></span><svg class="spark" id="k-calls-sp" viewBox="0 0 64 22" aria-hidden="true"></svg></button>
+    <button class="tile" id="k-lat"><span class="k-l" data-i="k-lat"></span><span class="k-v" id="k-lat-v">–</span><span class="k-s" id="k-lat-s"></span></button>
+    <button class="tile" id="k-fail"><span class="k-l" data-i="k-fail"></span><span class="k-v" id="k-fail-v">0</span><span class="k-s" id="k-fail-s"></span><svg class="spark" id="k-fail-sp" viewBox="0 0 64 22" aria-hidden="true"></svg></button>
+    <button class="tile" id="k-ask"><span class="k-l" data-i="k-ask"></span><span class="k-v" id="k-ask-v">0</span><span class="k-s" id="k-ask-s"></span></button>
+    <button class="tile" id="ctx"><span class="k-l" data-i="k-ctx"></span><span class="k-v" id="ctx-t">–</span><span class="cbar"><i id="ctx-f"></i></span><span class="k-s" id="k-ctx-s"></span><span class="k-s" id="ctx-spark"></span></button>
+    <button class="tile" id="k-tok"><span class="k-l" data-i="k-tok"></span><span class="k-v" id="k-tok-v">–</span><span class="k-s" id="k-tok-s"></span></button>
+  </section>
   <nav class="tabs" role="tablist" id="tabs" aria-label="views">
     <button role="tab" id="tab-flow" aria-controls="p-flow" data-tab="flow"></button>
     <button role="tab" id="tab-log" aria-controls="p-log" data-tab="log"></button>
@@ -175,8 +196,7 @@ button:hover{color:var(--fg)}
   <main>
   <div class="tabpanel" id="p-flow" role="tabpanel" aria-labelledby="tab-flow">
     <div class="head"><b>SMARTWORKBENCH FLOW</b>
-      <span class="m c-opus">◆ OPUS · ON CALL</span><span class="m c-sonnet">◆ SONNET · LEAD</span><span class="m c-haiku">◆ HAIKU · SWARM</span>
-      <span class="ctx" id="ctx"><span class="cbar"><i id="ctx-f"></i></span><span id="ctx-t"></span><span id="ctx-spark"></span></span></div>
+      <span class="m c-opus">◆ OPUS · ON CALL</span><span class="m c-sonnet">◆ SONNET · LEAD</span><span class="m c-haiku">◆ HAIKU · SWARM</span></div>
     <div class="legend">
       <span><span class="sq opus"></span><span data-i="lg-advisor"></span></span><span><span class="sq sonnet"></span><span data-i="lg-lead"></span></span>
       <span><span class="sq haiku"></span><span data-i="lg-sub"></span></span><span><span class="sq guard"></span><span data-i="lg-guard"></span></span><span><span class="sq codex"></span>codex</span>
@@ -303,11 +323,180 @@ var DICT = {
   'p-sub': ['repeats a task', '회차 반복'], 'p-pass-l': ['pass', '회차'], 'p-turn-l': ['turns', '턴'],
   'tab-flow': ['Flow', '흐름'], 'tab-log': ['Log', '로그'],
   'st-live': ['● live', '● 연결됨'], 'st-reconnect': ['◌ reconnecting', '◌ 다시 연결 중'], 'st-down': ['✕ disconnected', '✕ 끊김'], 'st-wait': ['◌ connecting', '◌ 연결 중'],
+  'k-calls': ['calls / min', '호출 / 분'], 'k-lat': ['tool latency', '도구 지연'], 'k-fail': ['blocks + errors', '차단 + 오류'], 'k-ask': ['asks waiting', '확인 대기'], 'k-ctx': ['context window', '컨텍스트 창'], 'k-tok': ['tokens in / out', '토큰 입력 / 출력'],
   'th-light': ['light', '밝게'], 'th-dark': ['dark', '어둡게']
 };
 function T(k){ var d = DICT[k]; return d ? d[lang === 'ko' ? 1 : 0] : k; }
 
-var S, inflight, events = [];
+// model:begin
+// Pure data model: no DOM, no language, no clock of its own. The feed goes in through ingest(); the views read the result.
+// Run in node by tools/live-check.mjs on synthetic events.
+var MODEL_MAX_SPANS = 4000;
+var STATUS = { ok: 'ok', error: 'error', blocked: 'blocked', declined: 'declined' };
+function newTrace(){
+  return { turns: [], spans: new Map(), byAgent: new Map(), pendingAsk: new Map(), attention: [], agentTok: Object.create(null),
+    tok: Object.create(null), ctx: null, ctxHist: [], sessions: Object.create(null), missed: 0, loopPasses: 0, loopActive: false, activeMs: 0,
+    startAt: [], failAt: [], lastAt: 0, events: 0, order: 0 };
+}
+function turnOf(tr, at, extra){
+  var t = { n: tr.turns.length, at: at, end: null, aborted: false, text: '', origin: 'user', loop: false, spans: [], marks: [], warn: [], ctx: null, tokIn: 0, tokOut: 0, models: Object.create(null), early: !!(extra && extra.early) };
+  if (extra) for (var k in extra) t[k] = extra[k];
+  tr.turns.push(t);
+  return t;
+}
+function curTurn(tr, at){
+  var last = tr.turns[tr.turns.length - 1];
+  if (last && last.end === null) return last;
+  // Events before the first prompt (the start of the feed may have been cut) belong to a turn of their own.
+  if (!last) return turnOf(tr, at, { early: true });
+  return last;
+}
+function addTok(bucket, ev){
+  if (typeof ev.model !== 'string' || !ev.model) return;
+  var name = ev.model.replace(/^claude-/, '').slice(0, 24);
+  var t = bucket[name] || (bucket[name] = { i: 0, o: 0 });
+  if (typeof ev.tokensIn === 'number') t.i += ev.tokensIn;
+  if (typeof ev.tokensOut === 'number') t.o += ev.tokensOut;
+}
+function statusOf(sp){
+  if (sp.end === null) return 'running';
+  if (sp.workflowBg) return 'bg';
+  return STATUS[sp.outcome] || 'ok';
+}
+function spanDur(sp, now){
+  if (typeof sp.ms === 'number' && sp.end !== null) return sp.ms;
+  if (sp.end !== null) return Math.max(0, sp.end - sp.at);
+  return Math.max(0, now - sp.at);
+}
+function linkAgent(tr, sp){
+  // A subagent's call names its agent but not the call that started it; the Agent call that returns agentRun settles it.
+  if (!sp.agent) return;
+  var open = [];
+  tr.spans.forEach(function(o){ if (o.tool === 'Agent' && o.end === null && !o.agent) open.push(o); });
+  if (open.length === 1) { sp.parent = open[0].id; sp.est = true; }
+}
+function ingest(tr, ev){
+  var at = typeof ev.at === 'number' ? ev.at : tr.lastAt || 0;
+  tr.events++;
+  tr.lastAt = Math.max(tr.lastAt, at);
+  if (ev.session) tr.sessions[String(ev.session).slice(0, 12)] = 1;
+  var t, sp, id;
+  switch (ev.kind) {
+    case 'prompt':
+      // The turn before a prompt is over, even when its end event never came (the start of the feed was cut, or the turn was cut short).
+      if (tr.turns.length && tr.turns[tr.turns.length - 1].end === null) tr.turns[tr.turns.length - 1].end = at;
+      t = turnOf(tr, at, { text: String(ev.text || ''), origin: ev.origin === 'plugin' ? 'plugin' : 'user', loop: !!ev.loop, prompt: typeof ev.prompt === 'string' ? ev.prompt : '' });
+      t.ev = ev;
+      break;
+    case 'tool.start':
+      id = String(ev.id);
+      t = curTurn(tr, at);
+      sp = { id: id, tool: String(ev.tool || ''), summary: String(ev.summary || ''), at: at, end: null, ms: null, outcome: null, policy: ev.policy || 'allow', risk: ev.risk || '', category: ev.category || '',
+        agent: ev.agent || null, subagent: ev.subagent || '', codex: ev.codex || '', turn: t.n, parent: null, est: false, guard: null, output: '', workflowBg: false, agentRun: null, ev: ev, order: ++tr.order, kids: [] };
+      tr.spans.set(id, sp);
+      t.spans.push(sp);
+      if (tr.spans.size > MODEL_MAX_SPANS) tr.spans.delete(tr.spans.keys().next().value);
+      if (sp.agent) { var list = tr.byAgent.get(sp.agent) || []; list.push(sp); tr.byAgent.set(sp.agent, list); linkAgent(tr, sp); }
+      tr.startAt.push(at);
+      if (sp.policy === 'ask') tr.pendingAsk.set(id, at);
+      break;
+    case 'tool.end':
+      id = String(ev.id);
+      sp = tr.spans.get(id);
+      if (!sp) break;
+      sp.end = at; sp.outcome = ev.outcome || 'ok'; sp.ms = typeof ev.ms === 'number' ? ev.ms : null;
+      sp.output = typeof ev.output === 'string' ? ev.output : ''; sp.workflowBg = ev.workflowBg === true; sp.endEv = ev;
+      tr.pendingAsk.delete(id);
+      if (ev.agentRun) {
+        sp.agentRun = String(ev.agentRun);
+        (tr.byAgent.get(sp.agentRun) || []).forEach(function(c){ c.parent = sp.id; c.est = false; });
+      }
+      if (statusOf(sp) === 'error' || sp.outcome === 'blocked' || sp.outcome === 'declined') tr.failAt.push(at);
+      break;
+    case 'guard.ask': case 'guard.block':
+      sp = ev.id != null ? tr.spans.get(String(ev.id)) : null;
+      if (sp) sp.guard = { kind: ev.kind === 'guard.ask' ? 'ask' : 'block', reason: String(ev.reason || ''), answer: String(ev.answer || ''), at: at, ev: ev };
+      if (ev.id != null) tr.pendingAsk.delete(String(ev.id));
+      break;
+    case 'turn': case 'turn.agent':
+      if (ev.kind === 'turn.agent') { if (ev.agent) addTok(tr.agentTok[ev.agent] || (tr.agentTok[ev.agent] = Object.create(null)), ev); addTok(tr.tok, ev); break; }
+      t = tr.turns[tr.turns.length - 1];
+      if (!t || t.end !== null) t = turnOf(tr, at, { early: !t });
+      t.end = at; t.aborted = ev.aborted === true;
+      t.tokIn = typeof ev.tokensIn === 'number' ? ev.tokensIn : 0; t.tokOut = typeof ev.tokensOut === 'number' ? ev.tokensOut : 0;
+      if (ev.model) addTok(t.models, ev);
+      addTok(tr.tok, ev);
+      var pct = typeof ev.contextPercent === 'number' ? ev.contextPercent : (typeof ev.contextTokens === 'number' && ev.contextWindow > 0 ? Math.round(ev.contextTokens / ev.contextWindow * 100) : null);
+      if (pct != null || typeof ev.contextTokens === 'number' || typeof ev.contextWindow === 'number') {
+        tr.ctx = { p: pct == null ? null : Math.max(0, Math.min(100, Math.round(pct))), tokens: typeof ev.contextTokens === 'number' ? ev.contextTokens : null, window: typeof ev.contextWindow === 'number' ? ev.contextWindow : null };
+        t.ctx = tr.ctx.p;
+        if (pct != null) { tr.ctxHist.push(tr.ctx.p); if (tr.ctxHist.length > 30) tr.ctxHist.shift(); }
+      }
+      tr.activeMs += Math.max(0, at - t.at);
+      if (t.aborted) tr.failAt.push(at);
+      break;
+    case 'loop.start': tr.loopActive = true; tr.loopPasses = 0; mark(tr, at, ev); break;
+    case 'loop.pass': tr.loopPasses = typeof ev.done === 'number' ? ev.done : tr.loopPasses + 1; mark(tr, at, ev); break;
+    case 'loop.done': case 'loop.stop': case 'loop.cancel': tr.loopActive = false; mark(tr, at, ev); break;
+    case 'feed.recovered':
+      if (typeof ev.missed === 'number') tr.missed += ev.missed;
+      tr.attention.push({ at: at, kind: ev.kind, ev: ev });
+      break;
+    case 'team.design-required': case 'team.plan-review-required': case 'team.final-check-required': case 'team.repeat-error': case 'codex.write-check':
+      tr.attention.push({ at: at, kind: ev.kind, ev: ev });
+      mark(tr, at, ev);
+      break;
+    default:
+      if (/^(contract|condition|task|session)\./.test(String(ev.kind))) mark(tr, at, ev);
+  }
+}
+function mark(tr, at, ev){
+  var last = tr.turns[tr.turns.length - 1] || turnOf(tr, at, { early: true });
+  last.marks.push({ at: at, kind: String(ev.kind), ev: ev });
+}
+// Nearest-rank percentile of a list of numbers.
+function pct(list, p){
+  if (!list.length) return null;
+  var a = list.slice().sort(function(x, y){ return x - y; });
+  return a[Math.min(a.length - 1, Math.max(0, Math.ceil(p / 100 * a.length) - 1))];
+}
+// n buckets of `size` ms ending at `end`; the last bucket holds the newest events.
+function buckets(ats, end, n, size){
+  var out = []; for (var i = 0; i < n; i++) out.push(0);
+  ats.forEach(function(a){ var back = Math.floor((end - a) / size); if (back >= 0 && back < n) out[n - 1 - back]++; });
+  return out;
+}
+// Calls that wait on a person (ask), return at once (blocked), only start something (Agent, Workflow, Codex in the background) or have no end say nothing about tool speed.
+function latencyOf(sp){
+  return sp.end !== null && typeof sp.ms === 'number' && sp.ms > 0 && sp.policy !== 'ask' && sp.tool !== 'Agent' && sp.tool !== 'Workflow' && !sp.workflowBg && sp.outcome !== 'blocked' && sp.outcome !== 'declined' && !(sp.ev && sp.ev.codexBg);
+}
+function kpis(tr, now){
+  var lat = [], fails = 0, spans = 0, agents = 0;
+  tr.spans.forEach(function(sp){
+    spans++;
+    if (latencyOf(sp)) lat.push(sp.ms);
+    if (sp.tool === 'Agent') agents++;
+    var st = statusOf(sp);
+    if (st === 'error' || st === 'blocked' || st === 'declined') fails++;
+  });
+  var aborted = 0, tokIn = 0, tokOut = 0, blocked = 0, errors = 0;
+  tr.spans.forEach(function(sp){ var st = statusOf(sp); if (st === 'error') errors++; else if (st === 'blocked' || st === 'declined') blocked++; });
+  tr.turns.forEach(function(t){ if (t.aborted) aborted++; });
+  Object.keys(tr.tok).forEach(function(m){ tokIn += tr.tok[m].i; tokOut += tr.tok[m].o; });
+  var oldest = null;
+  tr.pendingAsk.forEach(function(a){ if (oldest === null || a < oldest) oldest = a; });
+  return {
+    callsPerMin: tr.startAt.filter(function(a){ return now - a <= 60000 && now - a >= 0; }).length,
+    callSpark: buckets(tr.startAt, now, 12, 30000),
+    p50: pct(lat, 50), p95: pct(lat, 95), latN: lat.length,
+    fails: fails + aborted, blocked: blocked, errors: errors, aborted: aborted, failSpark: buckets(tr.failAt, now, 12, 30000),
+    askPending: tr.pendingAsk.size, askAge: oldest === null ? null : Math.max(0, now - oldest),
+    ctx: tr.ctx, tokIn: tokIn, tokOut: tokOut,
+    turns: tr.turns.filter(function(t){ return !t.early; }).length, activeMs: tr.activeMs, loopPasses: tr.loopPasses, agents: agents, spans: spans, events: tr.events
+  };
+}
+// model:end
+var S, inflight, TR, events = [];
 // ---- flow: where an event moves, drawn as packets on the links between the boxes ----
 var NODES = { u: 'b-user', l: 'b-lead', g: 'b-guard', d: 'b-sub', w: 'b-worker', e: 'b-explorer', p: 'b-loop', o: 'b-opus', x: 'b-codex' };
 var NODE_NAME = { u: ['user', '사용자'], l: ['Sonnet lead', 'Sonnet 리드'], g: ['guard', '가드'], d: ['dispatcher', '디스패처'], w: ['worker', 'worker'], e: ['explorer', 'explorer'], p: ['loop', '루프'], o: ['Opus advisor', 'Opus 조언자'], x: ['OpenAI Codex', 'OpenAI Codex'] };
@@ -566,6 +755,7 @@ function reset(){
   S = { allow: 0, ask: 0, block: 0, design: 0, plan: 0, final: 0, opusCalls: 0, codexReviews: 0, codexTasks: 0, codexBg: 0, codexOn: null, expCalls: 0, subCalls: 0, wfRuns: 0, leadCalls: 0,
     edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '', ctx: null, ctxHist: [], tok: plain({}), sessions: plain({}), missed: 0 };
   inflight = new Map();
+  TR = newTrace();
   flowReset();
   $('log').textContent = '';
   $('log').appendChild(el('div', 'empty', L('waiting for events', '이벤트를 기다리는 중')));
@@ -683,13 +873,15 @@ function render(){
   bp.hidden = !paused && !playback;
   bp.textContent = playback ? L('▶ replaying', '▶ 다시보기 중') : L('‖ paused', '‖ 일시정지') + (pending.length ? ' · +' + pending.length : '');
   showLast();
+  queueKpi();
   var cx = S.ctx, lvl = ctxLevel(cx ? cx.p : null);
   $('ctx-f').style.width = (cx && cx.p != null ? cx.p : 0) + '%';
   $('ctx-f').className = lvl;
-  $('ctx-t').textContent = cx && cx.p != null ? L('ctx ', '컨텍스트 ') + cx.p + '%' + (cx.tokens != null && cx.window ? ' · ' + k(cx.tokens) + '/' + k(cx.window) : '')
-    : cx && cx.window ? L('ctx — / ', '컨텍스트 — / ') + k(cx.window) : L('ctx — (after the first reply)', '컨텍스트 — (첫 응답 후 표시)');
+  $('ctx-t').textContent = cx && cx.p != null ? cx.p + '%' : '–';
+  $('k-ctx-s').textContent = cx && cx.tokens != null && cx.window ? k(cx.tokens) + ' / ' + k(cx.window) : cx && cx.window ? '— / ' + k(cx.window) : cx && cx.p != null ? '' : L('after the first reply', '첫 응답 후 표시');
   $('ctx-spark').textContent = S.ctxHist.map(function(p){ return '▁▂▃▄▅▆▇█'.charAt(Math.min(7, Math.floor(p * 8 / 100))); }).join('');
   $('ctx').title = L('context per lead turn; subagents are not measured', '리드 턴 기준 컨텍스트 · 서브에이전트는 측정되지 않음');
+  $('ctx').className = 'tile' + (lvl === 'block' ? ' bad' : lvl === 'ask' ? ' warn' : '');
   $('tok').textContent = Object.keys(S.tok).map(function(m){ return m + ' ' + L('in ', '입력 ') + k(S.tok[m].i) + ' · ' + L('out ', '출력 ') + k(S.tok[m].o); }).join('  |  ');
   queueLayout();
   if (!$('drawer').hidden && !replaying && !$('drawer').contains(document.activeElement) && !$('dw-list').querySelector('.detail:not([hidden])') && !$('dw-prompts').querySelector('.full:not([hidden])')) drawRefresh();
@@ -710,7 +902,7 @@ function showLast(){
   var ago = s >= 5 ? ' (' + (s >= 120 ? Math.round(s / 60) + L(' min', '분') : s + L(' s', '초')) + L(' ago', ' 전') + ')' : '';
   n.textContent = L('last event ', '마지막 이벤트 ') + clock(S.lastAt) + ago;
 }
-setInterval(function(){ if (!replaying) showLast(); }, 5000);
+setInterval(function(){ if (!replaying) showLast(); }, 1000);
 function addTokens(ev){
   if (typeof ev.model !== 'string' || !ev.model) return;
   var name = cut(ev.model.replace(/^claude-/, ''), 24);
@@ -724,6 +916,7 @@ function handle(ev){
   var at = ev.at || Date.now();
   S.events++;
   S.lastAt = at;
+  try { ingest(TR, ev); } catch (e) {}
   if (ev.session) S.sessions[cut(ev.session, 12)] = 1;
   if (ev.kind === 'feed.recovered' && typeof ev.missed === 'number') S.missed += ev.missed;
   try { flow(ev); } catch (e) {}
@@ -1042,6 +1235,37 @@ function uiBuild(){
   if (stored('swb-motion') === '0') motion = false;
 }
 
+// ---- KPI tiles: read from the model, redrawn at most once per frame and once a second so rates decay when nothing happens ----
+function fmtMs(ms){ return ms == null ? '–' : ms < 1000 ? Math.round(ms) + 'ms' : ms < 60000 ? (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + 's' : Math.floor(ms / 60000) + 'm' + String(Math.round(ms % 60000 / 1000)).padStart(2, '0') + 's'; }
+function spark(svg, data){
+  svg.textContent = '';
+  var max = Math.max.apply(null, data.concat([1])), pts = data.map(function(v, i){ return (i * 64 / (data.length - 1)).toFixed(1) + ',' + (20 - v / max * 18).toFixed(1); }).join(' ');
+  svg.appendChild(sv('polyline', { points: pts }));
+}
+var kpiQueued = false;
+function queueKpi(){ if (!kpiQueued) { kpiQueued = true; requestAnimationFrame(drawKpis); } }
+function nowFor(){ return replaying || playback ? TR.lastAt : Date.now(); }
+function drawKpis(){
+  kpiQueued = false;
+  var K = kpis(TR, nowFor() || Date.now());
+  $('k-calls-v').textContent = K.callsPerMin;
+  $('k-calls-s').textContent = L(K.spans + ' calls in view', '화면 내 호출 ' + K.spans + '개');
+  spark($('k-calls-sp'), K.callSpark);
+  $('k-lat-v').textContent = K.latN ? fmtMs(K.p50) + ' · ' + fmtMs(K.p95) : '–';
+  $('k-lat-s').textContent = L('p50 · p95 of ' + K.latN + ' calls', K.latN + '개 호출의 p50 · p95');
+  $('k-lat').title = L('Excludes asks (they wait on a person), blocked calls, Agent and Workflow calls (they only start a run) and calls still running.', '확인을 기다린 호출, 차단된 호출, Agent·Workflow 호출(실행을 시작만 함), 진행 중인 호출은 뺍니다.');
+  $('k-fail-v').textContent = (K.fails ? '▲ ' : '') + K.fails;
+  $('k-fail-s').textContent = L('blocked ' + K.blocked + ' · errors ' + K.errors + ' · aborted ' + K.aborted, '차단 ' + K.blocked + ' · 오류 ' + K.errors + ' · 중단 ' + K.aborted);
+  $('k-fail').className = 'tile' + (K.fails ? ' bad' : '');
+  spark($('k-fail-sp'), K.failSpark);
+  $('k-ask-v').textContent = (K.askPending ? '? ' : '') + K.askPending;
+  $('k-ask-s').textContent = K.askPending ? L('oldest ' + fmtMs(K.askAge) + ' · answer in the terminal', '가장 오래된 것 ' + fmtMs(K.askAge) + ' · 터미널에서 답하세요') : L('none waiting', '대기 없음');
+  $('k-ask').className = 'tile' + (K.askPending ? ' warn' : '');
+  $('k-tok-v').textContent = K.tokIn || K.tokOut ? k(K.tokIn) + ' / ' + k(K.tokOut) : '–';
+  $('k-tok-s').textContent = L('input includes cache · ' + K.turns + ' turns · active ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · loop ' + K.loopPasses : ''), '입력은 캐시 포함 · ' + K.turns + '턴 · 활동 ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · 루프 ' + K.loopPasses : ''));
+}
+setInterval(function(){ if (!replaying && !playback && !document.hidden) queueKpi(); }, 1000);
+
 // ---- tabs: roving tabindex, the choice kept in the address and in storage ----
 var TABS = ['flow', 'log'], tab = 'flow';
 function showTab(name, focusIt){
@@ -1069,6 +1293,8 @@ function tabsBuild(){
   });
   var h = /#tab=(\w+)/.exec(location.hash);
   showTab(h ? h[1] : stored('swb-tab') || 'flow');
+  ['k-calls', 'k-lat', 'ctx', 'k-tok'].forEach(function(id){ $(id).onclick = function(){ showTab('flow'); }; });
+  ['k-fail', 'k-ask'].forEach(function(id){ $(id).onclick = function(){ showTab('log'); }; });
   $('theme').onclick = function(){ theme = theme === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', theme); store('swb-theme', theme); translate(); };
 }
 function translate(){
