@@ -206,7 +206,7 @@ Choices are kept per project. The tab also shows the session's current model set
 | high (strict) | Medium-risk calls (edits, installs, …) are asked too |
 | medium (balanced) | The default: the rules below |
 | low (permissive) | Most questions are skipped; blocks, secrets, remote scripts, MCP deploys, Codex sends and project rules are still asked or blocked |
-| off | The built-in rules stop nothing: no question, no block. A rule your own project guard file wrote and the *Pause risky calls* switch still apply |
+| off | The built-in rules stop nothing: no question, no block. A rule your own project guard file wrote (with the policy it asks for), edits of that file, and the *Pause risky calls* switch still apply; turning it off asks once |
 
 A checked-in guard file can only raise the level (the stricter of the two applies) and can never set `off`; a template or a shared task cannot either. Every change is written to the audit log (`guard.profile`). Calls are still recorded in the live view with their risk, so you can see what went through.
 
@@ -634,7 +634,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 | high (strict) | 위험도 중간인 호출(편집, 설치 등)도 묻습니다 |
 | medium (balanced) | 기본값: 아래 규칙 |
 | low (permissive) | 대부분의 질문을 건너뜁니다. 차단, 비밀, 원격 스크립트, MCP 배포, Codex 전송, 프로젝트 규칙은 그대로 묻거나 막습니다 |
-| off | 기본 규칙이 아무것도 막지 않습니다(질문도 차단도 없음). 프로젝트 Guard 파일에 직접 쓴 규칙과 *Pause risky calls* 스위치는 계속 적용됩니다 |
+| off | 기본 규칙이 아무것도 막지 않습니다(질문도 차단도 없음). 프로젝트 Guard 파일에 직접 쓴 규칙(그 규칙이 요구한 대로), 그 파일의 수정, *Pause risky calls* 스위치는 계속 적용됩니다. 끌 때는 한 번 확인을 묻습니다 |
 
 저장소의 Guard 파일은 단계를 높이기만 할 수 있고(둘 중 엄격한 쪽 적용) `off`로는 못 바꿉니다. 템플릿과 공유된 작업도 마찬가지입니다. 바꿀 때마다 감사 로그에 `guard.profile`이 남고, 실시간 화면에는 통과한 호출도 위험도와 함께 기록됩니다.
 

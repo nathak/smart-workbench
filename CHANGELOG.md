@@ -7,10 +7,11 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 ## [0.17.0] - 2026-10-13
 
 ### Fixed
+- Project files read or written through the engine (guard file, audit log, pins, share and handoff files) and the `git`/`gh` calls are given from the project root too, since relative paths and commands follow the shell's directory.
 - Everything the mod keeps or reads by project (the live feed and its process note, the task state, the guard file, the handoff and share files, the live server's folder) used the session's current directory, which follows a shell `cd`. After a command like `cd assets/x && ...` the live feed, prompts, turns and calls were silently not written until the shell came back, and the task contract looked empty. They now use the project root.
 
 ### Added
-- Guard sensitivity: `/swb guard high|medium|low|off` (and the panel selector). `off` lets every call through except rules the project file wrote and the pause switch; a guard file, a template or a shared task can never set `off`, and a guard file can only raise the level.
+- Guard sensitivity: `/swb guard high|medium|low|off` (and the panel selector; turning it off asks once). `off` lets every call through except what a project rule asked for, changes to the guard file (still asked) and the pause switch; a guard file, a template or a shared task can never set `off`, and a guard file can only raise the level.
 - A Codex call that keeps the script path in a variable (`C=.../codex-companion.mjs; node "$C" task ...`) is shown as a Codex run in the live view and counted like the plain form (the guard's decision for it is unchanged).
 - One live view for many sessions: sessions on the same port are tabs of one page (project name, badges for new events and for calls waiting on you, ended sessions greyed with a close button, `#s=<session>` in the address). A hub process of its own, started detached by the first session, serves them and ends about 30 s after the last one leaves; sessions register in `~/.claude/smartworkbench-live/<port>/`. Without a port, a port held by another program is skipped (up to 20 further). The hub reads only each project's own feed, never through a link, and ignores registrations that break its rules.
 - The live page keeps what it shows when the event stream reconnects until the server's replay arrives (no blank flash), and its "server read N lines, page has M" warning now says what to do.

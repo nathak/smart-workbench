@@ -329,7 +329,7 @@ test('/swb guard sets the sensitivity; off lets a blocked call through', async (
   world(on, {
     ask: labels => {
       asked.push(labels.join('|'))
-      return 'Block'
+      return labels.includes('Turn off') ? 'Turn off' : 'Block'
     },
   })
 
@@ -341,7 +341,10 @@ test('/swb guard sets the sensitivity; off lets a blocked call through', async (
   expect((await $.command.run({ command: 'swb', args: 'guard off', ...COMMAND })).text).toContain('guard is off')
   const through = await $.tool.call({ tool: 'Bash', command: 'git push --force origin main' })
   expect('block' in through || 'deny' in through).toBe(false)
-  expect(asked).toEqual([])
+  // Only the question about turning it off was asked, and a change to the guard file is still asked while the guard is off.
+  expect(asked).toEqual(['Turn off|Cancel'])
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/.claude/smartworkbench.json`, old_string: 'a', new_string: 'b' })
+  expect(asked).toEqual(['Turn off|Cancel', 'Allow|Block'])
 
   expect((await $.command.run({ command: 'swb', args: 'guard 상', ...COMMAND })).text).toContain('high (strict)')
 })

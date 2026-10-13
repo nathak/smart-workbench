@@ -1,14 +1,15 @@
-import type { EvidenceRecord, ToolCallRecord, Workbench } from '../types'
+import type { EvidenceRecord, GuardProfile, ToolCallRecord, Workbench } from '../types'
 import { rangeLabel } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit } from './diff'
 import { completionOf, isStale, latestOf, markOf, statusOf } from './evidence'
+import { effectiveProfile } from './risk'
 
 function when(ms: number): string {
   return new Date(ms).toISOString().replace('T', ' ').slice(0, 16)
 }
 
 // A handoff another session or developer can pick the task up from.
-export function handoffMarkdown(wb: Workbench, now: number): string {
+export function handoffMarkdown(wb: Workbench, now: number, fileProfile?: GuardProfile): string {
   const { task } = wb
   const lastEdit = lastCheckedEdit(wb.changed)
   const { met, total, isComplete } = completionOf(task, wb.evidence, lastEdit)
@@ -17,7 +18,7 @@ export function handoffMarkdown(wb: Workbench, now: number): string {
     '',
     `- Exported: ${when(now)} UTC`,
     `- Status: ${task.status}${task.locked ? ' (contract locked)' : ''} · Done ${met}/${total}${total > 0 ? ` · ${isComplete ? 'COMPLETE' : 'INCOMPLETE'}` : ''}`,
-    `- Guard: ${wb.execution.profile}${wb.execution.isPaused ? ' (risky calls paused)' : ''}`,
+    `- Guard: ${effectiveProfile(wb.execution.profile, fileProfile)}${wb.execution.isPaused ? ' (risky calls paused)' : ''}`,
     ...(task.issue ? [`- Issue: ${task.issue.ref}${task.issue.title ? ` ${task.issue.title}` : ''}${task.issue.url ? ` (${task.issue.url})` : ''}`] : []),
     '',
     '## Goal',

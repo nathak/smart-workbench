@@ -6,6 +6,8 @@ export type Verdict = {
   risk: Risk
   policy: Policy
   reason: string
+  // The policy of the project rule that matched, when one did: what the project itself asked for.
+  rule?: Policy
 }
 
 const re = (source: string, flags = ''): RegExp => new RegExp(source, flags)
@@ -353,9 +355,11 @@ export function effectiveProfile(own: GuardProfile, file: GuardProfile | undefin
 
 // Applies the profile and the pause switch on top of the default (balanced) rule set.
 export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolean): Policy {
-  // Off: nothing the built-in rules find is stopped. A rule the project wrote itself still holds, and so does the pause switch.
+  // Off: nothing the built-in rules find is stopped. What a project rule asked for still holds, so does the pause switch,
+  // and a change to the guard file is still asked (or the rules could be deleted without anyone seeing it).
   if (profile === 'off') {
-    if (verdict.category === 'project-rule') return verdict.policy
+    if (verdict.rule !== undefined) return verdict.rule
+    if (verdict.category === 'guard-policy') return 'ask'
 
     return isPaused && verdict.risk !== 'low' ? 'ask' : 'allow'
   }

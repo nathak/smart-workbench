@@ -86,6 +86,12 @@ async function load($: $): Promise<Workbench> {
   return restored
 }
 
+// A project path as the engine reads it: relative paths and commands follow the shell's directory, which a `cd` moves,
+// so what belongs to the project is always given from the project root.
+async function rooted($: $, path: string): Promise<string> {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) ? path : `${await $.session.root()}/${path}`
+}
+
 // Every save builds on the newest copy: when another session of this project saved
 // since this one last did, its state is taken first, so neither overwrites the other.
 async function mutate($: $, change: (wb: Workbench) => Workbench): Promise<Workbench> {
@@ -249,11 +255,11 @@ async function audit($: $, event: string, detail: Record<string, unknown> = {}):
     // The log is committed by some teams: a command with a token in it must not reach it as typed.
     const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? redact(value) : value]))
     const line = auditLine({ at, event, ...(live.user ? { user: live.user } : {}), ...(live.sessionId ? { session: live.sessionId } : {}), ...masked })
-    const { text, rotated } = appendAudit(await $.fs.read(config.path).catch(() => undefined), line)
+    const { text, rotated } = appendAudit(await $.fs.read(await rooted($, config.path)).catch(() => undefined), line)
     if (rotated !== undefined) {
-      await $.fs.write(`${config.path}.1`, rotated)
+      await $.fs.write(await rooted($, `${config.path}.1`), rotated)
     }
-    await $.fs.write(config.path, text)
+    await $.fs.write(await rooted($, config.path), text)
   } catch (error) {
     $.ui.log(`SmartWorkbench: audit write failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
   }
@@ -273,7 +279,7 @@ async function injection($: $, wb: Workbench): Promise<Injection> {
       continue
     }
     try {
-      contents.push({ pin, text: await $.fs.read(pin.path) })
+      contents.push({ pin, text: await $.fs.read(await rooted($, pin.path)) })
     } catch (error) {
       contents.push({ pin, error: error instanceof Error ? error.message : String(error) })
     }
@@ -292,10 +298,10 @@ let treeRoot: string | undefined
 
 async function treeState($: $): Promise<TreeState | undefined> {
   // --no-optional-locks: this read-only look must not take index.lock from a Codex job or another session.
-  const status = await $.process.run(['git', '--no-optional-locks', 'status', '--porcelain=v1', '-z', '-uall']).catch(() => undefined)
+  const status = await $.process.run(['git', '--no-optional-locks', 'status', '--porcelain=v1', '-z', '-uall'], { cwd: await $.session.root() }).catch(() => undefined)
   if (status?.exitCode !== 0) return undefined
   if (treeRoot === undefined) {
-    const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).catch(() => undefined)
+    const top = await $.process.run(['git', 'rev-parse', '--show-toplevel'], { cwd: await $.session.root() }).catch(() => undefined)
     treeRoot = top?.exitCode === 0 ? top.stdout.trim() : ''
   }
   // The mod's own files change whenever it works (the live feed on every event, the audit log on every pass): they are not the task's work.
@@ -667,13 +673,13 @@ async function toggleLock($: $): Promise<void> {
 
 // Only on request: asks the local gh CLI for the workflow runs of HEAD.
 async function importCi($: $): Promise<string> {
-  const head = await $.process.run(['git', 'rev-parse', 'HEAD']).catch(() => undefined)
+  const head = await $.process.run(['git', 'rev-parse', 'HEAD'], { cwd: await $.session.root() }).catch(() => undefined)
   if (head?.exitCode !== 0) return 'Not a git repository with a commit; nothing to check.'
   const sha = head.stdout.trim()
   const fields = 'databaseId,workflowName,name,status,conclusion,headSha,url'
-  let runs = await $.process.run(['gh', 'run', 'list', '--commit', sha, '--json', fields, '--limit', '30']).catch(() => undefined)
+  let runs = await $.process.run(['gh', 'run', 'list', '--commit', sha, '--json', fields, '--limit', '30'], { cwd: await $.session.root() }).catch(() => undefined)
   if (runs?.exitCode !== 0) {
-    runs = await $.process.run(['gh', 'run', 'list', '--json', fields, '--limit', '50']).catch(() => undefined)
+    runs = await $.process.run(['gh', 'run', 'list', '--json', fields, '--limit', '50'], { cwd: await $.session.root() }).catch(() => undefined)
   }
   if (runs === undefined || runs.exitCode !== 0) {
     return `Could not read CI runs with gh${runs?.stderr ? `: ${runs.stderr.trim().split('\n')[0]}` : ' (is it installed and signed in?)'}`
@@ -685,7 +691,7 @@ async function importCi($: $): Promise<string> {
   } catch {
     return 'gh returned something that is not JSON.'
   }
-  const status = await $.process.run(['git', 'status', '--porcelain']).catch(() => undefined)
+  const status = await $.process.run(['git', 'status', '--porcelain'], { cwd: await $.session.root() }).catch(() => undefined)
   const hasLocalChanges = (status?.stdout ?? '').split('\n').some(line => line.trim() !== '' && affectsChecks(line.slice(3).trim()))
   const records = ciEvidence(parsed, sha, hasLocalChanges, await $.clock.now())
   await mutate($, wb => model.addCiEvidence(wb, records))
@@ -708,7 +714,7 @@ async function linkIssue($: $, args: string): Promise<string> {
     return `Linked ${parsed.ref}${parsed.title ? `: ${parsed.title}` : ''}.`
   }
 
-  const found = await $.process.run(['gh', 'issue', 'view', parsed.ref, '--json', 'number,title,url,body']).catch(() => undefined)
+  const found = await $.process.run(['gh', 'issue', 'view', parsed.ref, '--json', 'number,title,url,body'], { cwd: await $.session.root() }).catch(() => undefined)
   if (found?.exitCode !== 0) {
     await mutate($, current => model.setIssue(current, { ref: parsed.ref }))
     return `Linked ${parsed.ref} without details (gh could not read it${found?.stderr ? `: ${found.stderr.trim().split('\n')[0]}` : ''}).`
@@ -753,7 +759,7 @@ async function askToFinish($: $, wb: Workbench): Promise<void> {
 // Freezes a file pin at its current text; too large a file stays Live.
 async function snapshotPin($: $, pin: ContextPin): Promise<void> {
   if (pin.kind !== 'file') return
-  const text = await $.fs.read(pin.path).catch(() => undefined)
+  const text = await $.fs.read(await rooted($, pin.path)).catch(() => undefined)
 
   if (text === undefined) {
     $.ui.toast(`SmartWorkbench: cannot read ${pin.path}`)
@@ -774,11 +780,11 @@ async function pinSize($: $, pin: ContextPin): Promise<number> {
     return pinText(pin, undefined)?.length ?? 0
   }
   if (pin.lines) {
-    const text = await $.fs.read(pin.path).catch(() => undefined)
+    const text = await $.fs.read(await rooted($, pin.path)).catch(() => undefined)
     return text === undefined ? -1 : (pinText(pin, text)?.length ?? 0)
   }
 
-  return $.fs.stat(pin.path).then(stat => stat.size, () => -1)
+  return $.fs.stat(await rooted($, pin.path)).then(stat => stat.size, () => -1)
 }
 
 async function saveSet($: $, name: string): Promise<void> {
@@ -805,7 +811,7 @@ async function writableTarget($: $, path: string, fallback: string): Promise<str
   const target = path.trim() || fallback
   if (target === fallback) return target
   if (repoPath(target, await $.session.root()) === undefined) return { refused: `${target} is outside the project; give a path inside it.` }
-  if (await $.fs.exists(target).catch(() => false)) return { refused: `${target} already exists; give another name or delete it first.` }
+  if (await $.fs.exists(await rooted($, target)).catch(() => false)) return { refused: `${target} already exists; give another name or delete it first.` }
 
   return target
 }
@@ -814,7 +820,7 @@ async function exportHandoff($: $, path: string): Promise<{ written: string } | 
   const target = await writableTarget($, path, HANDOFF_PATH)
   if (typeof target !== 'string') return target
   // The handoff is meant to be read by someone else, so a command with a token in it is masked.
-  await $.fs.write(target, redact(handoffMarkdown(await read($, wbAtom), await $.clock.now())))
+  await $.fs.write(await rooted($, target), redact(handoffMarkdown(await read($, wbAtom), await $.clock.now(), (await read($, liveAtom)).policy?.profile)))
 
   return { written: target }
 }
@@ -836,7 +842,7 @@ function isTaskInUse(wb: Workbench): boolean {
 
 // Re-reads the checked-in guard file; no file means the person's own profile and the built-in rules.
 async function loadPolicy($: $): Promise<void> {
-  const text = await $.fs.read(POLICY_PATH).catch(() => undefined)
+  const text = await $.fs.read(await rooted($, POLICY_PATH)).catch(() => undefined)
   const policy = text === undefined ? undefined : parsePolicy(text)
   await setLive($, ({ policy: _old, ...live }) => (policy ? { ...live, policy } : live))
 
@@ -872,7 +878,7 @@ function policyText(live: Live): string {
 async function goalDraftFor($: $): Promise<string | undefined> {
   const messages = await $.session.messages().catch(() => [])
   const lastPrompt = [...messages].reverse().find(one => one.role === 'user' && one.text.trim() !== '' && one.toolUses.length === 0)?.text
-  const branch = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).catch(() => undefined)
+  const branch = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], { cwd: await $.session.root() }).catch(() => undefined)
 
   return model.goalDraft(lastPrompt, branch?.exitCode === 0 ? branch.stdout : undefined)
 }
@@ -1218,7 +1224,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     const target = await writableTarget($, name, SHARE_PATH)
     if (typeof target !== 'string') return { text: target.refused }
     const live = await read($, liveAtom)
-    await $.fs.write(target, shareText(await read($, wbAtom), await $.clock.now(), live.user))
+    await $.fs.write(await rooted($, target), shareText(await read($, wbAtom), await $.clock.now(), live.user))
     await audit($, 'task.share', { path: target })
 
     return { text: `Task written to ${target}. Commit and push it; on the other machine run /smartworkbench pickup.` }
@@ -1226,7 +1232,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
 
   if (word === 'pickup') {
     const target = name || SHARE_PATH
-    const text = await $.fs.read(target).catch(() => undefined)
+    const text = await $.fs.read(await rooted($, target)).catch(() => undefined)
     if (text === undefined) return { text: `No shared task at ${target}.` }
     const shared = readShare(text)
     if ('error' in shared) return { text: `${target}: ${shared.error}` }
@@ -1247,7 +1253,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   if (word === 'audit') {
     const config = (await read($, liveAtom)).policy?.audit
     if (!config) return { text: `Audit is off. Turn it on with "audit": true in ${POLICY_PATH}.` }
-    const text = await $.fs.read(config.path).catch(() => '')
+    const text = await $.fs.read(await rooted($, config.path)).catch(() => '')
     const entries = readAudit(text)
     const count = Math.max(1, Math.min(200, Number(name) || 20))
 
@@ -1265,6 +1271,11 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
       return { text: `Guard sensitivity: ${label[wb.execution.profile]}${file ? ` · the guard file sets at least ${file}, so ${label[effectiveProfile(wb.execution.profile, file)]} applies` : ''}.\n/swb guard high|medium|low|off to change it.\nhigh asks about medium-risk calls too; medium is the default; low skips most questions (secrets, remote scripts, Codex, project rules and blocks stay); off lets every call through (only rules your project file wrote and the pause switch still apply).` }
     }
     if (!wanted) return { text: 'Usage: /swb guard [high|medium|low|off]' }
+    // Turning the guard off is the person's decision, asked once, so nothing that only types a command can do it silently.
+    if (wanted === 'off' && wb.execution.profile !== 'off') {
+      const answer = await $.ui.ask('Turn the SmartWorkbench guard off? No call is asked about or blocked by the built-in rules until you set it back (/swb guard medium).', { header: 'Guard off', options: ['Turn off', 'Cancel'] }).catch(() => 'Cancel')
+      if (answer !== 'Turn off') return { text: 'Guard unchanged.' }
+    }
     await mutate($, current => model.setProfile(current, wanted))
     await audit($, 'guard.profile', { profile: wanted })
     const file = (await read($, liveAtom)).policy?.profile
@@ -1275,10 +1286,10 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
 
   if (word === 'policy') {
     if (name === 'init') {
-      if (await $.fs.exists(POLICY_PATH)) {
+      if (await $.fs.exists(await rooted($, POLICY_PATH))) {
         return { text: `${POLICY_PATH} already exists.\n${policyText(await read($, liveAtom))}` }
       }
-      await $.fs.write(POLICY_PATH, POLICY_TEMPLATE)
+      await $.fs.write(await rooted($, POLICY_PATH), POLICY_TEMPLATE)
       await loadPolicy($)
 
       return { text: `Wrote ${POLICY_PATH} with example rules; edit it and commit it so the team shares it.\n${policyText(await read($, liveAtom))}` }
@@ -1997,7 +2008,7 @@ export const register: Register = on => {
     await setLive($, live => ({ ...live, codexPath }))
 
     if ((await read($, liveAtom)).policy?.audit) {
-      const name = await $.process.run(['git', 'config', 'user.name']).catch(() => undefined)
+      const name = await $.process.run(['git', 'config', 'user.name'], { cwd: await $.session.root() }).catch(() => undefined)
       const user = name?.exitCode === 0 ? name.stdout.trim() : ''
       if (user) await setLive($, live => ({ ...live, user }))
       await audit($, 'session.start')
@@ -2386,7 +2397,7 @@ export const register: Register = on => {
     }
 
     // Changed regions against HEAD, so the Evidence tab can say which ones a check has seen.
-    const diff = await $.process.run(['git', '-c', 'core.quotePath=false', 'diff', '-U0', '--relative', '--no-color', '--no-ext-diff', 'HEAD']).catch(() => undefined)
+    const diff = await $.process.run(['git', '-c', 'core.quotePath=false', 'diff', '-U0', '--relative', '--no-color', '--no-ext-diff', 'HEAD'], { cwd: await $.session.root() }).catch(() => undefined)
     if (diff?.exitCode === 0) {
       const parsed = parseDiff(diff.stdout)
       await mutate($, current => model.applyDiff(current, parsed))

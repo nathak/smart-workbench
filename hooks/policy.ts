@@ -228,13 +228,13 @@ export function applyRule(builtIn: Verdict, rule: ProjectRule | undefined): Verd
   }
   const loosens = RANK[rule.policy] < RANK[builtIn.policy]
   if (loosens && (builtIn.policy === 'block' || UNRELAXABLE.has(builtIn.category))) {
-    return builtIn
+    return { ...builtIn, rule: rule.policy }
   }
   const risk = rule.policy === 'block' ? 'high' : rule.policy === 'ask' && builtIn.risk === 'low' ? 'medium' : builtIn.risk
   // A rule that asks about what is already asked, as protected checks are, keeps the built-in category, so the permissive
   // profile and "Allow for session" still treat it as the check it is.
   if (rule.policy === builtIn.policy && UNRELAXABLE.has(builtIn.category)) {
-    return { ...builtIn, reason: rule.reason ?? builtIn.reason }
+    return { ...builtIn, reason: rule.reason ?? builtIn.reason, rule: rule.policy }
   }
 
   return {
@@ -242,5 +242,6 @@ export function applyRule(builtIn: Verdict, rule: ProjectRule | undefined): Verd
     risk,
     policy: rule.policy,
     reason: rule.reason ?? (rule.policy === 'allow' ? 'allowed by project rule' : `project rule (${POLICY_PATH})`),
+    rule: rule.policy,
   }
 }
