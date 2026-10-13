@@ -11,7 +11,7 @@ import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseD
 import { checkOutcome, completionOf, evidenceKindsOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
-import { POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
+import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
 import { classify, decide, redact, sessionScope, summarize } from './risk'
@@ -175,6 +175,8 @@ function workflowFields(live: Live, input: unknown): Record<string, unknown> {
 
 // What each subagent answered at the end of its run, until the Agent call that started it returns and carries it to the page.
 const agentAnswers = new Map<string, Record<string, unknown>>()
+// Advisors started in the background, by agent id, until their run ends.
+const backgroundAdvisors = new Map<string, { id: string; description: string }>()
 
 // The answer of the subagent an Agent call ran: from the run's own last turn (found by the agent id in the call's record), or the
 // result itself when the tool returned plain text.
@@ -284,7 +286,11 @@ async function treeState($: $): Promise<TreeState | undefined> {
     const top = await $.process.run(['git', 'rev-parse', '--show-toplevel']).catch(() => undefined)
     treeRoot = top?.exitCode === 0 ? top.stdout.trim() : ''
   }
-  const paths = codex.porcelainPaths(status.stdout).filter(path => !path.includes('\n'))
+  // The mod's own files change whenever it works (the live feed on every event, the audit log on every pass): they are not the task's work.
+  const auditPath = (await read($, liveAtom)).policy?.audit?.path
+  const own = [LIVE_FILE, PID_FILE, HANDOFF_PATH, SHARE_PATH, AUDIT_PATH, ...(auditPath ? [auditPath] : [])].flatMap(one => [one, `${one}.1`])
+  const isOwn = (path: string) => own.some(one => path === one || path.endsWith(`/${one}`))
+  const paths = codex.porcelainPaths(status.stdout).filter(path => !path.includes('\n') && !isOwn(path))
   const stats = new Map(paths.map(path => [path, ''] as const))
   if (paths.length > 0) {
     const ran = await $.process.run(['node', '-e', STAT_SCRIPT], { stdin: paths.join('\n'), ...(treeRoot ? { cwd: treeRoot } : {}) }).catch(() => undefined)
@@ -296,7 +302,8 @@ async function treeState($: $): Promise<TreeState | undefined> {
     }
   }
 
-  return { status: status.stdout, stats }
+  // The fingerprint reads the filtered paths, not git's raw text, which still names the mod's files.
+  return { status: paths.join('\0'), stats }
 }
 
 // A fingerprint of the working tree for the loop's "did anything change" check.
@@ -594,18 +601,20 @@ async function setTeam($: $, enabled: boolean, isFromCommand = false): Promise<s
   const row = await modelRow($)
 
   if (!enabled) {
-    const previous = await $.store.get('team:previousModel')
+    const previousKey = `team:previousModel:${await $.session.cwd()}`
+    const previous = await $.store.get(previousKey)
     if (row && previous !== undefined && previous !== null) {
       await applyLeadModel($, String(previous))
-      await $.store.delete('team:previousModel')
+      await $.store.delete(previousKey)
       return `Team mode off: no automatic Opus reviews; the model is back to ${String(previous) || 'the default'}.`
     }
     return 'Team mode off: no automatic Opus reviews; the explorer and advisor agents stay available.'
   }
 
   const lead = crew.roleOf(wb.team, 'lead')
-  if (row && (await $.store.get('team:previousModel')) === undefined) {
-    await $.store.set('team:previousModel', row.value)
+  const previousKey = `team:previousModel:${await $.session.cwd()}`
+  if (row && (await $.store.get(previousKey)) === undefined) {
+    await $.store.set(previousKey, row.value)
   }
   const isSet = row ? await applyLeadModel($, lead.model) : false
   await applyLeadEffort($, lead.effort, isFromCommand)
@@ -1945,7 +1954,7 @@ export const register: Register = on => {
     const { policy } = await read($, liveAtom)
 
     // Opt-in team rule: no work without a locked contract that says when it is done.
-    if (policy?.requireContract && e.origin.kind !== 'plugin' && !(wb.task.locked && wb.task.goal.trim() !== '' && wb.task.doneConditions.length > 0)) {
+    if (policy?.requireContract && e.origin.kind !== 'plugin' && !/^\/(?:swb|smartworkbench|workbench)(?:\s|$)/.test(e.text.trimStart()) && !(wb.task.locked && wb.task.goal.trim() !== '' && wb.task.doneConditions.length > 0)) {
       return { drop: `This project requires a locked SmartWorkbench contract with at least one done condition (${POLICY_PATH}: requireContract). Run /swb new, fill it in and Lock.` }
     }
 
@@ -1971,8 +1980,11 @@ export const register: Register = on => {
     }
     const carriesDesign = (e.origin.kind === 'plugin' && (await read($, liveAtom)).loop !== undefined) || crew.planWasApproved((await read($, liveAtom)).track ?? crew.EMPTY_TRACK)
     await updateTrack($, track => crew.turnStart(track, startedAt, carriesDesign))
-    const { turnResult: _done, ...rest } = await read($, liveAtom)
-    await setLive($, () => ({ ...rest, pinWarnings: warnings }))
+    await setLive($, current => {
+      const { turnResult: _done, ...rest } = current
+
+      return { ...rest, pinWarnings: warnings }
+    })
 
     if (warnings.length > 0) {
       $.ui.toast(`SmartWorkbench: ${warnings.join(', ')}`)
@@ -1983,7 +1995,9 @@ export const register: Register = on => {
 
     await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(scanned(e.text)).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
 
-    const all = [...blocks, ...loopBlocks]
+    // A loop pass that rides on a typed prompt carries no Codex brief either.
+    const kept = loopBlocks.length > 0 ? blocks.filter(one => !codexBlock.includes(one)) : blocks
+    const all = [...kept, ...loopBlocks]
 
     return all.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...all] })
   }).catch(($, e, next) => next(e))
@@ -2051,6 +2065,8 @@ export const register: Register = on => {
         !wb.execution.isPaused &&
         typeof live.codexPath === 'string' &&
         e.tool === 'Bash' &&
+        // A review per pass would run on the person's Codex account with nobody watching, so inside a loop it is asked.
+        live.loop === undefined &&
         codex.isPlainInvocation(e.command, live.codexPath) &&
         (codexRun.op === 'task' ? codexConfig.rescue : codexConfig.review))
     const policy = isCodexAllowed ? 'allow' : decide(verdict, profileOf(wb, live), wb.execution.isPaused)
@@ -2067,7 +2083,8 @@ export const register: Register = on => {
       startedAt,
       ...(e.agentId ? { agentId: e.agentId } : {}),
     }
-    await mutate($, current => model.recordCall(current, call))
+    // The record is bookkeeping: if the store fails the decision below still stands, so a call to be asked about is asked about.
+    await mutate($, current => model.recordCall(current, call)).catch(() => undefined)
     const sub = (e as unknown as Record<string, unknown>).subagent_type
     // "Allow for session" answers stand until the session ends, except while risky calls are paused.
     const scope = policy === 'ask' ? sessionScope(e.tool, e, verdict) : undefined
@@ -2140,6 +2157,7 @@ export const register: Register = on => {
 
     // Allow still goes through Claude Code's own permission check beneath.
     const ran = await next(e)
+    try {
     const endedAt = await $.clock.now()
     if (isImage && ran.deny === undefined) {
       const after = imageBefore ? await treeState($) : undefined
@@ -2203,9 +2221,15 @@ export const register: Register = on => {
     }
 
     if (e.tool === 'Agent' && e.subagent_type === crew.ADVISOR && isOk) {
-      await updateTrack($, track => crew.advisorRan(track, endedAt))
-      await audit($, 'team.advisor', { id: call.id, description: e.description })
-    } else if (isTeam && ran.deny === undefined && !isUnsettled && e.tool !== 'Agent' && e.tool !== 'Workflow') {
+      const launched = (ran.result as { agentId?: unknown } | undefined)?.agentId
+      if ((e as unknown as { run_in_background?: unknown }).run_in_background === true && typeof launched === 'string') {
+        // Launching a background advisor is not its review: the design and final-check gates open when its run ends.
+        backgroundAdvisors.set(launched, { id: call.id, description: String(e.description ?? '') })
+      } else {
+        await updateTrack($, track => crew.advisorRan(track, endedAt))
+        await audit($, 'team.advisor', { id: call.id, description: e.description })
+      }
+    } else if (isTeam && e.agentId === undefined && ran.deny === undefined && !isUnsettled && e.tool !== 'Agent' && e.tool !== 'Workflow') {
       const key = crew.failureKey(e.tool, e as unknown as Record<string, unknown>)
       let nudge = false
       const track = await updateTrack($, current => {
@@ -2225,6 +2249,10 @@ export const register: Register = on => {
     await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut, ...bg })
 
     return ran
+    } catch {
+      // The call already ran; a failure in the records after it must not run it a second time.
+      return ran
+    }
   }).catch(($, e, next) => {
     if (next.called) {
       return next(e)
@@ -2241,6 +2269,12 @@ export const register: Register = on => {
     const ran = await next(e)
 
     if (e.agentId !== undefined) {
+      const advisor = backgroundAdvisors.get(e.agentId)
+      if (advisor) {
+        backgroundAdvisors.delete(e.agentId)
+        await updateTrack($, track => crew.advisorRan(track, Date.now()))
+        await audit($, 'team.advisor', { id: advisor.id, description: advisor.description, background: true })
+      }
       await emit($, 'turn.agent', { agent: e.agentId, ...usageOf(e.usage) })
       if (typeof e.answer === 'string' && e.answer !== '') {
         agentAnswers.set(e.agentId, promptOf(await read($, liveAtom), e.answer, 'output'))

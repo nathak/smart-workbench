@@ -688,6 +688,35 @@ test('an infinite loop whose working tree stays the same ends after the idle lim
   expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('No loop is running')
 })
 
+test('the mod\'s own files changing every pass do not keep an infinite loop alive', async ($, on) => {
+  const own = '.claude/smartworkbench-live.jsonl'
+  world(on, {
+    commands: {
+      [TREE_STATUS]: { exitCode: 0, stdout: ` M a\0?? ${own}\0` },
+      [`node -e ${TREE_STAT}`]: ['1:1', '2:2', '3:3', '4:4', '5:5'].map(line => ({ exitCode: 0, stdout: `a\t1:1\n${own}\t${line}\n` })),
+    },
+  })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'loop inf tidy', ...COMMAND })
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('pass 2')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('pass 3')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+})
+
+test('requireContract never holds back the /swb commands that make the contract', async ($, on) => {
+  world(on, { files: { '.claude/smartworkbench.json': JSON.stringify({ requireContract: true }) } })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+
+  expect((await $.prompt.submit({ text: '/swb new', ...COMPOSER })).drop).toBe(undefined)
+  expect((await $.prompt.submit({ text: '/smartworkbench lock', ...COMPOSER })).drop).toBe(undefined)
+  expect((await $.prompt.submit({ text: 'start coding', ...COMPOSER })).drop).toContain('requires a locked SmartWorkbench contract')
+})
+
 test('the command\'s own stop is not a pass, and a slash command neither ends nor consumes the loop', async ($, on) => {
   world(on)
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
