@@ -227,6 +227,7 @@ button:hover{color:var(--fg)}
     <span class="badge hold" id="b-paused" hidden></span>
     <span class="muted mono" id="sess"></span>
     <span id="notices"></span>
+    <span class="badge bad" id="errs" hidden role="status"></span>
     <span class="grow">
       <span class="muted mono" id="title"></span>
       <button id="helpb" aria-label="help" aria-haspopup="dialog">?</button>
@@ -392,6 +393,15 @@ button:hover{color:var(--fg)}
 </div>
 <script>
 var loadedAt = Date.now();
+// A failure while reading or drawing must never be silent: it is counted, shown in the status bar and logged to the console.
+var pageErrs = { n: 0, last: '' };
+function pageError(where, e){
+  pageErrs.n++; pageErrs.last = where + ': ' + (e && e.message ? e.message : String(e));
+  try { console.error('swb live', where, e); } catch (x) {}
+  var box = document.getElementById('errs');
+  if (box) { box.hidden = false; box.textContent = '⚠ ' + (lang === 'ko' ? '화면 오류 ' : 'page errors ') + pageErrs.n + ' · ' + pageErrs.last.slice(0, 160); box.title = e && e.stack ? String(e.stack).slice(0, 600) : ''; }
+}
+function safe(where, fn){ try { fn(); } catch (e) { pageError(where, e); } }
 var theme = 'dark';
 try { var savedTheme = localStorage.getItem('swb-theme'); theme = savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'); } catch (e) {}
 document.documentElement.setAttribute('data-theme', theme);
@@ -451,7 +461,9 @@ function curTurn(tr, at){
   if (last && last.end === null) return last;
   // Events before the first prompt (the start of the feed may have been cut) belong to a turn of their own.
   if (!last) return turnOf(tr, at, { early: true });
-  return last;
+  // Calls after a turn ended with no prompt in between (a background agent finished, a hook resumed the session) are a turn of their own;
+  // otherwise a long session would pile into its first turn and the newest calls would sit at the far end of it.
+  return turnOf(tr, at, { resumed: true, origin: 'resumed', text: '' });
 }
 function addTok(bucket, ev){
   if (typeof ev.model !== 'string' || !ev.model) return;
@@ -602,7 +614,7 @@ function kpis(tr, now){
 // A fresh trace from the events the page still holds, so the model never outgrows the buffer.
 function rebuild(list){
   var tr = newTrace();
-  list.forEach(function(ev){ try { ingest(tr, ev); } catch (e) {} });
+  list.forEach(function(ev){ try { ingest(tr, ev); } catch (e) { tr.lastError = e; } });
   return tr;
 }
 // A fixed key for a row, used in the address bar. Looked up in a Map only, never used as a selector.
@@ -1197,8 +1209,8 @@ function handle(ev){
   S.lastAt = at;
   if (ev.session) S.sessions[cut(ev.session, 12)] = 1;
   if (ev.kind === 'feed.recovered' && typeof ev.missed === 'number') S.missed += ev.missed;
-  try { ingest(TR, ev); queueView(); if ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block') alertNow(ev); } catch (e) {}
-  try { flow(ev); } catch (e) {}
+  try { ingest(TR, ev); queueView(); if ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block') alertNow(ev); } catch (e) { pageError('model', e); }
+  try { flow(ev); } catch (e) { pageError('flow', e); }
   switch (ev.kind) {
     case 'prompt':
       S.team = !!ev.team;
@@ -1266,7 +1278,7 @@ function take(ev){
   events.push(ev); if (events.length > 2000) events.shift();
   handle(ev);
   // The model follows the buffer: past twice its size it is rebuilt from the events still held.
-  if (TR.events > 4000) { TR = rebuild(events); said = { order: TR.order, fails: TR.failTotal }; resetViews(); queueView(); }
+  if (TR.events > 4000) { TR = rebuild(events); if (TR.lastError) pageError('model', TR.lastError); said = { order: TR.order, fails: TR.failTotal }; resetViews(); queueView(); }
 }
 function quiet(list){ replaying = true; try { list.forEach(take); } finally { replaying = false; } render(); applyFilter(); queueView(); }
 // While paused the tiles and tables stand still, but a call that waits on you or a block is still spoken and counted in the status bar.
@@ -1484,11 +1496,11 @@ function resetViews(){
   tl.seenOrder = TR ? TR.order : 0;
 }
 var tlQueued = false;
-function queueTl(){ tl.dirty = true; if (tab === 'timeline' && !tlQueued) { tlQueued = true; requestAnimationFrame(drawTimeline); } }
+function queueTl(){ tl.dirty = true; if (tab === 'timeline' && !tlQueued) { tlQueued = true; requestAnimationFrame(function(){ safe('timeline', drawTimeline); }); } }
 var viewQueued = false;
 function queueView(){
   if (tab === 'timeline') { queueTl(); return; }
-  if ((tab === 'guard' || tab === 'agents') && !viewQueued) { viewQueued = true; requestAnimationFrame(function(){ viewQueued = false; if (tab === 'guard') drawGuard(); else if (tab === 'agents') drawAgents(); }); }
+  if ((tab === 'guard' || tab === 'agents') && !viewQueued) { viewQueued = true; requestAnimationFrame(function(){ viewQueued = false; safe(tab, function(){ if (tab === 'guard') drawGuard(); else if (tab === 'agents') drawAgents(); }); }); }
 }
 function isFail(sp){ var st = statusOf(sp); return st === 'error' || st === 'blocked' || st === 'declined'; }
 function whoOf(sp){
@@ -1574,8 +1586,8 @@ function drawTimeline(){
     var head = el('button', 'turnhead');
     head.setAttribute('aria-expanded', open ? 'true' : 'false'); head.setAttribute('role', 'treeitem'); head.setAttribute('aria-level', '1');
     head.appendChild(el('span', 'tt', (open ? '▾ ' : '▸ ') + (t.early ? L('before the first prompt', '첫 프롬프트 이전') : '#' + t.n)));
-    if (!t.early) head.appendChild(el('span', 'tag ' + (t.loop ? 'loop' : ''), t.loop ? 'LOOP' : t.origin === 'plugin' ? 'PLUGIN' : 'PROMPT'));
-    head.appendChild(hl(el('span', 'tx'), t.early ? L('(the start of the feed may have been cut)', '(피드의 앞부분이 잘렸을 수 있음)') : cut(t.text, 140)));
+    if (!t.early) head.appendChild(el('span', 'tag ' + (t.loop ? 'loop' : ''), t.loop ? 'LOOP' : t.resumed ? 'RESUMED' : t.origin === 'plugin' ? 'PLUGIN' : 'PROMPT'));
+    head.appendChild(hl(el('span', 'tx'), t.early ? L('(the start of the feed may have been cut)', '(피드의 앞부분이 잘렸을 수 있음)') : t.resumed ? L('continued with no prompt: a background agent or a hook resumed the session', '프롬프트 없이 이어짐: 백그라운드 에이전트나 훅이 세션을 다시 이어 감') : cut(t.text, 140)));
     head.appendChild(el('span', 'mt', L(calls + ' calls', '호출 ' + calls) + (errs ? ' · ' + (L('▲ ' + errs + ' failed', '▲ 실패 ' + errs)) : '') + ' · ' + fmtMs(tEnd - t.at) + (t.ctx != null ? ' · ctx ' + t.ctx + '%' : '') + (t.tokIn || t.tokOut ? ' · ' + k(t.tokIn) + '/' + k(t.tokOut) : '') + (t.aborted ? ' · ' + L('aborted', '중단') : t.end === null ? ' · ' + L('running', '진행 중') : '')));
     turnWarns(t).forEach(function(w){
       head.appendChild(el('span', 'badge warn', w.kind === 'repeat' ? L('⚠ repeated ' + cut(w.tool, 20), '⚠ 반복 ' + cut(w.tool, 20)) : w.kind === 'errors' ? L('⚠ ' + w.n + ' failures', '⚠ 실패 ' + w.n + '개') : L('⚠ repeated error', '⚠ 같은 오류 반복')));
@@ -1644,6 +1656,14 @@ function drawTimeline(){
         g.onclick = function(){ tlq.runOpen[rid] = true; queueTl(); };
         host.appendChild(g);
       });
+    }
+    // Too many calls in one turn: the newest are drawn and the earlier ones wait behind a button at the top.
+    var earlier = 0;
+    if (!filtered && roots.length > budget) { earlier = roots.length - budget; roots = roots.slice(earlier); }
+    if (earlier) {
+      var eb = el('button', 'moreb', L('show ' + Math.min(earlier, 200) + ' earlier of ' + earlier + ' calls', '이전 호출 ' + earlier + '개 중 ' + Math.min(earlier, 200) + '개 더 보기'));
+      eb.onclick = function(){ tl.more[t.n] = (tl.more[t.n] || 0) + 200; queueTl(); };
+      host.appendChild(eb);
     }
     addList(roots, 0, crit);
     Object.keys(groups).forEach(function(ag){
@@ -2088,7 +2108,7 @@ function spark(svg, data){
   svg.appendChild(sv('polyline', { points: pts }));
 }
 var kpiQueued = false;
-function queueKpi(){ if (!kpiQueued) { kpiQueued = true; requestAnimationFrame(drawKpis); } }
+function queueKpi(){ if (!kpiQueued) { kpiQueued = true; requestAnimationFrame(function(){ safe('tiles', drawKpis); }); } }
 function nowFor(){ return replaying || playback ? TR.lastAt : Date.now(); }
 function drawKpis(){
   kpiQueued = false;
@@ -2184,7 +2204,7 @@ var es = new EventSource('/events');
 es.onopen = function(){ if (everOpened) { events = []; pending = []; replay(); resetViews(); } connected = true; everOpened = true; translate(); };
 es.onerror = function(){ connected = false; translate(); };
 es.onmessage = function(m){
-  try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) {}
+  try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) { pageError('event', e); }
 };
 flowBuild();
 uiBuild();
