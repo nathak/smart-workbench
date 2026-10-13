@@ -65,7 +65,9 @@ function world(on: On, options: WorldOptions = {}) {
     delete store[e.key]
     return { value: undefined }
   })
-  on('session.cwd', () => ({ value: CWD }))
+  // A shell cd moves the session's directory, not its project root: nothing the mod keeps may follow it.
+  on('session.cwd', () => ({ value: `${CWD}/sub` }))
+  on('session.root', () => ({ value: CWD }))
   on('session.id', () => ({ value: 'session-a' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: options.context ?? { window: 200000 }, rateLimits: [] } }))
   on('fs.read', ($, e) => {

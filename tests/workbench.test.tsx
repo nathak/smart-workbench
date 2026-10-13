@@ -28,6 +28,7 @@ function world(on: On, store: Record<string, unknown> = {}, files: Record<string
     return { value: undefined }
   })
   on('session.cwd', () => ({ value: CWD }))
+  on('session.root', () => ({ value: CWD }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 84000, window: 200000, percent: 42 }, rateLimits: [] } }))
   // The engine hands fs hooks absolute paths; match the project-relative name.
   const fileAt = (path: string) => Object.entries(files).find(([name]) => path === name || path.endsWith(`/${name}`))?.[1]
@@ -381,6 +382,7 @@ test('an edit after a passing test makes the condition need a re-run; the diff m
   })
   on('store.keys', () => ({ value: Object.keys(store) }))
   on('session.cwd', () => ({ value: CWD }))
+  on('session.root', () => ({ value: CWD }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('fs.read', ($, e) => {
     throw new Error(`ENOENT: ${e.path}`)

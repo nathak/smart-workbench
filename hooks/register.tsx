@@ -75,7 +75,7 @@ const EDIT_TOOL_NAMES = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 // ---- state: $.state for drawing, $.store (per project) to survive restarts
 
 async function storeKey($: $): Promise<string> {
-  return `ws:${await $.session.cwd()}`
+  return `ws:${await $.session.root()}`
 }
 
 async function load($: $): Promise<Workbench> {
@@ -200,9 +200,9 @@ async function agentOutput($: $, result: unknown): Promise<Record<string, unknow
 
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
   try {
-    const path = `${await $.session.cwd()}/${LIVE_FILE}`
+    const path = `${await $.session.root()}/${LIVE_FILE}`
     // The feed is written only while a live server owns it: its process note must be beside it, so a feed file that was committed to the repository is never appended to.
-    if (!(await $.fs.exists(path)) || !(await $.fs.exists(`${await $.session.cwd()}/${PID_FILE}`))) return
+    if (!(await $.fs.exists(path)) || !(await $.fs.exists(`${await $.session.root()}/${PID_FILE}`))) return
     const session = (await read($, liveAtom)).sessionId
     // Every text the feed carries is masked here, so a command summary or a URL cannot carry a secret around the prompt masking.
     const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? redact(scanned(value)) : value]))
@@ -612,7 +612,7 @@ async function setTeam($: $, enabled: boolean, isFromCommand = false): Promise<s
   const row = await modelRow($)
 
   if (!enabled) {
-    const previousKey = `team:previousModel:${await $.session.cwd()}`
+    const previousKey = `team:previousModel:${await $.session.root()}`
     const previous = await $.store.get(previousKey)
     if (row && previous !== undefined && previous !== null) {
       await applyLeadModel($, String(previous))
@@ -623,7 +623,7 @@ async function setTeam($: $, enabled: boolean, isFromCommand = false): Promise<s
   }
 
   const lead = crew.roleOf(wb.team, 'lead')
-  const previousKey = `team:previousModel:${await $.session.cwd()}`
+  const previousKey = `team:previousModel:${await $.session.root()}`
   if (row && (await $.store.get(previousKey)) === undefined) {
     await $.store.set(previousKey, row.value)
   }
@@ -803,7 +803,7 @@ async function savedNames($: $, prefix: 'set:' | 'tpl:'): Promise<string[]> {
 async function writableTarget($: $, path: string, fallback: string): Promise<string | { refused: string }> {
   const target = path.trim() || fallback
   if (target === fallback) return target
-  if (repoPath(target, await $.session.cwd()) === undefined) return { refused: `${target} is outside the project; give a path inside it.` }
+  if (repoPath(target, await $.session.root()) === undefined) return { refused: `${target} is outside the project; give a path inside it.` }
   if (await $.fs.exists(target).catch(() => false)) return { refused: `${target} already exists; give another name or delete it first.` }
 
   return target
@@ -909,7 +909,7 @@ const REMOVE_SCRIPT = "for(const f of process.argv.slice(1))require('fs').rmSync
 
 // A live view this session did not start: whether its feed file is there and whether the process that made it still runs.
 async function foreignView($: $): Promise<{ state: 'none' | 'alive' | 'dead' | 'unknown'; pid?: string }> {
-  const cwd = await $.session.cwd()
+  const cwd = await $.session.root()
   if (!(await $.fs.exists(`${cwd}/${LIVE_FILE}`))) return { state: 'none' }
   // The note is a file of the project, so its words are untrusted: a host that begins with a dash would be read by node as an option.
   const note = /^([A-Za-z0-9][A-Za-z0-9._-]*) (\d+)$/.exec(await $.fs.read(`${cwd}/${PID_FILE}`).then(text => text.trim(), () => ''))
@@ -934,7 +934,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     if (!liveServer) {
       const other = await foreignView($)
       if (other.state === 'dead') {
-        const cwd = await $.session.cwd()
+        const cwd = await $.session.root()
         await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', `${cwd}/${LIVE_FILE}`, `${cwd}/${PID_FILE}`]).catch(() => undefined)
 
         return { text: 'Removed a feed left behind by a live view that is no longer running.' }
@@ -952,7 +952,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     for (let wait = 0; wait < 4; wait++) {
       const gone = await foreignView($)
       if (gone.state === 'dead') {
-        const cwd = await $.session.cwd()
+        const cwd = await $.session.root()
         await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', `${cwd}/${LIVE_FILE}`, `${cwd}/${PID_FILE}`]).catch(() => undefined)
         break
       }
@@ -985,7 +985,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   // All sessions on a port share one hub and are its tabs; with no port given, a port that something else holds is skipped.
   const sessionId = (await read($, liveAtom)).sessionId
   let url = `http://127.0.0.1:${port}`
-  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--join', ...(sessionId ? ['--session', sessionId] : []), '--port', String(port), ...(isAuto ? ['--auto'] : []), '--watch-parent'] })
+  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.root(), '--join', ...(sessionId ? ['--session', sessionId] : []), '--port', String(port), ...(isAuto ? ['--auto'] : []), '--watch-parent'] })
   const iterator = child[Symbol.asyncIterator]()
   let output = ''
   const handle = { url, stop: () => void Promise.resolve(iterator.return?.()).catch(() => undefined) }
@@ -2072,7 +2072,7 @@ export const register: Register = on => {
     }
     // Design first: a big edit needs a design from the advisor; asked once per turn so it can never deadlock.
     if (isTeam && e.agentId === undefined && model.isEditTool(e.tool)) {
-      const cwd = await $.session.cwd()
+      const cwd = await $.session.root()
       const input = e as unknown as Record<string, unknown>
       const target = input.file_path ?? input.notebook_path
       const file = typeof target === 'string' ? target : undefined
@@ -2088,7 +2088,7 @@ export const register: Register = on => {
     }
     const wb = await read($, wbAtom)
     const live = await read($, liveAtom)
-    const cwd = await $.session.cwd()
+    const cwd = await $.session.root()
     const verdict = applyRule(classify(e.tool, e), live.policy ? matchRule(live.policy.rules, e.tool, e, cwd) : undefined)
     // Codex through the companion script: the person's team setting lets a read-only review (or a rescue task) run without
     // asking, once per turn. A write, a transfer, a paused session and a project rule that blocks still decide for themselves.
