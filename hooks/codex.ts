@@ -27,7 +27,12 @@ const OPS: readonly string[] = ['review', 'adversarial-review', 'task', 'transfe
 
 // A Bash command that runs the plugin's companion script, and what it asks of it.
 export function codexCall(command: string): CodexCall | undefined {
-  const hit = /\bnode\b[^;&|\n]*?codex-companion\.mjs["']?\s+([\w-]+)/.exec(command)
+  let hit = /\bnode\b[^;&|\n]*?codex-companion\.mjs["']?\s+([\w-]+)/.exec(command)
+  // The script path kept in a variable (`C=.../codex-companion.mjs; node "$C" task ...`) is the same call.
+  for (const named of command.matchAll(/(?:^|[\s;&|(])(\w+)=["']?[^\s"';&|]*codex-companion\.mjs/g)) {
+    if (hit) break
+    hit = new RegExp(`\\bnode\\b[^;&|\\n]*?\\$\\{?${named[1]}\\}?["']?\\s+([\\w-]+)`).exec(command)
+  }
   if (!hit || !OPS.includes(hit[1] ?? '')) return undefined
 
   return { op: hit[1] as CodexOp, write: /(?:^|[\s"'])--?w\\?r\\?i\\?t\\?e\b/.test(command), background: /\s--background\b/.test(command) }
