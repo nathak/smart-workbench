@@ -233,8 +233,8 @@ button:hover{color:var(--fg)}
     <span class="grow">
       <span class="muted mono" id="title"></span>
       <button id="helpb" aria-label="help" aria-haspopup="dialog">?</button>
-      <button id="theme" aria-label="theme"></button>
-      <button id="lang" aria-label="language"></button>
+      <button id="theme"></button>
+      <button id="lang"></button>
       <button id="clear" data-i="clear"></button>
     </span>
   </header>
@@ -288,7 +288,7 @@ button:hover{color:var(--fg)}
       <button id="focus" hidden></button>
     </div>
     <div class="grid" id="grid">
-      <svg id="flow" aria-hidden="true"></svg>
+      <svg id="flow"></svg>
       <div class="side">
       <aside class="box opus" id="b-opus">
         <h3>Opus · on call</h3>
@@ -364,7 +364,7 @@ button:hover{color:var(--fg)}
     <div class="sect"><h2 data-i="g-cats"></h2><div class="tblwrap"><table class="tbl" id="g-cats"></table></div></div>
     <div class="sect"><h2 data-i="g-table"></h2>
       <div class="fchips" id="g-chips"></div>
-      <div class="tblwrap"><table class="tbl" id="g-tbl"></table></div></div>
+      <div class="tblwrap"><table class="tbl" id="g-tbl"></table></div><div class="muted" id="g-more" hidden></div></div>
   </div>
   <div class="tabpanel" id="p-agents" role="tabpanel" aria-labelledby="tab-agents" hidden>
     <div class="sect"><h2 data-i="a-kinds"></h2><div class="tblwrap"><table class="tbl" id="a-kinds"></table></div></div>
@@ -404,6 +404,9 @@ function pageError(where, e){
   if (box) { box.hidden = false; box.textContent = '⚠ ' + (lang === 'ko' ? '화면 오류 ' : 'page errors ') + pageErrs.n + ' · ' + pageErrs.last.slice(0, 160); box.title = e && e.stack ? String(e.stack).slice(0, 600) : ''; }
 }
 function safe(where, fn){ try { fn(); } catch (e) { pageError(where, e); } }
+window.addEventListener('error', function(e){ pageError('page', e.error || e.message); });
+window.addEventListener('unhandledrejection', function(e){ pageError('promise', e.reason); });
+function isoOf(at){ try { return new Date(at).toISOString(); } catch (e) { return String(at); } }
 var theme = 'dark';
 try { var savedTheme = localStorage.getItem('swb-theme'); theme = savedTheme === 'light' || savedTheme === 'dark' ? savedTheme : (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'); } catch (e) {}
 document.documentElement.setAttribute('data-theme', theme);
@@ -428,7 +431,7 @@ var DICT = {
   'e-sub': ['Haiku · read code + docs', 'Haiku · 코드·문서 읽기'], 'e-read-l': ['reads', '읽기'], 'e-run-l': ['running', '실행 중'],
   'p-sub': ['repeats a task', '회차 반복'], 'p-pass-l': ['pass', '회차'], 'p-turn-l': ['turns', '턴'],
   'tab-timeline': ['Timeline', '타임라인'],
-  's-ok': ['ok', '완료'], 's-error': ['error', '오류'], 's-blocked': ['blocked', '차단'], 's-declined': ['declined', '거절'], 's-running': ['running', '실행 중'], 's-bg': ['started', '시작됨'], 's-ask': ['asking', '확인 중'],
+  's-aborted': ['aborted', '중단됨'], 's-ok': ['ok', '완료'], 's-error': ['error', '오류'], 's-blocked': ['blocked', '차단'], 's-declined': ['declined', '거절'], 's-running': ['running', '실행 중'], 's-bg': ['started', '시작됨'], 's-ask': ['asking', '확인 중'],
   'tl-follow-on': ['↓ following', '↓ 따라가는 중'], 'tl-follow-off': ['↓ follow', '↓ 따라가기'], 'tl-fail-l': ['failures only', '실패만'], 'tl-expand': ['expand all', '모두 펼치기'], 'tl-collapse': ['collapse all', '모두 접기'],
   'tl-q-ph': ['search · tool:Bash -policy:allow "npm test" ms:>500 is:fail', '검색 · tool:Bash -policy:allow "npm test" ms:>500 is:fail'], 'tl-crit-l': ['◆ critical path', '◆ 임계 경로'], 'tl-zoom-l': ['reset zoom', '확대 해제'],
   'h-title': ['Keyboard and search', '키보드와 검색'], 'h-keys': ['Keys', '단축키'], 'h-query': ['Search words (Timeline)', '검색어 (타임라인)'], 'h-off': ['Turn off single-key shortcuts', '한 글자 단축키 끄기'], 'h-close': ['Close', '닫기'],
@@ -446,7 +449,12 @@ function T(k){ var d = DICT[k]; return d ? d[lang === 'ko' ? 1 : 0] : k; }
 // Pure data model: no DOM, no language, no clock of its own. The feed goes in through ingest(); the views read the result.
 // Run in node by tools/live-check.mjs on synthetic events.
 var MODEL_MAX_SPANS = 4000;
-var STATUS = Object.assign(Object.create(null), { ok: 'ok', error: 'error', blocked: 'blocked', declined: 'declined' });
+// Every text from the feed is made safe once, at the door: control and bidi characters become spaces, runs of space one space, and it is cut.
+function clean(text, n){
+  var s = String(text == null ? '' : text).replace(/[\u0000-\u001f\u007f‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim();
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+var STATUS = Object.assign(Object.create(null), { ok: 'ok', error: 'error', blocked: 'blocked', declined: 'declined', aborted: 'aborted' });
 function newTrace(){
   return { turns: [], spans: new Map(), byAgent: new Map(), pendingAsk: new Map(), attention: [], agentTok: Object.create(null),
     tok: Object.create(null), ctx: null, ctxHist: [], sessions: Object.create(null), missed: 0, loopPasses: 0, loopActive: false, activeMs: 0,
@@ -491,6 +499,12 @@ function linkAgent(tr, sp){
   tr.spans.forEach(function(o){ if (o.tool === 'Agent' && o.end === null && !o.agent) open.push(o); });
   if (open.length === 1) { sp.parent = open[0].id; sp.est = true; }
 }
+// A turn that was cut short, or a new prompt, ends the calls of the lead that never reported an end: they are not running and nobody is being asked.
+function abortOpen(tr, at){
+  tr.spans.forEach(function(sp){
+    if (sp.end === null && !sp.agent) { sp.end = at; sp.outcome = 'aborted'; tr.pendingAsk.delete(sp.id); }
+  });
+}
 function ingest(tr, ev){
   var at = typeof ev.at === 'number' ? ev.at : tr.lastAt || 0;
   tr.events++;
@@ -499,6 +513,7 @@ function ingest(tr, ev){
   var t, sp, id;
   switch (ev.kind) {
     case 'prompt':
+      abortOpen(tr, at);
       // The turn before a prompt is over, even when its end event never came (the start of the feed was cut, or the turn was cut short).
       if (tr.turns.length && tr.turns[tr.turns.length - 1].end === null) tr.turns[tr.turns.length - 1].end = at;
       t = turnOf(tr, at, { text: String(ev.text || ''), origin: ev.origin === 'plugin' ? 'plugin' : 'user', loop: !!ev.loop, prompt: typeof ev.prompt === 'string' ? ev.prompt : '' });
@@ -507,8 +522,8 @@ function ingest(tr, ev){
     case 'tool.start':
       id = String(ev.id);
       t = curTurn(tr, at);
-      sp = { id: id, tool: String(ev.tool || ''), summary: String(ev.summary || ''), at: at, end: null, ms: null, outcome: null, policy: ev.policy || 'allow', risk: ev.risk || '', category: ev.category || '',
-        agent: ev.agent || null, subagent: ev.subagent || '', codex: ev.codex || '', turn: t.n, parent: null, est: false, guard: null, output: '', workflowBg: false, agentRun: null, ev: ev, order: ++tr.order, kids: [] };
+      sp = { id: id, tool: clean(ev.tool, 60), summary: clean(ev.summary, 300), at: at, end: null, ms: null, outcome: null, policy: clean(ev.policy || 'allow', 12), risk: clean(ev.risk, 12), category: clean(ev.category, 40),
+        agent: ev.agent ? clean(ev.agent, 40) : null, subagent: clean(ev.subagent, 80), codex: clean(ev.codex, 20), turn: t.n, parent: null, est: false, guard: null, output: '', workflowBg: false, agentRun: null, ev: ev, order: ++tr.order, kids: [] };
       tr.spans.set(id, sp);
       t.spans.push(sp);
       if (tr.spans.size > MODEL_MAX_SPANS) tr.spans.delete(tr.spans.keys().next().value);
@@ -532,7 +547,7 @@ function ingest(tr, ev){
       break;
     case 'guard.ask': case 'guard.block':
       sp = ev.id != null ? tr.spans.get(String(ev.id)) : null;
-      if (sp) sp.guard = { kind: ev.kind === 'guard.ask' ? 'ask' : 'block', reason: String(ev.reason || ''), answer: String(ev.answer || ''), at: at, ev: ev };
+      if (sp) sp.guard = { kind: ev.kind === 'guard.ask' ? 'ask' : 'block', reason: clean(ev.reason, 300), answer: clean(ev.answer, 40), at: at, ev: ev };
       if (ev.id != null) tr.pendingAsk.delete(String(ev.id));
       break;
     case 'turn': case 'turn.agent':
@@ -541,7 +556,7 @@ function ingest(tr, ev){
       // A second turn line for a turn that is already closed only refreshes its numbers; it makes no turn of its own.
       var closed = !!t && t.end !== null;
       if (!t) t = turnOf(tr, at, { early: true });
-      if (!closed) { t.end = at; t.aborted = ev.aborted === true; }
+      if (!closed) { t.end = at; t.aborted = ev.aborted === true; if (t.aborted) abortOpen(tr, at); }
       t.tokIn = typeof ev.tokensIn === 'number' ? ev.tokensIn : 0; t.tokOut = typeof ev.tokensOut === 'number' ? ev.tokensOut : 0;
       if (ev.model) addTok(t.models, ev);
       if (!closed) addTok(tr.tok, ev);
@@ -641,12 +656,19 @@ function parseHash(h){
   });
   return out;
 }
+// Calls by the call that started them, built once per change of the trace so a table of agents does not walk every call for every agent.
+function childIndex(tr){
+  if (tr.idx && tr.idxAt === tr.events) return tr.idx;
+  var idx = new Map();
+  tr.spans.forEach(function(c){ if (c.parent) { var l = idx.get(c.parent); if (!l) idx.set(c.parent, l = []); l.push(c); } });
+  tr.idx = idx; tr.idxAt = tr.events;
+  return idx;
+}
 // What a subagent's Agent call cost: calls made under it (all depths), failures among them, and its own tokens.
 function agentStats(tr, sp){
   var calls = 0, fails = 0, tokIn = 0, tokOut = 0, seen = 0;
   function walk(parentId){
-    tr.spans.forEach(function(c){
-      if (c.parent !== parentId) return;
+    (childIndex(tr).get(parentId) || []).forEach(function(c){
       if (++seen > MODEL_MAX_SPANS) return;
       calls++;
       var st = statusOf(c);
@@ -768,6 +790,7 @@ function decisionOf(sp){
   if (sp.guard && sp.guard.kind === 'block') return 'block';
   if (sp.outcome === 'blocked') return 'block';
   if (sp.outcome === 'declined' || (sp.guard && sp.guard.kind === 'ask' && sp.guard.answer === 'declined')) return 'declined';
+  if (sp.outcome === 'aborted' && sp.policy === 'ask' && !sp.guard) return 'aborted';
   if (sp.guard && sp.guard.kind === 'ask') return 'ask';
   if (sp.policy === 'ask' && sp.end === null) return 'asking';
   if (sp.policy === 'block') return 'block';
@@ -806,7 +829,7 @@ function groupRows(rows){
 function guardStats(tr){
   var cats = Object.create(null);
   tr.spans.forEach(function(sp){
-    var c = sp.category || 'other', d = decisionOf(sp), e = cats[c] || (cats[c] = { allow: 0, ask: 0, block: 0, declined: 0, asking: 0 });
+    var c = sp.category || 'other', d = decisionOf(sp), e = cats[c] || (cats[c] = { allow: 0, ask: 0, block: 0, declined: 0, asking: 0, aborted: 0 });
     e[d]++;
   });
   return cats;
@@ -916,12 +939,12 @@ function flowBuild(){
   var svg = $('flow');
   Object.keys(NODES).forEach(function(n){ boxes[n] = $(NODES[n]); });
   Object.keys(EDGES).forEach(function(id){
-    edgeEl[id] = svg.appendChild(sv('path', { 'class': 'edge' }));
+    edgeEl[id] = svg.appendChild(sv('path', { 'class': 'edge', 'aria-hidden': 'true' }));
     var hit = svg.appendChild(sv('path', { 'class': 'hit', 'data-edge': id, tabindex: '0', role: 'button' }));
     edgeEl[id].hitEl = hit;
-    countEl[id] = svg.appendChild(sv('text', { 'class': 'ec' }));
+    countEl[id] = svg.appendChild(sv('text', { 'class': 'ec', 'aria-hidden': 'true' }));
   });
-  svg.appendChild(sv('g', { id: 'pk' }));
+  svg.appendChild(sv('g', { id: 'pk', 'aria-hidden': 'true' }));
 }
 function flowReset(){
   E = {}; P = []; PR = []; R = new Map(); live = []; queue = []; parked = new Map();
@@ -1163,8 +1186,8 @@ function render(){
   if (events.length >= 2000) nt.appendChild(el('span', 'badge warn', L('⚠ older events cut (2000 kept)', '⚠ 오래된 이벤트 잘림 (2000개 유지)')));
   var bp = $('b-paused');
   bp.hidden = !paused && !playback;
-  if (!pending.length) heldAsk = 0;
-  bp.textContent = (playback ? L('▶ replaying', '▶ 다시보기 중') : L('‖ paused', '‖ 일시정지')) + (pending.length ? ' · +' + pending.length : '') + (heldAsk ? ' · ⚠ ' + L(heldAsk + ' ask or block held', '확인·차단 ' + heldAsk + '건 대기') : '');
+  if (!pending.length) { heldAsk = 0; lostHeld = 0; }
+  bp.textContent = (playback ? L('▶ replaying', '▶ 다시보기 중') : L('‖ paused', '‖ 일시정지')) + (pending.length ? ' · +' + pending.length : '') + (heldAsk ? ' · ⚠ ' + L(heldAsk + ' ask or block held', '확인·차단 ' + heldAsk + '건 대기') : '') + (lostHeld ? ' · ' + L(lostHeld + ' oldest dropped', '가장 오래된 ' + lostHeld + '개 버려짐') : '');
   showLast();
   queueKpi();
   var cx = S.ctx, lvl = ctxLevel(cx ? cx.p : null);
@@ -1175,7 +1198,7 @@ function render(){
   $('ctx-spark').textContent = S.ctxHist.map(function(p){ return '▁▂▃▄▅▆▇█'.charAt(Math.min(7, Math.floor(p * 8 / 100))); }).join('');
   $('ctx').title = L('context per lead turn; subagents are not measured', '리드 턴 기준 컨텍스트 · 서브에이전트는 측정되지 않음');
   $('ctx').className = 'tile' + (lvl === 'block' ? ' bad' : lvl === 'ask' ? ' warn' : '');
-  $('tok').textContent = Object.keys(S.tok).map(function(m){ return m + ' ' + L('in ', '입력 ') + k(S.tok[m].i) + ' · ' + L('out ', '출력 ') + k(S.tok[m].o); }).join('  |  ');
+  $('tok').textContent = Object.keys(TR.tok).map(function(m){ return m + ' ' + L('in ', '입력 ') + k(TR.tok[m].i) + ' · ' + L('out ', '출력 ') + k(TR.tok[m].o); }).join('  |  ');
   queueLayout();
   if (!$('drawer').hidden && !replaying && !$('drawer').contains(document.activeElement) && !$('dw-list').querySelector('.detail:not([hidden])') && !$('dw-prompts').querySelector('.full:not([hidden])')) drawRefresh();
 }
@@ -1203,7 +1226,7 @@ function addTokens(ev){
   if (typeof ev.tokensIn === 'number') t.i += ev.tokensIn;
   if (typeof ev.tokensOut === 'number') t.o += ev.tokensOut;
 }
-function k(n){ return n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n); }
+function k(n){ return n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n); }
 
 function handle(ev){
   var at = ev.at || Date.now();
@@ -1254,6 +1277,7 @@ function handle(ev){
       break;
     case 'turn':
       S.turn++;
+      if (ev.aborted === true) inflight.forEach(function(c, id){ if (c.lane === 'lead' || c.lane === 'worker' || c.lane === 'advisor' || c.lane === 'explorer' || c.lane === 'codex') inflight.delete(id); });
       var pct = typeof ev.contextPercent === 'number' ? ev.contextPercent : (typeof ev.contextTokens === 'number' && ev.contextWindow > 0 ? Math.round(ev.contextTokens / ev.contextWindow * 100) : null);
       if (pct != null || typeof ev.contextTokens === 'number' || typeof ev.contextWindow === 'number') S.ctx = { p: pct == null ? null : Math.max(0, Math.min(100, Math.round(pct))), tokens: typeof ev.contextTokens === 'number' ? ev.contextTokens : null, window: typeof ev.contextWindow === 'number' ? ev.contextWindow : null };
       if (S.ctx && S.ctx.p != null && pct != null) { S.ctxHist.push(S.ctx.p); if (S.ctxHist.length > 30) S.ctxHist.shift(); }
@@ -1264,7 +1288,7 @@ function handle(ev){
 }
 
 // ---- ui: pause, replay, speed, filters, and the detail drawer ----
-var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null, lastTriggerKey = null, heldAsk = 0;
+var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null, lastTriggerKey = null, heldAsk = 0, lostHeld = 0;
 var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id', 'promptLength', 'contextPercent', 'tokensIn', 'tokensOut', 'model', 'paths', 'skipped', 'missed', 'outputLength', 'agentRun'];
 function store(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
 function stored(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -1285,7 +1309,7 @@ function take(ev){
 function quiet(list){ replaying = true; try { list.forEach(take); } finally { replaying = false; } render(); applyFilter(); queueView(); }
 // While paused the tiles and tables stand still, but a call that waits on you or a block is still spoken and counted in the status bar.
 function holdBack(ev){
-  pending.push(ev); if (pending.length > 2000) pending.shift();
+  pending.push(ev); if (pending.length > 2000) { pending.shift(); lostHeld++; }
   if ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block') { heldAsk++; alertNow(ev, true); }
   syncTools(); render();
 }
@@ -1362,6 +1386,7 @@ function openDrawer(f, trigger){
   $('dw-item').hidden = true;
   ['dw-stats', 'dw-links', 'dw-list'].forEach(function(id){ $(id).hidden = false; });
   focus = f;
+  lastTriggerKey = null;
   lastTrigger = trigger || lastTrigger;
   drawRefresh();
   $('drawer').hidden = false;
@@ -1373,8 +1398,9 @@ function closeDrawer(){
   $('drawer').hidden = true;
   applyFilter(); syncTools();
   var back = lastTriggerKey ? tl.rows.filter(function(r){ return r.key === lastTriggerKey; })[0] : null;
+  lastTriggerKey = null;
   if (back) back.el.focus({ preventScroll: true });
-  else if (lastTrigger && lastTrigger.focus) lastTrigger.focus();
+  else if (lastTrigger && lastTrigger.focus && lastTrigger.offsetParent !== null) lastTrigger.focus();
 }
 function drawRefresh(){
   if (!focus) return;
@@ -1490,10 +1516,12 @@ function uiBuild(){
 }
 
 // ---- timeline: turns as collapsible blocks of nested calls with a duration bar; one row per call ----
-var STATUS_ICON = { ok: '✓', error: '▲', blocked: '✕', declined: '⊘', running: '◐', bg: '→', ask: '?' };
+var STATUS_ICON = { ok: '✓', error: '▲', blocked: '✕', declined: '⊘', aborted: '■', running: '◐', bg: '→', ask: '?' };
 var tl = { turnOpen: Object.create(null), spanClosed: Object.create(null), sel: null, follow: true, failOnly: false, more: Object.create(null), seenOrder: 0, rows: [], byKey: new Map(), dirty: true, setTop: 0, pendingReveal: null, openAfter: null, reveal: null };
 // Numbers of turns and ids of calls mean something else after the buffer is cleared or rebuilt, so what hung on them is dropped.
 function resetViews(){
+  tlq.range = null; tl.sel = null;
+  if (!$('drawer').hidden && !$('dw-item').hidden) $('drawer').hidden = true;
   tl.turnOpen = Object.create(null); tl.spanClosed = Object.create(null); tl.more = Object.create(null); tlq.runOpen = Object.create(null);
   tl.seenOrder = TR ? TR.order : 0;
 }
@@ -1502,7 +1530,7 @@ function queueTl(){ tl.dirty = true; if (tab === 'timeline' && !tlQueued) { tlQu
 var viewQueued = false;
 function queueView(){
   if (tab === 'timeline') { queueTl(); return; }
-  if ((tab === 'guard' || tab === 'agents') && !viewQueued) { viewQueued = true; requestAnimationFrame(function(){ viewQueued = false; safe(tab, function(){ if (tab === 'guard') drawGuard(); else if (tab === 'agents') drawAgents(); }); }); }
+  if ((tab === 'guard' || tab === 'agents') && !viewQueued) { viewQueued = true; requestAnimationFrame(function(){ viewQueued = false; safe(tab, function(){ withFocus(function(){ if (tab === 'guard') drawGuard(); else if (tab === 'agents') drawAgents(); }); }); }); }
 }
 function isFail(sp){ var st = statusOf(sp); return st === 'error' || st === 'blocked' || st === 'declined'; }
 function whoOf(sp){
@@ -1556,10 +1584,10 @@ function drawTimeline(){
   var ae = document.activeElement, hadFocus = host.contains(ae) && ae !== host, focusKey = hadFocus && ae.dataset ? ae.dataset.key : null;
   if (tl.pendingReveal) {
     var psp = TR.spans.get(String(tl.pendingReveal).replace(/^call:/, ''));
-    if (psp) { revealPrep(psp); tl.follow = false; tl.reveal = tl.pendingReveal; tl.openAfter = tl.pendingReveal; tl.pendingReveal = null; }
+    if (psp) { revealPrep(psp); stopFollow(); tl.reveal = tl.pendingReveal; tl.openAfter = tl.pendingReveal; tl.pendingReveal = null; }
   }
   host.textContent = '';
-  tl.rows = []; tl.byKey = new Map(); tlq.hits = [];
+  tl.rows = []; tl.byKey = new Map(); tlq.hits = []; tl.extra = new Map();
   var turns = TR.turns, now = nowFor() || Date.now(), q = tlq.parsed, hiddenTurns = 0;
   if (!turns.length) host.appendChild(el('div', 'emptytl', L('waiting for events', '이벤트를 기다리는 중')));
   turns.forEach(function(t, ti){
@@ -1587,10 +1615,11 @@ function drawTimeline(){
     var calls = t.spans.length, errs = t.spans.filter(isFail).length;
     var head = el('button', 'turnhead');
     head.setAttribute('aria-expanded', open ? 'true' : 'false'); head.setAttribute('role', 'treeitem'); head.setAttribute('aria-level', '1');
+    head.dataset.key = 'turn:' + t.n; tl.extra.set(head.dataset.key, head);
     head.appendChild(el('span', 'tt', (open ? '▾ ' : '▸ ') + (t.early ? L('before the first prompt', '첫 프롬프트 이전') : '#' + t.n)));
-    if (!t.early) head.appendChild(el('span', 'tag ' + (t.loop ? 'loop' : ''), t.loop ? 'LOOP' : t.resumed ? 'RESUMED' : t.origin === 'plugin' ? 'PLUGIN' : 'PROMPT'));
+    if (!t.early) head.appendChild(el('span', 'tag ' + (t.loop ? 'loop' : ''), t.loop ? L('LOOP', '루프') : t.resumed ? L('RESUMED', '재개') : t.origin === 'plugin' ? L('PLUGIN', '플러그인') : L('PROMPT', '프롬프트')));
     head.appendChild(hl(el('span', 'tx'), t.early ? L('(the start of the feed may have been cut)', '(피드의 앞부분이 잘렸을 수 있음)') : t.resumed ? L('continued with no prompt: a background agent or a hook resumed the session', '프롬프트 없이 이어짐: 백그라운드 에이전트나 훅이 세션을 다시 이어 감') : cut(t.text, 140)));
-    head.appendChild(el('span', 'mt', L(calls + ' calls', '호출 ' + calls) + (errs ? ' · ' + (L('▲ ' + errs + ' failed', '▲ 실패 ' + errs)) : '') + ' · ' + fmtMs(tEnd - t.at) + (t.ctx != null ? ' · ctx ' + t.ctx + '%' : '') + (t.tokIn || t.tokOut ? ' · ' + k(t.tokIn) + '/' + k(t.tokOut) : '') + (t.aborted ? ' · ' + L('aborted', '중단') : t.end === null ? ' · ' + L('running', '진행 중') : '')));
+    head.appendChild(el('span', 'mt', L(calls + ' calls', '호출 ' + calls) + (errs ? ' · ' + (L('▲ ' + errs + ' failed', '▲ 실패 ' + errs)) : '') + ' · ' + fmtMs(tEnd - t.at) + (t.ctx != null ? ' · ' + L('ctx ', '컨텍스트 ') + t.ctx + '%' : '') + (t.tokIn || t.tokOut ? ' · ' + k(t.tokIn) + '/' + k(t.tokOut) : '') + (t.aborted ? ' · ' + L('aborted', '중단') : t.end === null ? ' · ' + L('running', '진행 중') : '')));
     turnWarns(t).forEach(function(w){
       head.appendChild(el('span', 'badge warn', w.kind === 'repeat' ? L('⚠ repeated ' + cut(w.tool, 20), '⚠ 반복 ' + cut(w.tool, 20)) : w.kind === 'errors' ? L('⚠ ' + w.n + ' failures', '⚠ 실패 ' + w.n + '개') : L('⚠ repeated error', '⚠ 같은 오류 반복')));
     });
@@ -1643,7 +1672,8 @@ function drawTimeline(){
         if (!shown.length) return;
         if (tlq.runOpen[rid] || (filtered && hasQuery()) || run.some(function(sp){ var kk = selKey('call', sp.id); return kk === tl.sel || kk === tl.reveal; })) { shown.forEach(function(sp){ addRow(sp, depth, critSet); }); return; }
         var f = run.filter(isFail).length, total = run.reduce(function(a, sp){ return a + spanDur(sp, now); }, 0);
-        var g = el('button', 'trow');
+        var g = el('button', 'trow fold');
+        g.dataset.key = 'run:' + rid; tl.extra.set(g.dataset.key, g);
         var gn = el('span', 'nm'); gn.style.paddingLeft = depth * 16 + 'px';
         gn.appendChild(el('span', 'caret', '▸'));
         gn.appendChild(el('span', 'st ' + (f ? 'error' : 'ok'), (f ? '▲ ' : '✓ ') + '×' + run.length));
@@ -1661,10 +1691,17 @@ function drawTimeline(){
     }
     // Too many calls in one turn: the newest are drawn and the earlier ones wait behind a button at the top.
     var earlier = 0;
-    if (!filtered && roots.length > budget) { earlier = roots.length - budget; roots = roots.slice(earlier); }
+    if (!filtered) {
+      // The budget counts every row, nested ones too, and is spent from the newest root backwards.
+      var load = function(sp){ var n = 1, stack = (kids[sp.id] || []).slice(), steps = 0; while (stack.length && steps++ < 5000) { var c = stack.pop(); n++; (kids[c.id] || []).forEach(function(x){ stack.push(x); }); } return n; };
+      var spent = 0, from = roots.length;
+      for (var ri = roots.length - 1; ri >= 0; ri--) { var w = load(roots[ri]); if (spent + w > budget && from < roots.length) break; spent += w; from = ri; }
+      earlier = from; roots = roots.slice(from);
+    }
     if (earlier) {
       var eb = el('button', 'moreb', L('show ' + Math.min(earlier, 200) + ' earlier of ' + earlier + ' calls', '이전 호출 ' + earlier + '개 중 ' + Math.min(earlier, 200) + '개 더 보기'));
       eb.onclick = function(){ tl.more[t.n] = (tl.more[t.n] || 0) + 200; queueTl(); };
+      eb.dataset.key = 'earlier:' + t.n; tl.extra.set(eb.dataset.key, eb);
       host.appendChild(eb);
     }
     addList(roots, 0, crit);
@@ -1696,13 +1733,15 @@ function drawTimeline(){
   // A redraw replaces every row; keyboard focus goes back to the selected one so j and k keep working while the stream runs.
   if (hadFocus && !host.contains(document.activeElement)) {
     var back = tl.rows.filter(function(r){ return r.key === (focusKey || tl.sel); })[0];
-    (back ? back.el : host).focus({ preventScroll: true });
+    (back ? back.el : (focusKey && tl.extra.get(focusKey)) || host).focus({ preventScroll: true });
   }
   // Everything directly under the tree is a tree item, so assistive technology reads one consistent structure.
-  Array.prototype.forEach.call(host.children, function(c){ if (!c.getAttribute('role')) { c.setAttribute('role', 'treeitem'); c.setAttribute('aria-level', '2'); } });
+  Array.prototype.forEach.call(host.children, function(c){ if (!c.getAttribute('role') && c.tagName !== 'BUTTON') { c.setAttribute('role', 'treeitem'); c.setAttribute('aria-level', '2'); } });
   $('tl-note').textContent = tl.sel && !tl.byKey.has(tl.sel) && tl.sel.indexOf('call:') === 0 ? L('the selected call is not in view or no longer in the buffer', '선택한 호출이 보이지 않거나 버퍼에 없습니다') : '';
   drawChips(); drawMini();
   syncTl();
+  // An open call's details follow the stream (it ends, the language changes) unless the person is reading or typing in the drawer.
+  if (!$('drawer').hidden && !$('dw-item').hidden && tl.sel && !$('drawer').contains(document.activeElement)) openItem(tl.sel);
 }
 function drawChips(){
   var box = $('tl-chips'), q = tlq.parsed;
@@ -1750,6 +1789,7 @@ function miniBuild(){
     down = null; miniBrush = null;
     queueTl();
   });
+  svg.addEventListener('pointercancel', function(){ down = null; miniBrush = null; drawMini(); });
   $('tl-zoom').onclick = function(){ tlq.range = null; queueTl(); };
 }
 function jumpHit(delta){
@@ -1768,9 +1808,10 @@ function syncTl(){
   $('tl-expand').textContent = T('tl-expand'); $('tl-collapse').textContent = T('tl-collapse');
   $('tl-crit').textContent = T('tl-crit-l'); $('tl-crit').setAttribute('aria-pressed', tlq.crit ? 'true' : 'false'); $('tl-zoom').textContent = T('tl-zoom-l'); $('tl-q').placeholder = T('tl-q-ph');
 }
+function stopFollow(){ tl.follow = false; tl.seenOrder = TR.order; }
 function setFollow(on){
   tl.follow = on;
-  if (on) tl.seenOrder = TR.order;
+  tl.seenOrder = TR.order;
   queueTl();
 }
 function selectRow(key, open){
@@ -1809,7 +1850,7 @@ var itemTab = 'overview';
 function openItem(key){
   var sp = tl.byKey.get(key) || TR.spans.get(String(key).replace(/^call:/, ''));
   if (!sp) return;
-  focus = null; applyFilter();
+  focus = null; applyFilter(); syncTools();
   ['dw-stats', 'dw-links', 'dw-prompts', 'dw-list'].forEach(function(id){ $(id).hidden = true; });
   var box = $('dw-item');
   box.hidden = false; box.textContent = '';
@@ -1825,16 +1866,16 @@ function openItem(key){
   var turn = TR.turns[sp.turn], now = nowFor() || Date.now(), d = spanDur(sp, now);
   if (itemTab === 'overview') {
     var dl = el('dl', 'detail');
-    var add = function(k2, v){ if (v == null || v === '') return; dl.appendChild(el('dt', null, k2)); dl.appendChild(el('dd', null, String(v))); };
+    var add = function(k2, v){ if (v == null || v === '') return; dl.appendChild(el('dt', null, k2)); dl.appendChild(el('dd', null, cut(v, 300))); };
     add(L('status', '상태'), (STATUS_ICON[st] || '') + ' ' + stWord(st));
-    add(L('started', '시작'), clock(sp.at) + ' (' + new Date(sp.at).toISOString() + ')');
+    add(L('started', '시작'), clock(sp.at) + ' (' + isoOf(sp.at) + ')');
     add(L('duration', '길이'), fmtMs(d) + (turn && turn.end !== null && turn.end > turn.at ? ' · ' + Math.round(d / (turn.end - turn.at) * 100) + L('% of the turn', '% (턴 대비)') : ''));
-    add('tool', sp.tool); add('policy', sp.policy); add('risk', sp.risk); add('category', sp.category);
+    add(L('tool', '도구'), sp.tool); add(L('policy', '정책'), sp.policy); add(L('risk', '위험'), sp.risk); add(L('category', '범주'), sp.category);
     if (sp.guard) { add(L('guard', '가드'), sp.guard.kind + (sp.guard.answer ? ' → ' + sp.guard.answer : '')); add(L('reason', '이유'), sp.guard.reason); }
-    add(L('who', '주체'), whoOf(sp)[0]); add('subagent', sp.subagent); add('agent', sp.agent);
+    add(L('who', '주체'), whoOf(sp)[0]); add(L('subagent', '서브에이전트'), sp.subagent); add(L('agent', '에이전트'), sp.agent);
     add(L('parent', '부모'), sp.parent ? sp.parent + (sp.est ? L(' (guessed)', ' (추정)') : '') : '');
     if (sp.workflowBg) add(L('note', '비고'), L('started in the background; its end is not reported', '백그라운드에서 시작됨, 끝은 보고되지 않음'));
-    add(L('turn', '턴'), sp.turn); add('id', sp.id); add('session', sp.ev && sp.ev.session);
+    add(L('turn', '턴'), sp.turn); add('id', sp.id); add(L('session', '세션'), sp.ev && sp.ev.session);
     box.appendChild(dl);
     var cp = el('button', null, L('copy link', '링크 복사')); cp.onclick = function(){ copyText(location.href.split('#')[0] + buildHash({ tab: 'timeline', sel: selKey('call', sp.id), q: tlq.text }), cp); };
     box.appendChild(cp);
@@ -1946,12 +1987,15 @@ function timelineBuild(){
   host.addEventListener('scroll', function(){
     if (Math.abs(host.scrollTop - tl.setTop) < 2) return;
     var bottom = host.scrollHeight - host.scrollTop - host.clientHeight < 40;
-    if (!bottom && tl.follow) { tl.follow = false; tl.seenOrder = TR.order; syncTl(); }
+    if (!bottom && tl.follow) { stopFollow(); syncTl(); }
     else if (bottom && !tl.follow) { tl.follow = true; syncTl(); queueTl(); }
   });
   host.addEventListener('keydown', function(e){
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (keysOff && e.key.length === 1) return;
+    // Enter and the arrows belong to a button that has the focus (a turn header, "show more"); only a call row or the list itself takes them.
+    var t = e.target;
+    if (t !== host && !(t.classList && t.classList.contains('trow') && !t.classList.contains('fold') && t.dataset && t.dataset.key)) return;
     if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); moveSel(1); }
     else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); moveSel(-1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); toggleSel(true); }
@@ -1975,12 +2019,20 @@ function timelineBuild(){
 function gotoCall(key){
   var sp = TR.spans.get(String(key).replace(/^call:/, ''));
   if (!sp) return;
-  revealPrep(sp); tlq.range = null; tl.sel = key; tl.follow = false; tl.reveal = key;
+  revealPrep(sp); tlq.range = null; tl.sel = key; stopFollow(); tl.reveal = key;
   setQuery('');
   showTab('timeline');
   openItem(key);
 }
 // head: [{ key, label, num }]; rows: [{ cells: [string | node], key, cls }]; sort: { key, dir } or null; onSort(key).
+// A redraw replaces every element; the one that had the keyboard focus (marked data-fk) gets it back.
+function withFocus(fn){
+  var ae = document.activeElement, fk = ae && ae.dataset ? ae.dataset.fk : null;
+  fn();
+  if (!fk) return;
+  var all = document.querySelectorAll('[data-fk]');
+  for (var i = 0; i < all.length; i++) if (all[i].dataset.fk === fk) { all[i].focus({ preventScroll: true }); break; }
+}
 function drawTable(tbl, head, rows, sort, onSort, onRow, empty){
   tbl.textContent = '';
   var thead = el('thead'), tr = el('tr');
@@ -1988,6 +2040,7 @@ function drawTable(tbl, head, rows, sort, onSort, onRow, empty){
     var th = el('th', h.num ? 'num' : '');
     if (onSort && h.key) {
       var b = el('button', null, h.label + (sort && sort.key === h.key ? (sort.dir > 0 ? ' ▲' : ' ▼') : ''));
+      b.dataset.fk = 'sort-' + h.key;
       b.onclick = function(){ onSort(h.key); };
       th.appendChild(b);
       th.setAttribute('aria-sort', sort && sort.key === h.key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none');
@@ -2004,14 +2057,14 @@ function drawTable(tbl, head, rows, sort, onSort, onRow, empty){
       if (c instanceof Node) td.appendChild(c); else td.textContent = c == null ? '' : String(c);
       row.appendChild(td);
     });
-    if (r.key && onRow) { row.tabIndex = 0; row.onclick = function(){ onRow(r.key); }; row.onkeydown = function(e){ if (e.key === 'Enter') { e.preventDefault(); onRow(r.key); } }; }
+    if (r.key && onRow) { row.tabIndex = 0; row.dataset.fk = 'row-' + r.key; row.onclick = function(){ onRow(r.key); }; row.onkeydown = function(e){ if (e.key === 'Enter') { e.preventDefault(); onRow(r.key); } }; }
     tbody.appendChild(row);
   });
   tbl.appendChild(tbody);
 }
-var DEC = { allow: ['✓', 'allow', '허용'], asking: ['?', 'waiting', '확인 대기'], ask: ['?', 'asked, allowed', '확인 후 허용'], declined: ['⊘', 'declined', '거절'], block: ['✕', 'blocked', '차단'] };
+var DEC = { allow: ['✓', 'allow', '허용'], asking: ['?', 'waiting', '확인 대기'], ask: ['?', 'asked, allowed', '확인 후 허용'], declined: ['⊘', 'declined', '거절'], aborted: ['■', 'cut short', '중단됨'], block: ['✕', 'blocked', '차단'] };
 function decNode(d){ var x = DEC[d] || ['•', d, d]; return el('span', 'dec ' + d, x[0] + ' ' + L(x[1], x[2])); }
-var gd = { sort: { key: 'at', dir: -1 }, show: { allow: false, asking: true, ask: true, declined: true, block: true }, group: true };
+var gd = { sort: { key: 'at', dir: -1 }, show: { allow: false, asking: true, ask: true, declined: true, aborted: true, block: true }, group: true };
 function eventText(a){
   var ev = a.ev || {};
   if (HOLD[a.kind]) return L(HOLD[a.kind][1], HOLD[a.kind][2]);
@@ -2043,28 +2096,30 @@ function drawGuard(){
     var e = cats[c], tot = e.allow + e.ask + e.block + e.declined + e.asking || 1;
     var bar = el('span', 'catbar');
     [['a', e.allow], ['k', e.ask + e.asking], ['b', e.block + e.declined]].forEach(function(p){ var i = el('i', p[0]); i.style.width = p[1] / tot * 100 + '%'; bar.appendChild(i); });
-    crow.push({ cells: [c, e.allow, e.ask + e.asking, e.block + e.declined, bar] });
+    crow.push({ cells: [c, e.allow, e.ask + e.asking, e.block + e.declined + e.aborted, bar] });
   });
   drawTable($('g-cats'), [{ label: L('category', '범주') }, { label: L('allowed', '허용'), num: true }, { label: L('asked', '확인'), num: true }, { label: L('blocked or declined', '차단·거절'), num: true }, { label: '' }], crow, null, null, null);
   var chips = $('g-chips'); chips.textContent = '';
-  ['asking', 'ask', 'block', 'declined', 'allow'].forEach(function(d){
+  ['asking', 'ask', 'block', 'declined', 'aborted', 'allow'].forEach(function(d){
     var b = el('button', null, (DEC[d][0]) + ' ' + L(DEC[d][1], DEC[d][2]));
     b.setAttribute('aria-pressed', gd.show[d] ? 'true' : 'false');
-    b.onclick = function(){ gd.show[d] = !gd.show[d]; drawGuard(); };
+    b.dataset.fk = 'chip-' + d;
+    b.onclick = function(){ gd.show[d] = !gd.show[d]; withFocus(drawGuard); };
     chips.appendChild(b);
   });
-  var gb = el('button', null, L('group the same', '같은 것 묶기')); gb.setAttribute('aria-pressed', gd.group ? 'true' : 'false'); gb.onclick = function(){ gd.group = !gd.group; drawGuard(); };
+  var gb = el('button', null, L('group the same', '같은 것 묶기')); gb.setAttribute('aria-pressed', gd.group ? 'true' : 'false'); gb.dataset.fk = 'chip-group'; gb.onclick = function(){ gd.group = !gd.group; withFocus(drawGuard); };
   chips.appendChild(gb);
   var rows = sortRows(guardRows(TR, now).filter(function(r){ return gd.show[r.decision]; }), gd.sort.key, gd.sort.dir);
   var list = gd.group ? groupRows(rows) : rows.map(function(r){ return { row: r, n: 1, first: r.at, last: r.at }; });
   var capped = list.slice(0, 300);
-  drawTable($('g-tbl'), [{ key: 'at', label: L('time', '시각') }, { key: 'decision', label: L('decision', '판정') }, { key: 'tool', label: 'tool' }, { label: L('input', '입력') }, { key: 'reason', label: L('reason', '이유') }, { key: 'category', label: L('category', '범주') }, { key: 'risk', label: 'risk' }, { key: 'turn', label: L('turn', '턴'), num: true }, { key: 'ms', label: 'ms', num: true }],
+  drawTable($('g-tbl'), [{ key: 'at', label: L('time', '시각') }, { key: 'decision', label: L('decision', '판정') }, { key: 'tool', label: L('tool', '도구') }, { label: L('input', '입력') }, { key: 'reason', label: L('reason', '이유') }, { key: 'category', label: L('category', '범주') }, { key: 'risk', label: L('risk', '위험') }, { key: 'turn', label: L('turn', '턴'), num: true }, { key: 'ms', label: 'ms', num: true }],
     capped.map(function(g){
       var r = g.row;
       return { key: r.key, cells: [clock(r.at), decNode(r.decision), r.tool + (g.n > 1 ? ' ×' + g.n : ''), cut(r.input, 100), cut(r.reason, 80), r.category, r.risk, r.turn, r.ms == null ? '' : r.decision === 'block' && !r.ms ? '–' : fmtMs(r.ms)] };
     }),
-    gd.sort, function(key){ gd.sort = { key: key, dir: gd.sort.key === key ? -gd.sort.dir : (key === 'at' || key === 'turn' || key === 'ms' ? -1 : 1) }; drawGuard(); }, gotoCall, L('no decisions match the filter', '조건에 맞는 판정이 없습니다'));
-  if (list.length > capped.length) $('g-tbl').parentNode.appendChild(el('div', 'muted', L('showing 300 of ' + list.length + ' lines', list.length + '줄 중 300줄만 표시')));
+    gd.sort, function(key){ gd.sort = { key: key, dir: gd.sort.key === key ? -gd.sort.dir : (key === 'at' || key === 'turn' || key === 'ms' ? -1 : 1) }; withFocus(drawGuard); }, gotoCall, L('no decisions match the filter', '조건에 맞는 판정이 없습니다'));
+  $('g-more').hidden = list.length <= capped.length;
+  $('g-more').textContent = list.length > capped.length ? L('showing 300 of ' + list.length + ' lines', list.length + '줄 중 300줄만 표시') : '';
   syncTabsText();
 }
 function tokText(a){ return a.tokIn || a.tokOut ? k(a.tokIn) + ' / ' + k(a.tokOut) : ''; }
@@ -2093,7 +2148,7 @@ function drawAgents(){
   var wf = [], cx = [];
   TR.spans.forEach(function(sp){
     var ev = sp.ev || {};
-    if (sp.tool === 'Workflow') wf.push({ key: selKey('call', sp.id), cells: [ev.workflow || cut(sp.summary, 60), cut(ev.workflowDesc || '', 100), (ev.workflowSaved ? L('saved', '저장됨') : L('inline', '인라인')) + (ev.workflowResume ? ' · ' + L('resumed', '이어서') : ''), clock(sp.at), L('started; its end is not reported', '시작됨 · 끝은 보고되지 않음')] });
+    if (sp.tool === 'Workflow') wf.push({ key: selKey('call', sp.id), cells: [cut(ev.workflow || sp.summary, 60), cut(ev.workflowDesc || '', 100), (ev.workflowSaved ? L('saved', '저장됨') : L('inline', '인라인')) + (ev.workflowResume ? ' · ' + L('resumed', '이어서') : ''), clock(sp.at), L('started; its end is not reported', '시작됨 · 끝은 보고되지 않음')] });
     if (sp.codex) cx.push({ key: selKey('call', sp.id), cells: [sp.codex, ev.codexBg ? L('background', '백그라운드') : L('wait', '대기'), ev.codexWrite ? L('writes', '쓰기') : L('read-only', '읽기 전용'), clock(sp.at), stWord(statusOf(sp)), cut(sp.summary, 80)] });
   });
   drawTable($('a-wf'), [{ label: L('name', '이름') }, { label: L('description', '설명') }, { label: L('source', '출처') }, { label: L('started', '시작') }, { label: L('end', '끝') }], wf, null, null, gotoCall, L('no workflow started', '시작된 워크플로가 없습니다'));
@@ -2103,7 +2158,13 @@ function drawAgents(){
 function syncTabsText(){}
 
 // ---- KPI tiles: read from the model, redrawn at most once per frame and once a second so rates decay when nothing happens ----
-function fmtMs(ms){ return ms == null ? '–' : ms < 1000 ? Math.round(ms) + 'ms' : ms < 60000 ? (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + 's' : Math.floor(ms / 60000) + 'm' + String(Math.round(ms % 60000 / 1000)).padStart(2, '0') + 's'; }
+function fmtMs(ms){
+  if (ms == null) return '–';
+  if (ms < 1000) return Math.round(ms) + 'ms';
+  if (ms < 59500) return (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + 's';
+  var sec = Math.round(ms / 1000);
+  return Math.floor(sec / 60) + 'm' + String(sec % 60).padStart(2, '0') + 's';
+}
 function spark(svg, data){
   svg.textContent = '';
   var max = Math.max.apply(null, data.concat([1])), pts = data.map(function(v, i){ return (i * 64 / (data.length - 1)).toFixed(1) + ',' + (20 - v / max * 18).toFixed(1); }).join(' ');
@@ -2111,7 +2172,8 @@ function spark(svg, data){
 }
 var kpiQueued = false;
 function queueKpi(){ if (!kpiQueued) { kpiQueued = true; requestAnimationFrame(function(){ safe('tiles', drawKpis); }); } }
-function nowFor(){ return replaying || playback ? TR.lastAt : Date.now(); }
+// While paused, replaying or playing back, time stands where the last event left it, so rates and ages do not drift.
+function nowFor(){ return replaying || playback || paused ? TR.lastAt : Date.now(); }
 function drawKpis(){
   kpiQueued = false;
   var K = kpis(TR, nowFor() || Date.now());
@@ -2131,7 +2193,7 @@ function drawKpis(){
   $('k-tok-v').textContent = K.tokIn || K.tokOut ? k(K.tokIn) + ' / ' + k(K.tokOut) : '–';
   $('k-tok-s').textContent = L('input includes cache · ' + K.turns + ' turns · active ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · loop ' + K.loopPasses : ''), '입력은 캐시 포함 · ' + K.turns + '턴 · 활동 ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · 루프 ' + K.loopPasses : ''));
 }
-setInterval(function(){ if (!replaying && !playback && !document.hidden) { queueKpi(); if (tab === 'guard') queueView(); } }, 1000);
+setInterval(function(){ if (!replaying && !playback && !paused && !document.hidden) { queueKpi(); if (tab === 'guard') queueView(); } }, 1000);
 
 // ---- the server's own count of what it read, against what this page received ----
 var srv = null, srvBase = 0;
@@ -2196,6 +2258,8 @@ function translate(){
   TABS.forEach(function(t){ $('tab-' + t).textContent = T('tab-' + t); });
   $('theme').textContent = theme === 'dark' ? T('th-light') : T('th-dark');
   $('theme').title = L('switch theme', '테마 바꾸기');
+  $('lang').setAttribute('aria-describedby', 'title');
+  [['tl', 'timeline', '타임라인'], ['mini', 'overview of the whole buffer: drag to zoom', '버퍼 전체 개요: 끌어서 확대'], ['tl-q', 'search', '검색'], ['tl-prev', 'previous match', '이전 일치'], ['tl-next', 'next match', '다음 일치'], ['tabs', 'views', '화면'], ['kpis', 'metrics', '지표'], ['helpb', 'help', '도움말'], ['drawer', 'details', '상세']].forEach(function(a){ $(a[0]).setAttribute('aria-label', L(a[1], a[2])); });
   Object.keys(edgeEl).forEach(function(id){ if (edgeEl[id].hitEl) edgeEl[id].hitEl.setAttribute('aria-label', edgeLabel(id)); });
   syncTools();
   var down = es && es.readyState === 2;
@@ -2212,6 +2276,8 @@ function replay(){
   render();
   applyFilter();
   queueView();
+  // The page was rebuilt from the buffer: what it holds now is not "new", and the screen reader is not told it all again.
+  tl.seenOrder = TR.order; said = { order: TR.order, fails: TR.failTotal };
   $('tl').setAttribute('aria-busy', 'false');
 }
 $('lang').onclick = function(){

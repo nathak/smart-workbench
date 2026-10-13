@@ -292,13 +292,14 @@ const tr1 = feedOf([
 ])
 const k1 = M.kpis(tr1, 5000)
 check(k1.p50 === 100 && k1.p95 === 900 && k1.latN === 3, 'latency leaves out asks, blocked, Agent, Workflow, running and zero-length calls (the pre-prompt Read is the third)')
-check(k1.askPending === 1 && k1.askAge !== null, 'an ask with no answer or end counts as waiting; one that was answered does not')
+const trWait = feedOf([{ kind: 'prompt', text: 'p' }, { kind: 'tool.start', id: 'w1', tool: 'Bash', policy: 'ask' }])
+check(M.kpis(trWait, 5000).askPending === 1 && M.kpis(trWait, 5000).askAge !== null && k1.askPending === 0, 'an ask with no answer or end counts as waiting; one that was answered does not; one cut short by the next prompt is not waiting')
 check(k1.blocked === 1 && k1.errors === 1 && k1.aborted === 1 && k1.fails === 3, 'blocks, errors and an aborted turn make the failure count')
 check(k1.tokIn === 1050 && k1.tokOut === 105, 'tokens add up the lead turns and the subagents')
 check(k1.ctx && k1.ctx.p === 25, 'context percent is computed from tokens and window when the turn gives no percent')
 check(tr1.turns.length === 3 && tr1.turns[0].early && tr1.turns[1].spans.length === 7 && tr1.turns[2].loop === true && tr1.turns[2].origin === 'plugin', 'events before the first prompt form an early turn; a prompt starts a turn; a plugin prompt is its own turn')
 check(tr1.turns[2].marks.some(m => m.kind === 'loop.stop'), 'a loop event after a turn is marked on that turn')
-check(M.statusOf(tr1.spans.get('f')) === 'bg' && M.statusOf(tr1.spans.get('g')) === 'running' && M.statusOf(tr1.spans.get('d')) === 'blocked', 'span statuses: background start, running, blocked')
+check(M.statusOf(tr1.spans.get('f')) === 'bg' && M.statusOf(trWait.spans.get('w1')) === 'running' && M.statusOf(tr1.spans.get('g')) === 'aborted' && M.statusOf(tr1.spans.get('d')) === 'blocked', 'span statuses: background start, running, cut short by the next prompt, blocked')
 check(M.pct([], 50) === null && M.pct([5], 95) === 5 && M.pct([1, 2, 3, 4], 50) === 2 && M.pct([1, 2, 3, 4], 95) === 4, 'percentiles use the nearest rank')
 check(M.buckets([100, 190, 250, 9999], 300, 3, 100).join() === '1,1,1' && M.buckets([-5], 300, 3, 100).join() === '0,0,0', 'buckets count events into equal slices ending now and ignore the future and the too old')
 const tr2 = feedOf([
@@ -355,7 +356,7 @@ check(M.runsOf([{ tool: 'B', summary: 'x' }, { tool: 'B', summary: 'x' }, { tool
 check(page.includes('id="mini"') && page.includes('id="tl-q"') && page.includes('type="search"'), 'the timeline has an overview strip and a search box')
 
 const ds = id => M.decisionOf(tr1.spans.get(id))
-check(ds('a') === 'allow' && ds('c') === 'ask' && ds('d') === 'block' && ds('g') === 'asking', 'a call is allow, asked and answered yes, blocked, or still asking')
+check(ds('a') === 'allow' && ds('c') === 'ask' && ds('d') === 'block' && ds('g') === 'aborted' && M.decisionOf(trWait.spans.get('w1')) === 'asking', 'a call is allow, asked and answered yes, blocked, cut short, or still asking')
 const trD = feedOf([
   { kind: 'prompt', text: 'p' },
   { kind: 'tool.start', id: 'p1', tool: 'Bash', policy: 'ask', risk: 'high', category: 'external' }, { kind: 'guard.ask', id: 'p1', reason: 'send', answer: 'declined' }, { kind: 'tool.end', id: 'p1', outcome: 'declined', ms: 10 },
