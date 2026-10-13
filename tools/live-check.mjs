@@ -209,8 +209,8 @@ try {
   const hubPort = port + 10
   const projectA = mkdtempSync(join(tmpdir(), 'swb-hub-a-'))
   const projectB = mkdtempSync(join(tmpdir(), 'swb-hub-b-'))
-  const join_ = (project, id, extra = []) => {
-    const child = spawn('node', [server, project, '--join', '--session', id, '--port', String(hubPort), ...extra], { stdio: ['ignore', 'pipe', 'pipe'], env })
+  const join_ = (project, id, extra = [], more = {}, at = hubPort) => {
+    const child = spawn('node', [server, project, '--join', '--session', id, '--port', String(at), ...extra], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...env, ...more } })
     const out = { stdout: '', stderr: '', code: undefined }
     child.stdout.on('data', chunk => (out.stdout += chunk))
     child.stderr.on('data', chunk => (out.stderr += chunk))
@@ -293,6 +293,24 @@ try {
     const seen = JSON.parse((await getJson('/sessions')).body).sessions.map(one => one.id)
     check(seen.join() === 'c', `registrations that break a rule are not listed (saw ${seen.join()})`)
     c.child.kill('SIGTERM')
+    // A project the hub would ignore is reported as failed, not started.
+    const realClaude = mkdtempSync(join(tmpdir(), 'swb-hub-r-'))
+    const linkedClaude = mkdtempSync(join(tmpdir(), 'swb-hub-k-'))
+    mkdirSync(join(realClaude, 'x'))
+    symlinkSync(join(realClaude, 'x'), join(linkedClaude, '.claude'))
+    const bad = join_(linkedClaude, 'k', [], {}, hubPort + 1)
+    check(await until(() => bad.out.code === 1, 60) && bad.out.stderr.includes('cannot show'), 'a project whose .claude is a link fails to start instead of showing nothing')
+    // One hub answers to one list of names: a session with another list does not join it.
+    const d = join_(projectA, 'd', [], { SWB_LIVE_HOSTS: 'proxy.test' }, hubPort + 2)
+    check(await until(() => d.out.stdout.includes('#s=d')), 'a session with its own host list starts a hub')
+    const e = join_(projectB, 'e', [], {}, hubPort + 2)
+    check(await until(() => e.out.code === 1, 60) && e.out.stderr.includes('SWB_LIVE_HOSTS'), 'a session whose host list differs is refused on that port')
+    const f = join_(projectB, 'f', ['--auto'], {}, hubPort + 2)
+    check(await until(() => f.out.stdout.includes(`:${hubPort + 3}/`), 80), 'with --auto it moves to the next port')
+    d.child.kill('SIGTERM')
+    f.child.kill('SIGTERM')
+    rmSync(realClaude, { recursive: true, force: true })
+    rmSync(linkedClaude, { recursive: true, force: true })
   } finally {
     for (const one of [a, b]) one.child.kill('SIGKILL')
     await sleep(2500)

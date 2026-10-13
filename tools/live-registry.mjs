@@ -4,9 +4,14 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, rea
 import { homedir, hostname } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
+import { readPlain } from './live-tail.mjs'
+
 export const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 export const feedOf = project => join(project, '.claude', 'smartworkbench-live.jsonl')
 export const noteOf = project => join(project, '.claude', 'smartworkbench-live.pid')
+
+// The names a hub answers to besides loopback; one hub serves every session on its port, so sessions must agree on them.
+export const trustedHosts = () => (process.env.SWB_LIVE_HOSTS ?? '').split(',').map(one => one.trim().toLowerCase()).filter(Boolean).sort()
 
 export function registryRoot() {
   return process.env.SWB_LIVE_HOME || join(homedir(), '.claude', 'smartworkbench-live')
@@ -150,6 +155,19 @@ export function pidAlive(pid) {
 
 const sameHostAlive = entry => entry.host === hostname() && Number.isInteger(entry.pid) && pidAlive(entry.pid)
 
+// The project must have a real .claude folder (not a link to somewhere else), its process note must name this very session,
+// and a feed that is a link would be read through to wherever it points. The joiner runs the same check before it reports success.
+export function projectOk(reg) {
+  try {
+    if (realpathSync(join(reg.project, '.claude')) !== join(realpathSync(reg.project), '.claude')) return false
+    if (readPlain(noteOf(reg.project), 200)?.trim() !== `${reg.host} ${reg.pid}`) return false
+    const feedInfo = lstatSync(feedOf(reg.project), { throwIfNoEntry: false })
+    return !feedInfo || feedInfo.isFile()
+  } catch {
+    return false
+  }
+}
+
 // Every registration the hub may act on. A file that breaks any rule is ignored: it could be a plant.
 // `ignoreStale`: the machine just woke from sleep, so heartbeats are old for everyone and say nothing.
 export function scan(dir, { staleMs, ignoreStale = false, now = Date.now() }) {
@@ -170,13 +188,7 @@ export function scan(dir, { staleMs, ignoreStale = false, now = Date.now() }) {
       if (!reg || typeof reg !== 'object' || reg.v !== 1 || reg.id !== id) continue
       if (typeof reg.project !== 'string' || reg.project.includes('\0') || !isAbsolute(reg.project) || resolve(reg.project) !== reg.project) continue
       if (typeof reg.host !== 'string' || !Number.isInteger(reg.pid) || reg.pid < 1) continue
-      // The project must have a real .claude folder (not a link to somewhere else) and its process note must name this very session.
-      if (realpathSync(join(reg.project, '.claude')) !== join(realpathSync(reg.project), '.claude')) continue
-      const note = lstatSync(noteOf(reg.project), { throwIfNoEntry: false })
-      if (!note?.isFile() || note.size > 200 || readFileSync(noteOf(reg.project), 'utf8').trim() !== `${reg.host} ${reg.pid}`) continue
-      // A feed that is a link would be read through to wherever it points.
-      const feedInfo = lstatSync(feedOf(reg.project), { throwIfNoEntry: false })
-      if (feedInfo && !feedInfo.isFile()) continue
+      if (!projectOk(reg)) continue
       const local = reg.host === hostname()
       const alive = local && pidAlive(reg.pid)
       // A process that is gone on this machine leaves a file that is only clutter.

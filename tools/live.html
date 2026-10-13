@@ -2301,7 +2301,7 @@ $('clear').onclick = function(){ events = []; pending = []; srvBase = srv ? srv.
 
 var connected = false, everOpened = false, es = null;
 // One page, many sessions: when the server is a hub, every session has its own buffer and a tab; the one shown is wired to the views above.
-var hub = false, CTX = Object.create(null), ORDER = [], curId = null, closedIds = Object.create(null), badgeTimer = 0;
+var hubSync = false, hub = false, CTX = Object.create(null), ORDER = [], curId = null, closedIds = Object.create(null), badgeTimer = 0;
 function ctxOf(id){
   var c = CTX[id];
   if (!c) { c = CTX[id] = { id: id, name: id, project: '', startedAt: 0, alive: true, events: [], pending: [], srv: null, srvBase: 0, badge: { n: 0, ask: 0 }, ui: { tab: null, sel: null, q: '' } }; }
@@ -2311,7 +2311,8 @@ function renderSessions(){
   var bar = $('stabs');
   bar.hidden = !hub;
   if (!hub) return;
-  var keep = document.activeElement && document.activeElement.parentNode === bar ? document.activeElement.getAttribute('data-sid') : null;
+  var active = document.activeElement && document.activeElement.parentNode === bar ? document.activeElement : null;
+  var keep = active ? (active.hasAttribute('data-sx') ? 'data-sx' : 'data-sid') : null, keepId = active && keep ? active.getAttribute(keep) : null;
   while (bar.firstChild) bar.removeChild(bar.firstChild);
   ORDER.forEach(function(id){
     var c = CTX[id]; if (!c) return;
@@ -2325,13 +2326,13 @@ function renderSessions(){
     b.onclick = function(){ switchTo(id); };
     bar.appendChild(b);
     if (!c.alive) {
-      var x = el('button', 'sx', '×'); x.setAttribute('data-sid', id);
+      var x = el('button', 'sx', '×'); x.setAttribute('data-sx', id);
       x.title = L('close this ended session', '끝난 세션 닫기'); x.setAttribute('aria-label', x.title);
       x.onclick = function(){ closeSession(id); };
       bar.appendChild(x);
     }
   });
-  if (keep) { var again = bar.querySelector('button[data-sid="' + keep + '"]'); if (again) again.focus(); }
+  if (keep) { var again = bar.querySelector('button[' + keep + '="' + keepId + '"]'); if (again) again.focus(); }
 }
 function queueBadges(){ if (!badgeTimer) badgeTimer = setTimeout(function(){ badgeTimer = 0; renderSessions(); }, 300); }
 function switchTo(id){
@@ -2351,7 +2352,8 @@ function switchTo(id){
   drawSrv(); pollInfo(); renderSessions();
 }
 function closeSession(id){
-  closedIds[id] = true;
+  // Remembered with the start time: a later session that reuses the id is a different session and is shown.
+  closedIds[id] = CTX[id] ? CTX[id].startedAt : 1;
   var wasCurrent = id === curId;
   delete CTX[id];
   ORDER = ORDER.filter(function(one){ return one !== id; });
@@ -2369,7 +2371,8 @@ function onSessions(m){
     var rows = data && Array.isArray(data.sessions) ? data.sessions : [];
     var seen = Object.create(null);
     rows.forEach(function(row){
-      if (!row || !/^[A-Za-z0-9_-]{1,64}$/.test(String(row.id)) || closedIds[row.id]) return;
+      if (!row || !/^[A-Za-z0-9_-]{1,64}$/.test(String(row.id))) return;
+      if (closedIds[row.id]) { if (Number(row.startedAt) <= closedIds[row.id]) return; delete closedIds[row.id]; }
       seen[row.id] = true;
       var c = ctxOf(row.id);
       c.name = String(row.name || row.id); c.project = String(row.project || ''); c.startedAt = Number(row.startedAt) || 0; c.alive = !!row.alive;
@@ -2391,8 +2394,9 @@ function onHubLine(m){
     if (f.s === curId) { if (paused || playback) holdBack(ev); else take(ev); return; }
     var c = ctxOf(f.s);
     c.events.push(ev); if (c.events.length > 2000) c.events.shift();
-    c.badge.n++;
-    if ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block') c.badge.ask++;
+    // What the hub replays when a page connects is history, not news: it is not counted.
+    if (!hubSync) c.badge.n++;
+    if (!hubSync && ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block')) c.badge.ask++;
     queueBadges();
   } catch (e) { pageError('event', e); }
 }
@@ -2400,7 +2404,7 @@ function openStream(){
   es = new EventSource(hub ? '/events?all=1' : '/events');
   es.onopen = function(){
     srvBase = 0; setTimeout(pollInfo, 1500);
-    if (hub) { Object.keys(CTX).forEach(function(id){ CTX[id].events = []; CTX[id].pending = []; CTX[id].srvBase = 0; }); }
+    if (hub) { hubSync = true; Object.keys(CTX).forEach(function(id){ CTX[id].events = []; CTX[id].pending = []; CTX[id].srvBase = 0; CTX[id].badge = { n: 0, ask: 0 }; }); }
     if (everOpened) {
       if (hub && CTX[curId]) { events = CTX[curId].events; pending = CTX[curId].pending; } else { events = []; pending = []; }
       replay(); resetViews();
@@ -2408,7 +2412,7 @@ function openStream(){
     connected = true; everOpened = true; translate();
   };
   es.onerror = function(){ connected = false; translate(); };
-  if (hub) { es.addEventListener('sessions', onSessions); es.addEventListener('line', onHubLine); }
+  if (hub) { es.addEventListener('sessions', onSessions); es.addEventListener('line', onHubLine); es.addEventListener('ready', function(){ hubSync = false; renderSessions(); }); }
   else es.onmessage = function(m){
     try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) { pageError('event', e); }
   };

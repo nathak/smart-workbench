@@ -5,10 +5,11 @@ import { closeSync, constants, fstatSync, ftruncateSync, lstatSync, openSync, re
 const FEED_CAP = 8 * 1024 * 1024
 // A line longer than this is dropped (and counted): a huge or sparse file cannot stall the server.
 const LINE_MAX = 1024 * 1024
-const NOFOLLOW = constants.O_NOFOLLOW ?? 0
+// No-follow stops a link, and non-blocking stops a pipe put in the file's place after the check from hanging the reader.
+const NOFOLLOW = (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
 
 // The file is opened only if it is a plain file (not a link) and the opened handle is the file that was looked at.
-function openPlain(path, flags) {
+export function openPlain(path, flags) {
   const found = lstatSync(path, { throwIfNoEntry: false })
   if (!found || !found.isFile()) return undefined
   const fd = openSync(path, flags | NOFOLLOW)
@@ -68,11 +69,13 @@ export function makeTail(feed, { onLine, readMax = 8 * 1024 * 1024, recentMax = 
           tail.badLines++
           continue
         }
-        const line = raw.toString('utf8').replace(/\r$/, '')
         // A line that is not one JSON object (two writers interleaved, a torn write) would break the page's reader and the stream's framing.
+        // It is written out again, so a bare carriage return or line separator inside it cannot split a stream frame.
+        let line
         try {
-          const parsed = JSON.parse(line)
+          const parsed = JSON.parse(raw.toString('utf8'))
           if (parsed === null || typeof parsed !== 'object') throw new Error('not an object')
+          line = JSON.stringify(parsed)
         } catch {
           tail.badLines++
           continue
@@ -80,7 +83,7 @@ export function makeTail(feed, { onLine, readMax = 8 * 1024 * 1024, recentMax = 
         tail.linesRead++
         tail.lastAt = Date.now()
         tail.recent.push(line)
-        held += raw.length
+        held += line.length
         while (tail.recent.length > recentMax || (held > recentBytes && tail.recent.length > 1)) held -= Buffer.byteLength(tail.recent.shift() ?? '')
         onLine(line)
       }
@@ -104,4 +107,18 @@ export function makeTail(feed, { onLine, readMax = 8 * 1024 * 1024, recentMax = 
   }
 
   return tail
+}
+
+// A small plain file read whole, never through a link or a pipe.
+export function readPlain(path, max) {
+  const opened = openPlain(path, 0)
+  if (!opened) return undefined
+  try {
+    if (opened.info.size > max) return undefined
+    const buffer = Buffer.alloc(opened.info.size)
+    const got = readSync(opened.fd, buffer, 0, buffer.length, 0)
+    return buffer.subarray(0, got).toString('utf8')
+  } finally {
+    closeSync(opened.fd)
+  }
 }
