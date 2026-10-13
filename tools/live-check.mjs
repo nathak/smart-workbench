@@ -354,4 +354,12 @@ const rb = M.rebuild([{ at: 1, kind: 'prompt', text: 'x' }, { at: 2, kind: 'tool
 check(rb.turns.length === 1 && rb.spans.size === 1 && rb.events === 3, 'a rebuilt trace comes from the events given and survives a bad entry')
 check(tr1.spans.get('__proto__') === undefined && M.statusOf({ end: 1, outcome: 'constructor', workflowBg: false }) === 'ok', 'an outcome or id named like an object property is just text')
 
+const trR = feedOf([
+  { kind: 'prompt', text: 'task' }, { kind: 'tool.start', id: 'a1', tool: 'Read' }, { kind: 'tool.end', id: 'a1', outcome: 'ok', ms: 1 }, { kind: 'turn', aborted: false },
+  { kind: 'tool.start', id: 'a2', tool: 'Agent', subagent: 'smartworkbench:advisor' }, { kind: 'tool.end', id: 'a2', outcome: 'ok', ms: 1, agentRun: 'x1' },
+  { kind: 'tool.start', id: 'a3', tool: 'Grep', agent: 'x1' }, { kind: 'turn', aborted: false },
+])
+check(trR.turns.length === 2 && trR.turns[1].resumed === true && trR.turns[1].spans.map(s => s.id).join() === 'a2,a3' && trR.turns[0].spans.length === 1, 'calls after a turn ended with no prompt start a resumed turn instead of piling into the old one')
+check(page.includes('id="errs"') && page.includes('function safe(') && !/catch \(e\) \{\}\s*\n\s*try \{ flow/.test(page), 'a failure while reading or drawing is shown in the status bar, not swallowed')
+
 process.exit(failed === 0 ? 0 : 1)

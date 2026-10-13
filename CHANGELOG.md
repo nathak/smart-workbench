@@ -4,6 +4,10 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+- Live view: calls that follow a finished turn with no new prompt (a background agent finished, a hook resumed the session) start a resumed turn instead of piling into the old one, and a turn with too many calls draws the newest ones with the earlier ones behind a button, so recent advisor and subagent calls are no longer hidden at the far end of a long turn.
+- Live view: a failure while reading an event or drawing a view is shown in the status bar and logged to the console instead of being swallowed.
+
 ## [0.16.0] - 2026-10-13
 
 ### Changed
