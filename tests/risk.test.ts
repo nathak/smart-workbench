@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import { applyRule } from '../hooks/policy'
 import { classify, commandPrefix, decide, effectiveProfile, normalisePath, redact, sessionScope } from '../hooks/risk'
 
 describe('risk rules', () => {
@@ -267,7 +268,12 @@ describe('risk rules', () => {
     expect(decide(force, 'off', false)).toBe('allow')
     expect(decide(classify('Bash', { command: 'cat .env' }), 'off', false)).toBe('allow')
     expect(decide(edit, 'off', true)).toBe('ask')
-    expect(decide({ ...push, category: 'project-rule', policy: 'block' }, 'off', false)).toBe('block')
+    expect(decide({ ...push, category: 'project-rule', policy: 'block', rule: 'block' }, 'off', false)).toBe('block')
+    // What a project rule asked for holds in off, also when it only repeated a protected check or tried to loosen a block.
+    const rules = [{ tool: 'Read', path: '.env', policy: 'ask' as const }, { command: 'git push --force', policy: 'ask' as const }]
+    expect(decide(applyRule(classify('Read', { file_path: '.env' }), rules[0]), 'off', false)).toBe('ask')
+    expect(decide(applyRule(force, rules[1]), 'off', false)).toBe('ask')
+    expect(decide(classify('Edit', { file_path: '.claude/smartworkbench.json' }), 'off', false)).toBe('ask')
     expect(effectiveProfile('off', 'strict')).toBe('strict')
     expect(effectiveProfile('strict', 'permissive')).toBe('strict')
     expect(effectiveProfile('off', undefined)).toBe('off')
