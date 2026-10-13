@@ -4,6 +4,9 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- `/swb live` without a port takes the next free port when another session's view holds 4317 (up to 20 further), so several sessions each get their own view; a named port must be free.
+
 ### Security
 - A project guard file can only tighten the guard: the stricter of its profile and yours applies, protected checks (secret reads, Codex, remote scripts, MCP deploys) cannot be allowed by a rule, and a rule that asks is still asked under the permissive profile.
 - Quoted or escaped flags and words (`rm "-rf"`, `'git' push`, `git -C "a b" push -f`) are read as the shell reads them; scripts piped into a path, `sudo -u` or a bare interpreter are asked; Codex rules hold when `node` has options; `Grep` and `Glob` that reach secrets files are asked; more key and credential files count as secrets; Windows paths and upper-case guard file names are matched.
