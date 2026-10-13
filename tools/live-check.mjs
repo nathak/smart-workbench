@@ -221,7 +221,7 @@ for (const theme of ['dark', 'light']) {
 
 // ---- the data model: pure, so it runs here on synthetic events ----
 const modelCode = page.slice(page.indexOf('// model:begin'), page.indexOf('// model:end'))
-const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf }`)()
+const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns }`)()
 const feedOf = list => { const tr = M.newTrace(); let at = 1000; for (const ev of list) { at += 100; M.ingest(tr, { at, ...ev }) } return tr }
 const tr1 = feedOf([
   { kind: 'tool.start', id: 'x0', tool: 'Read', policy: 'allow' }, { kind: 'tool.end', id: 'x0', outcome: 'ok', ms: 30 },
@@ -269,5 +269,24 @@ const big = M.newTrace(); const t0 = Date.now()
 for (let i = 0; i < 2000; i++) { M.ingest(big, { at: i * 10, kind: 'tool.start', id: 'i' + i, tool: 'Read', policy: 'allow' }); M.ingest(big, { at: i * 10 + 5, kind: 'tool.end', id: 'i' + i, outcome: 'ok', ms: 5 }) }
 M.kpis(big, 30000)
 check(Date.now() - t0 < 400, 'two thousand calls ingest and summarise in under 400 ms')
+
+const h1 = M.buildHash({ tab: 'timeline', sel: M.selKey('call', 'a/b c&d=e'), q: 'tool:Bash -policy:allow' })
+const p1 = M.parseHash(h1)
+check(p1.tab === 'timeline' && p1.sel === 'call:a/b c&d=e' && p1.q === 'tool:Bash -policy:allow', 'an address round-trips a tab, a selected call and a query, whatever characters the id holds')
+check(M.parseHash('#tab=%E0%A4%A&sel=call:x').sel === 'call:x' && M.parseHash('#sel=<script>').sel === null && M.parseHash('#tab=../../x').tab === null && M.parseHash(undefined).tab === null, 'a damaged or hostile address is dropped piece by piece without an exception')
+const trA = feedOf([
+  { kind: 'prompt', text: 'p' },
+  { kind: 'tool.start', id: 'A', tool: 'Agent' },
+  { kind: 'tool.start', id: 's1', tool: 'Read', agent: 'sub1' }, { kind: 'tool.end', id: 's1', outcome: 'error', ms: 5 },
+  { kind: 'tool.start', id: 's2', tool: 'Read', agent: 'sub1' }, { kind: 'tool.end', id: 's2', outcome: 'ok', ms: 5 },
+  { kind: 'turn.agent', agent: 'sub1', model: 'claude-haiku-4-5', tokensIn: 7, tokensOut: 3 },
+  { kind: 'tool.end', id: 'A', outcome: 'ok', ms: 100, agentRun: 'sub1' },
+])
+const stA = M.agentStats(trA, trA.spans.get('A'))
+check(stA.calls === 2 && stA.fails === 1 && stA.tokIn === 7 && stA.tokOut === 3, 'a subagent run adds up its calls, its failures and its own tokens')
+const trW = feedOf([{ kind: 'prompt', text: 'p' }, ...[1, 2, 3].flatMap(i => [{ kind: 'tool.start', id: 'r' + i, tool: 'Bash', summary: 'npm test' }, { kind: 'tool.end', id: 'r' + i, outcome: 'error', ms: 9 }])])
+check(M.turnWarns(trW.turns[0]).map(w => w.kind).join() === 'repeat,errors', 'the same call three times in a row, and three failures, each raise a note on the turn')
+check(M.turnWarns(feedOf([{ kind: 'prompt', text: 'p' }, { kind: 'tool.start', id: 'q1', tool: 'Bash', summary: 'a' }, { kind: 'tool.start', id: 'q2', tool: 'Bash', summary: 'b' }, { kind: 'tool.start', id: 'q3', tool: 'Bash', summary: 'a' }]).turns[0]).length === 0, 'different calls in a row raise no note')
+check(page.includes('role="tree"') && page.includes('role="treeitem"'), 'the timeline is a tree of tree items')
 
 process.exit(failed === 0 ? 0 : 1)
