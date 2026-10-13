@@ -359,10 +359,10 @@ export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolea
   // and a change to the guard file is still asked (or the rules could be deleted without anyone seeing it).
   if (profile === 'off') {
     // First, so a rule inside the guard file cannot allow edits of the guard file.
-    if (verdict.category === 'guard-policy') return 'ask'
-    if (verdict.rule !== undefined) return verdict.rule
+    if (verdict.category === 'guard-policy') return verdict.rule === 'block' ? 'block' : 'ask'
+    const asked = verdict.rule ?? 'allow'
 
-    return isPaused && verdict.risk !== 'low' ? 'ask' : 'allow'
+    return asked === 'allow' && isPaused && verdict.risk !== 'low' ? 'ask' : asked
   }
 
   if (verdict.policy === 'block') {

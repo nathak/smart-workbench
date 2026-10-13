@@ -89,7 +89,7 @@ async function load($: $): Promise<Workbench> {
 // A project path as the engine reads it: relative paths and commands follow the shell's directory, which a `cd` moves,
 // so what belongs to the project is always given from the project root.
 async function rooted($: $, path: string): Promise<string> {
-  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) ? path : `${await $.session.root()}/${path}`
+  return path.startsWith('/') || path.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(path) ? path : `${await $.session.root()}/${path}`
 }
 
 // Every save builds on the newest copy: when another session of this project saved
@@ -1038,6 +1038,20 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   return { text: `The live view did not start${output.trim() ? `: ${model.cut(output.trim().split('\n').pop() ?? '', 160)}` : ' (is node installed? is the port free?)'}` }
 }
 
+// The one way the guard level changes, from the command and from the panel. Turning it off is the person's decision, asked once,
+// so nothing that only types a command can do it silently; every change is written to the audit log.
+async function chooseGuard($: $, wanted: GuardProfile): Promise<boolean> {
+  const wb = await read($, wbAtom)
+  if (wanted === 'off' && wb.execution.profile !== 'off') {
+    const answer = await $.ui.ask('Turn the SmartWorkbench guard off? No call is asked about or blocked by the built-in rules until you set it back (/swb guard medium).', { header: 'Guard off', options: ['Turn off', 'Cancel'] }).catch(() => 'Cancel')
+    if (answer !== 'Turn off') return false
+  }
+  await mutate($, current => model.setProfile(current, wanted))
+  await audit($, 'guard.profile', { profile: wanted })
+
+  return true
+}
+
 async function runCommand($: $, args: string): Promise<{ text: string }> {
   const word = (args.trim().split(/\s+/)[0] ?? '').toLowerCase()
 
@@ -1271,13 +1285,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
       return { text: `Guard sensitivity: ${label[wb.execution.profile]}${file ? ` · the guard file sets at least ${file}, so ${label[effectiveProfile(wb.execution.profile, file)]} applies` : ''}.\n/swb guard high|medium|low|off to change it.\nhigh asks about medium-risk calls too; medium is the default; low skips most questions (secrets, remote scripts, Codex, project rules and blocks stay); off lets every call through (only rules your project file wrote and the pause switch still apply).` }
     }
     if (!wanted) return { text: 'Usage: /swb guard [high|medium|low|off]' }
-    // Turning the guard off is the person's decision, asked once, so nothing that only types a command can do it silently.
-    if (wanted === 'off' && wb.execution.profile !== 'off') {
-      const answer = await $.ui.ask('Turn the SmartWorkbench guard off? No call is asked about or blocked by the built-in rules until you set it back (/swb guard medium).', { header: 'Guard off', options: ['Turn off', 'Cancel'] }).catch(() => 'Cancel')
-      if (answer !== 'Turn off') return { text: 'Guard unchanged.' }
-    }
-    await mutate($, current => model.setProfile(current, wanted))
-    await audit($, 'guard.profile', { profile: wanted })
+    if (!(await chooseGuard($, wanted))) return { text: 'Guard unchanged.' }
     const file = (await read($, liveAtom)).policy?.profile
     const applied = effectiveProfile(wanted, file)
 
@@ -1631,7 +1639,7 @@ function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
             { value: 'balanced', label: 'Medium (balanced)' },
             { value: 'strict', label: 'High (strict)' },
           ]}
-          onSelect={value => void mutate($, wb => model.setProfile(wb, value as GuardProfile))}
+          onSelect={value => void chooseGuard($, value as GuardProfile)}
         />
       )}
       <Text dimColor={!wb.team?.enabled}>
