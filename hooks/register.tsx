@@ -14,7 +14,7 @@ import * as model from './model'
 import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
-import { classify, decide, redact, sessionScope, summarize } from './risk'
+import { classify, decide, effectiveProfile, redact, sessionScope, summarize } from './risk'
 import { workflowOf } from './workflow'
 
 type $ = EngineInterface
@@ -54,6 +54,7 @@ const HELP = [
   '  /smartworkbench load <name>      start a task from a template',
   '  /smartworkbench templates        list templates and context sets',
   '  /smartworkbench export [path]    write a Markdown handoff (default .claude/smartworkbench-handoff.md)',
+  '  /smartworkbench guard [high|medium|low|off]   how strict the guard is (medium is the default)',
   '  /smartworkbench policy [init|reload]  show, create or re-read the project guard file (.claude/smartworkbench.json)',
   '  /smartworkbench ci               import CI results for the current commit (uses the gh CLI)',
   '  /smartworkbench issue <#n|url|KEY title>  link the task to an issue; issue clear unlinks',
@@ -845,12 +846,8 @@ async function loadPolicy($: $): Promise<void> {
 }
 
 // A checked-in guard file may only tighten the person's own setting: the stricter of the two applies.
-const PROFILE_RANK: Record<GuardProfile, number> = { permissive: 0, balanced: 1, strict: 2 }
 function profileOf(wb: Workbench, live: Live): GuardProfile {
-  const own = wb.execution.profile
-  const file = live.policy?.profile
-
-  return file !== undefined && PROFILE_RANK[file] > PROFILE_RANK[own] ? file : own
+  return effectiveProfile(wb.execution.profile, live.policy?.profile)
 }
 
 function policyText(live: Live): string {
@@ -1257,6 +1254,25 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     return { text: entries.length === 0 ? `No audit entries in ${config.path} yet.` : `${config.path} (last ${Math.min(count, entries.length)} of ${entries.length}):\n${formatAudit(entries, count)}` }
   }
 
+  if (word === 'guard') {
+    const names: Record<string, GuardProfile> = { high: 'strict', strict: 'strict', 상: 'strict', medium: 'balanced', mid: 'balanced', balanced: 'balanced', 중: 'balanced', low: 'permissive', permissive: 'permissive', 하: 'permissive', off: 'off' }
+    const label: Record<GuardProfile, string> = { strict: 'high (strict)', balanced: 'medium (balanced)', permissive: 'low (permissive)', off: 'off' }
+    const wanted = names[name.toLowerCase()]
+    const wb = await read($, wbAtom)
+    const live = await read($, liveAtom)
+    if (name === '') {
+      const file = live.policy?.profile
+      return { text: `Guard sensitivity: ${label[wb.execution.profile]}${file ? ` · the guard file sets at least ${file}, so ${label[effectiveProfile(wb.execution.profile, file)]} applies` : ''}.\n/swb guard high|medium|low|off to change it.\nhigh asks about medium-risk calls too; medium is the default; low skips most questions (secrets, remote scripts, Codex, project rules and blocks stay); off lets every call through (only rules your project file wrote and the pause switch still apply).` }
+    }
+    if (!wanted) return { text: 'Usage: /swb guard [high|medium|low|off]' }
+    await mutate($, current => model.setProfile(current, wanted))
+    await audit($, 'guard.profile', { profile: wanted })
+    const file = (await read($, liveAtom)).policy?.profile
+    const applied = effectiveProfile(wanted, file)
+
+    return { text: `Guard sensitivity: ${label[wanted]}${applied !== wanted ? ` (the guard file sets ${file}, which is stricter, so ${label[applied]} applies)` : ''}.${wanted === 'off' ? '\nThe guard is off: no call is asked about or blocked by the built-in rules. Turn it back on with /swb guard medium.' : ''}` }
+  }
+
   if (word === 'policy') {
     if (name === 'init') {
       if (await $.fs.exists(POLICY_PATH)) {
@@ -1599,9 +1615,10 @@ function runTab($: $, { els, wb, live, width, room }: View): RenderElement {
           label="Guard profile"
           value={wb.execution.profile}
           options={[
-            { value: 'permissive', label: 'Permissive' },
-            { value: 'balanced', label: 'Balanced' },
-            { value: 'strict', label: 'Strict' },
+            { value: 'off', label: 'Off (no checks)' },
+            { value: 'permissive', label: 'Low (permissive)' },
+            { value: 'balanced', label: 'Medium (balanced)' },
+            { value: 'strict', label: 'High (strict)' },
           ]}
           onSelect={value => void mutate($, wb => model.setProfile(wb, value as GuardProfile))}
         />
@@ -1947,7 +1964,7 @@ export const register: Register = on => {
     isFeedNoted = false
     treeRoot = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
-    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
