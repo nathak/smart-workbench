@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Smoke test for tools/live.mjs using only node built-ins: node tools/live-check.mjs
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { get } from 'node:http'
 import { hostname, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -69,8 +69,9 @@ function request(path, host) {
   })
 }
 
+let first
 try {
-  const first = launch()
+  first = launch()
   for (let i = 0; i < 40 && !first.out.stdout.includes('SmartWorkbench live:'); i++) await sleep(100)
   check(first.out.stdout.includes('SmartWorkbench live:'), 'starts and prints its address')
   check(existsSync(feed), 'creates the feed after listening')
@@ -83,7 +84,7 @@ try {
   check((await request('/', `evil.test:${port}`)).status === 403, 'refuses a foreign Host header')
   check((await request('/', `127.0.0.1:${port}`)).status === 200, 'serves the page on a loopback Host')
   const info = JSON.parse((await request('/info', `127.0.0.1:${port}`)).body || '{}')
-  check(info.pid > 0 && typeof info.linesRead === 'number' && typeof info.startedAt === 'number' && info.feed.endsWith('smartworkbench-live.jsonl') && (await request('/info', `evil.test:${port}`)).status === 403, 'reports where the feed is and how many lines it read, and only to a trusted Host')
+  check(info.pid > 0 && typeof info.linesRead === 'number' && typeof info.startedAt === 'number' && typeof info.feed === 'string' && info.feed.endsWith('smartworkbench-live.jsonl') && (await request('/info', `evil.test:${port}`)).status === 403, 'reports where the feed is and how many lines it read, and only to a trusted Host')
   check(await headerOf('/', 'content-security-policy').then(value => value?.includes("default-src 'none'")), 'sends a content security policy with the page')
 
   const second = launch()
@@ -107,7 +108,7 @@ try {
 
   // Past the cap the file is emptied once read, and a later line still arrives exactly once.
   appendFileSync(feed, '{"kind":"pad"}\n'.repeat(600000))
-  await sleep(900)
+  await sleep(2500)
   check(statSync(feed).size === 0, 'empties the feed once it passes the cap')
   const afterCap = follow()
   await sleep(300)
@@ -116,6 +117,31 @@ try {
   await sleep(500)
   check(afterCap.lines.length === seen + 1 && afterCap.lines.at(-1) === 'data: {"kind":"d"}', 'a line after the cap arrives exactly once')
   afterCap.close()
+
+  // A character that is only half written (Korean is three bytes) is decoded once it is whole, and lines that are not JSON are dropped and counted.
+  const text = follow()
+  await sleep(300)
+  const korean = Buffer.from('{"kind":"ko","t":"가나다"}\n')
+  appendFileSync(feed, korean.subarray(0, 19))
+  await sleep(500)
+  appendFileSync(feed, korean.subarray(19))
+  appendFileSync(feed, 'this is not json\n{"kind":"after-bad"}\n')
+  await sleep(600)
+  check(text.lines.filter(one => one === 'data: {"kind":"ko","t":"가나다"}').length === 1, 'a line written in two parts, split inside a Korean character, arrives whole and once')
+  check(text.lines.some(one => one.includes('after-bad')) && !text.lines.some(one => one.includes('not json')), 'a line that is not JSON is dropped and the next one still arrives')
+  const info2 = JSON.parse((await request('/info', `127.0.0.1:${port}`)).body || '{}')
+  check(info2.badLines >= 1, 'the dropped line is counted in /info')
+  text.close()
+
+  // The file deleted and made again is read from its start, not from the old position.
+  rmSync(feed)
+  await sleep(500)
+  const again = follow()
+  await sleep(300)
+  appendFileSync(feed, '{"kind":"reborn"}\n')
+  await sleep(600)
+  check(again.lines.some(one => one.includes('reborn')), 'a feed that was deleted and made again is read from the start')
+  again.close()
 
   rmSync(feed)
   await sleep(400)
@@ -136,7 +162,30 @@ try {
     check(other.out.code !== undefined && !existsSync(otherFeed), `${signal} ends the server and removes its feed`)
     rmSync(otherDir, { recursive: true, force: true })
   }
+
+  // A feed that is a link (one a repository could ship) is refused, and what it points at is left alone.
+  const linkDir = mkdtempSync(join(tmpdir(), 'swb-live-'))
+  mkdirSync(join(linkDir, '.claude'))
+  const victim = join(linkDir, 'victim.txt')
+  writeFileSync(victim, 'keep me')
+  symlinkSync(victim, join(linkDir, '.claude', 'smartworkbench-live.jsonl'))
+  const linked = launch(port + 2, linkDir)
+  for (let i = 0; i < 30 && linked.out.code === undefined; i++) await sleep(100)
+  check(linked.out.code === 1 && readFileSync(victim, 'utf8') === 'keep me', 'a feed that is a link is refused and its target is not emptied')
+  rmSync(linkDir, { recursive: true, force: true })
+
+  // A second server for the same project is refused instead of emptying the feed the first one reads.
+  const crowded = mkdtempSync(join(tmpdir(), 'swb-live-'))
+  const one = launch(port + 3, crowded)
+  for (let i = 0; i < 40 && !one.out.stdout.includes('SmartWorkbench live:'); i++) await sleep(100)
+  appendFileSync(join(crowded, '.claude', 'smartworkbench-live.jsonl'), '{"kind":"keep"}\n')
+  const two = launch(port + 4, crowded)
+  for (let i = 0; i < 30 && two.out.code === undefined; i++) await sleep(100)
+  check(two.out.code === 1 && two.out.stderr.includes('already runs') && readFileSync(join(crowded, '.claude', 'smartworkbench-live.jsonl'), 'utf8').includes('keep'), 'a second view for the same project is refused and the feed is kept')
+  one.child.kill('SIGTERM')
+  rmSync(crowded, { recursive: true, force: true })
 } finally {
+  first?.child.kill('SIGTERM')
   rmSync(dir, { recursive: true, force: true })
 }
 // Feed text must only reach the page through textContent.

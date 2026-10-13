@@ -203,22 +203,27 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
     const at = await $.clock.now()
     const line = JSON.stringify({ at, kind, ...(session ? { session } : {}), ...masked })
     try {
-      await appendLine($, path, `${line}\n`)
+      // A newline first: a line that an earlier, failed write left half finished ends there instead of swallowing this one.
+      await appendLine($, path, `\n${line}\n`)
     } catch (error) {
+      const why = model.cut(error instanceof Error ? error.message : String(error), 120)
+      // Every new failed stretch is shown by /swb live; the toast is only for the first.
+      if (feedMissed === 0) await setLive($, current => ({ ...current, feedError: why })).catch(() => undefined)
       feedMissed++
       if (!isFeedNoted) {
         isFeedNoted = true
-        const why = model.cut(error instanceof Error ? error.message : String(error), 120)
         $.ui.toast(`SmartWorkbench: the live feed cannot be written (${why}); the live view will miss events.`)
-        await setLive($, current => ({ ...current, feedError: why })).catch(() => undefined)
       }
       return
     }
     if (feedMissed > 0) {
       const missed = feedMissed
-      feedMissed = 0
-      await appendLine($, path, `${JSON.stringify({ at, kind: 'feed.recovered', missed })}\n`).catch(() => undefined)
-      await setLive($, current => ({ ...current, feedError: undefined })).catch(() => undefined)
+      // The count is cleared only once the line that reports it is written, so a failure of that line does not lose it.
+      const noted = await appendLine($, path, `\n${JSON.stringify({ at, kind: 'feed.recovered', missed })}\n`).then(() => true, () => false)
+      if (noted) {
+        feedMissed -= missed
+        await setLive($, current => ({ ...current, feedError: undefined })).catch(() => undefined)
+      }
     }
   } catch {
     // The feed is optional.
@@ -915,6 +920,18 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     liveServer.stop()
     liveServer = undefined
     await setLive($, live => ({ ...live, livePrompts: undefined }))
+    // Ending a child is a signal on Linux and macOS, where the server removes its own files; on Windows it is a hard kill and nothing runs.
+    // Once the process is gone, the files it would have removed are removed here.
+    for (let wait = 0; wait < 4; wait++) {
+      const gone = await foreignView($)
+      if (gone.state === 'dead') {
+        const cwd = await $.session.cwd()
+        await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', `${cwd}/${LIVE_FILE}`, `${cwd}/${PID_FILE}`]).catch(() => undefined)
+        break
+      }
+      if (gone.state !== 'alive') break
+      await $.clock.sleep(300).catch(() => undefined)
+    }
 
     return { text: 'Live view stopped; the feed file is removed.' }
   }
@@ -965,7 +982,8 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
       resolve(false)
     })()
   })
-  const timeout = $.clock.sleep(3000).then(
+  // Windows can take a while to start node the first time (a virus scanner reads it), so the wait is generous.
+  const timeout = $.clock.sleep(10000).then(
     () => {
       isSettled = true
       return false
