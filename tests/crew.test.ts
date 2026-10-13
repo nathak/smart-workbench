@@ -109,6 +109,7 @@ describe('codex plugin', () => {
     expect(codex.codexCall('C=/a/codex/scripts/codex-companion.mjs S="fix it" && node "$C" task --write "$S"')).toEqual({ op: 'task', write: true, background: false })
     expect(codex.codexCall('C=/a/codex-companion.mjs; node ${C} review --background')).toEqual({ op: 'review', write: false, background: true })
     expect(codex.codexCall('C=/a/codex-companion.mjs; echo $C review')).toBeUndefined()
+    expect(codex.codexCall('C=/a/codex/scripts/codex-companion.mjs\nSTYLE="s"\ngen() { node $C task --write "Draw $2. $STYLE" >/dev/null 2>&1; }\ngen a b')).toEqual({ op: 'task', write: true, background: false })
     expect(codex.codexCall('node x.mjs review')).toBeUndefined()
     expect(codex.codexCall('node /a/codex-companion.mjs bogus')).toBeUndefined()
     expect(codex.codexCall('grep codex-companion.mjs README.md')).toBeUndefined()
