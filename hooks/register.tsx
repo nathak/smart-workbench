@@ -972,7 +972,8 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     return { text: `Live view: ${liveServer.url}\n/swb live stop to end it.${await feedNote($)}` }
   }
 
-  const port = arg === '' ? 4317 : Number(arg)
+  const isAuto = arg === ''
+  const port = isAuto ? 4317 : Number(arg)
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { text: 'Usage: /swb live [port 1024-65535] [--no-prompts] | /swb live stop' }
 
   const other = await foreignView($)
@@ -981,8 +982,9 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   feedMissed = 0
   isFeedNoted = false
   await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined, feedError: undefined }))
-  const url = `http://127.0.0.1:${port}`
-  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--port', String(port), '--watch-parent'] })
+  // With no port given, a port another session's view holds is skipped: every session gets its own view, on the next free port.
+  let url = `http://127.0.0.1:${port}`
+  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--port', String(port), ...(isAuto ? ['--auto'] : []), '--watch-parent'] })
   const iterator = child[Symbol.asyncIterator]()
   let output = ''
   const handle = { url, stop: () => void Promise.resolve(iterator.return?.()).catch(() => undefined) }
@@ -996,7 +998,10 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
           const step = await iterator.next()
           if (step.done) break
           output += step.value.text
-          if (!isSettled && output.includes('SmartWorkbench live:')) {
+          const shown = /SmartWorkbench live: (http:\/\/127\.0\.0\.1:\d+)/.exec(output)
+          if (!isSettled && shown) {
+            url = shown[1] ?? url
+            handle.url = url
             isSettled = true
             liveServer = handle
             resolve(true)

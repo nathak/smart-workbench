@@ -182,6 +182,18 @@ try {
   const two = launch(port + 4, crowded)
   for (let i = 0; i < 30 && two.out.code === undefined; i++) await sleep(100)
   check(two.out.code === 1 && two.out.stderr.includes('already runs') && readFileSync(join(crowded, '.claude', 'smartworkbench-live.jsonl'), 'utf8').includes('keep'), 'a second view for the same project is refused and the feed is kept')
+  // Another project's view on the same port: with --auto the next free port is taken, without it the start fails.
+  const other = mkdtempSync(join(tmpdir(), 'swb-live-'))
+  const strict = launch(port + 3, other)
+  for (let i = 0; i < 30 && strict.out.code === undefined; i++) await sleep(100)
+  check(strict.out.code === 1 && strict.out.stderr.includes('EADDRINUSE'), 'an explicit port that is taken fails')
+  const moved = spawn('node', [server, other, '--port', String(port + 3), '--auto'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let movedOut = ''
+  moved.stdout.on('data', chunk => (movedOut += chunk))
+  for (let i = 0; i < 40 && !movedOut.includes('SmartWorkbench live:'); i++) await sleep(100)
+  check(movedOut.includes(`http://127.0.0.1:${port + 4}`), 'with --auto a taken port moves to the next free one')
+  moved.kill('SIGTERM')
+  rmSync(other, { recursive: true, force: true })
   one.child.kill('SIGTERM')
   rmSync(crowded, { recursive: true, force: true })
 } finally {
