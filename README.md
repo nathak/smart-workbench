@@ -266,7 +266,7 @@ Watch a request flow in a browser: prompts, tool calls and guard decisions, suba
 **Where to set it.** The variable is read by the live server process, `tools/live.mjs`, which `/swb live` starts (the hub starts with the first session on a port and keeps the list it started with; it ends about 30 seconds after the last session leaves). So it must be in Claude Code's own environment when you start it, and it takes effect when the server starts:
 
 1. Set it in the shell that launches Claude Code: `export SWB_LIVE_HOSTS=live.example.com` (bash, zsh), `$env:SWB_LIVE_HOSTS = "live.example.com"` (PowerShell), `set SWB_LIVE_HOSTS=live.example.com` (cmd). Claude Code's own settings may also offer an `env` section; use it if your version does.
-2. Restart Claude Code, then run `/swb live stop` and `/swb live` again if a view was already running; a running server keeps the list it started with.
+2. Restart Claude Code, then run `/swb live stop` and `/swb live` again if a view was already running; a running server keeps the list it started with. One view (hub) serves every session on its port, so all of them must use the same list: a session whose list differs is refused on that port (with `/swb live <port>` it fails, with no port given it moves to the next one). A new list takes effect once the last session has left and the hub has ended (about 30 seconds). A trusted name sees every project's sessions on that port, not only its own.
 
 **A reverse proxy in front of it.** The server only speaks plain HTTP on `127.0.0.1`, so the proxy must run on the same machine (or reach it through a tunnel). The stream is Server-Sent Events, so keep it unbuffered and open:
 
@@ -680,7 +680,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 **어디에 설정하나.** 이 변수는 `/swb live`가 Claude Code의 자식 프로세스로 띄우는 실시간 서버(`tools/live.mjs`)가 읽습니다. 그래서 Claude Code를 시작할 때 그 환경에 들어 있어야 하고, 서버가 시작될 때 적용됩니다.
 
 1. Claude Code를 띄우는 셸에서 설정합니다. bash·zsh는 `export SWB_LIVE_HOSTS=live.example.com`, PowerShell은 `$env:SWB_LIVE_HOSTS = "live.example.com"`, cmd는 `set SWB_LIVE_HOSTS=live.example.com`. 사용 중인 Claude Code 버전의 설정에 `env` 항목이 있다면 거기에 적어도 됩니다.
-2. Claude Code를 다시 시작합니다. 이미 실시간 보기가 떠 있었다면 `/swb live stop` 뒤 `/swb live`를 다시 실행하세요. 실행 중인 서버는 시작할 때의 목록을 그대로 씁니다.
+2. Claude Code를 다시 시작합니다. 이미 실시간 보기가 떠 있었다면 `/swb live stop` 뒤 `/swb live`를 다시 실행하세요. 실행 중인 서버는 시작할 때의 목록을 그대로 씁니다. 한 허브가 같은 포트의 모든 세션을 보여 주므로 세션들의 목록이 같아야 합니다. 목록이 다른 세션은 그 포트에서 거부됩니다(`/swb live <포트>`는 실패하고, 포트를 안 주면 다음 포트로 넘어감). 새 목록은 마지막 세션이 나가 허브가 끝난 뒤(약 30초) 적용됩니다. 신뢰한 이름은 자기 프로젝트만이 아니라 그 포트의 모든 프로젝트의 세션을 볼 수 있습니다.
 
 **앞단의 리버스 프록시.** 서버는 `127.0.0.1`에서 평문 HTTP만 하므로, 프록시는 같은 머신에서 돌거나 터널로 닿아야 합니다. 스트림은 Server-Sent Events이므로 버퍼링하지 말고 열어 두어야 합니다.
 

@@ -63,7 +63,7 @@ It reads no environment variable except `CLAUDE_CONFIG_DIR` and `HOME` (through 
 
 ### Network
 
-None of its own. `/swb live` starts a local web server that listens on `127.0.0.1` only (default port 4317) and answers only requests (the page, `/events` and `/info`, which gives the project's absolute path, the feed path, the process id and how many lines it has read) whose Host is `127.0.0.1`, `localhost`, or a name listed in the `SWB_LIVE_HOSTS` environment variable (comma separated, none by default; format, proxy settings and the security trade-off are in the README under `SWB_LIVE_HOSTS`); it makes no outgoing requests. `gh` reaches GitHub only when you run `/swb ci` or `/swb issue` with a GitHub reference.
+None of its own. `/swb live` starts a local web server that listens on `127.0.0.1` only (default port 4317) and answers only requests (the page, `/events` and `/info`, which gives the project's absolute path, the feed path, the process id and how many lines it has read; the hub also answers `/sessions` and `/events?all=1`, which list every session's project path and carry every session's feed, and its `/info` adds the registry path, the host name and the trusted names) whose Host is `127.0.0.1`, `localhost`, or a name listed in the `SWB_LIVE_HOSTS` environment variable (comma separated, none by default; format, proxy settings and the security trade-off are in the README under `SWB_LIVE_HOSTS`); it makes no outgoing requests. `gh` reaches GitHub only when you run `/swb ci` or `/swb issue` with a GitHub reference.
 
 ### Codex (optional, off by default)
 
@@ -134,7 +134,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 ### 네트워크
 
-자체 요청은 없습니다. `/swb live`는 `127.0.0.1`에서만 듣는 로컬 웹 서버(기본 포트 4317)를 띄우며, (페이지, `/events`, 그리고 프로젝트 절대 경로·피드 경로·프로세스 id·읽은 줄 수를 알려 주는 `/info`) Host가 `127.0.0.1`, `localhost`, 또는 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분, 기본값 없음. 형식, 프록시 설정, 보안상 주의는 README의 `SWB_LIVE_HOSTS` 절)에 적은 이름인 요청에만 응답하고 밖으로 나가는 요청은 없습니다. `gh`가 GitHub에 접속하는 것은 `/swb ci` 또는 GitHub 이슈 번호로 `/swb issue`를 실행할 때뿐입니다.
+자체 요청은 없습니다. `/swb live`는 `127.0.0.1`에서만 듣는 로컬 웹 서버(기본 포트 4317)를 띄우며, (페이지, `/events`, 그리고 프로젝트 절대 경로·피드 경로·프로세스 id·읽은 줄 수를 알려 주는 `/info`. 허브는 모든 세션의 프로젝트 경로를 알려 주는 `/sessions`와 모든 세션의 피드를 싣는 `/events?all=1`도 답하고, 허브의 `/info`에는 registry 경로·호스트 이름·신뢰한 이름이 더해짐) Host가 `127.0.0.1`, `localhost`, 또는 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분, 기본값 없음. 형식, 프록시 설정, 보안상 주의는 README의 `SWB_LIVE_HOSTS` 절)에 적은 이름인 요청에만 응답하고 밖으로 나가는 요청은 없습니다. `gh`가 GitHub에 접속하는 것은 `/swb ci` 또는 GitHub 이슈 번호로 `/swb issue`를 실행할 때뿐입니다.
 
 ### Codex(선택, 기본 꺼짐)
 

@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { HUB_VERSION } from './live-hub.mjs'
-import { beat, claimFeed, ensureRegistry, register, registryDir, registryRoot, releaseFeed, unregister } from './live-registry.mjs'
+import { beat, claimFeed, ensureRegistry, projectOk, register, registryDir, registryRoot, releaseFeed, trustedHosts, unregister } from './live-registry.mjs'
 
 const sleep = ms => new Promise(done => setTimeout(done, ms))
 const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)
@@ -23,8 +23,11 @@ function probe(port) {
       res.on('end', () => {
         try {
           const info = JSON.parse(text)
-          if (info?.hub === 'smartworkbench' && info.v === HUB_VERSION && typeof info.registry === 'string' && same(info.registry, registryDir(port))) done({ kind: 'hub' })
-          else done({ kind: 'other' })
+          if (info?.hub === 'smartworkbench' && info.v === HUB_VERSION && typeof info.registry === 'string' && same(info.registry, registryDir(port))) {
+            // One hub answers to one list of names; a session with another list would have its prompts served under names it never agreed to.
+            if (JSON.stringify(info.hosts ?? []) === JSON.stringify(trustedHosts())) done({ kind: 'hub' })
+            else done({ kind: 'other', why: 'SWB_LIVE_HOSTS differs from the one the running view was started with; end the other sessions on this port (the view ends about 30 s after the last one) or use another port' })
+          } else done({ kind: 'other' })
         } catch {
           done({ kind: 'other' })
         }
@@ -48,6 +51,7 @@ export async function runJoin({ project, port, auto, session, watchParent }) {
   const lastTry = auto ? Math.min(port + 20, 65535) : port
   const beatMs = Number(process.env.SWB_LIVE_BEAT_MS) || 5000
   let claimed = false
+  let reason = ''
   let entry
   let dir = ''
   let chosen = 0
@@ -81,42 +85,45 @@ export async function runJoin({ project, port, auto, session, watchParent }) {
   }
 
   entry = { id: session, project, host: hostname(), pid: process.pid, parent: process.ppid, startedAt: Date.now() }
+  // The registration is checked the way the hub will check it: a project it would ignore must not be reported as started.
+  if (!projectOk(entry)) {
+    console.error(`The live view cannot show ${project}: its .claude folder or feed is a link, or the process note is missing.`)
+    process.exit(1)
+  }
   for (let at = port; at <= lastTry && !chosen; at++) {
-    let found = await probe(at)
-    if (found.kind === 'none') {
-      try {
-        dir = ensureRegistry(at, { create: true })
-        entry.id = register(dir, entry)
-      } catch (err) {
-        console.error(`Cannot use the live registry: ${err.message}`)
+    const found = await probe(at)
+    if (found.kind === 'other') {
+      reason = found.why ?? reason
+      if (!auto) {
+        console.error(found.why ? `Port ${at}: ${found.why}` : `Cannot listen on 127.0.0.1:${at}: EADDRINUSE (port used by another program)`)
         process.exit(1)
       }
-      startHub(at)
-      for (let i = 0; i < 40 && found.kind !== 'hub'; i++) {
-        await sleep(200)
-        found = await probe(at)
-      }
-      if (found.kind !== 'hub') {
-        unregister(dir, entry)
-        continue
-      }
-      chosen = at
-    } else if (found.kind === 'hub') {
-      try {
-        dir = ensureRegistry(at, { create: true })
-        entry.id = register(dir, entry)
-      } catch (err) {
-        console.error(`Cannot use the live registry: ${err.message}`)
-        process.exit(1)
-      }
-      chosen = at
-    } else if (!auto) {
-      console.error(`Cannot listen on 127.0.0.1:${at}: EADDRINUSE (port used by another program)`)
+      continue
+    }
+    try {
+      dir = ensureRegistry(at, { create: true })
+      entry.id = register(dir, entry)
+    } catch (err) {
+      console.error(`Cannot use the live registry: ${err.message}`)
       process.exit(1)
     }
+    // A hub that is about to end for lack of sessions may still answer: it must answer twice, a moment apart, with this session registered.
+    let steady = false
+    for (let i = 0; i < 40 && !steady; i++) {
+      const now = await probe(at)
+      if (now.kind === 'none') startHub(at)
+      else if (now.kind === 'hub') {
+        await sleep(400)
+        steady = (await probe(at)).kind === 'hub'
+        continue
+      }
+      await sleep(200)
+    }
+    if (steady) chosen = at
+    else unregister(dir, entry)
   }
   if (!chosen) {
-    console.error(`No port from ${port} to ${lastTry} could serve the live view (EADDRINUSE or the hub did not start).`)
+    console.error(`No port from ${port} to ${lastTry} could serve the live view${reason ? ` (${reason})` : ' (in use by another program, or the hub did not start)'}.`)
     process.exit(1)
   }
 

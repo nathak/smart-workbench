@@ -6,7 +6,7 @@ import { hostname } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { ID_PATTERN, ensureRegistry, feedOf, registryDir, scan } from './live-registry.mjs'
+import { ID_PATTERN, ensureRegistry, feedOf, registryDir, scan, trustedHosts } from './live-registry.mjs'
 import { makeTail } from './live-tail.mjs'
 
 const page = join(dirname(fileURLToPath(import.meta.url)), 'live.html')
@@ -20,7 +20,9 @@ export function runHub({ port }) {
   const IDLE_MS = Number(process.env.SWB_LIVE_IDLE_MS) || 30000
   const MAX_SESSIONS = Number(process.env.SWB_LIVE_MAX_SESSIONS) || 16
   const PING_MS = Number(process.env.SWB_LIVE_PING_MS) || 15000
-  const MAX_CLIENTS = 32
+  // A page that cannot be served is cut off the oldest first: EventSource does not retry after a refusal, so refusing would strand a page for good.
+  const MAX_CLIENTS = 64
+  const REPLAY_BYTES = 6 * 1024 * 1024
   const startedAt = Date.now()
   const dir = (() => {
     try {
@@ -31,7 +33,7 @@ export function runHub({ port }) {
     }
   })()
 
-  const TRUSTED = (process.env.SWB_LIVE_HOSTS ?? '').split(',').map(one => one.trim().toLowerCase()).filter(Boolean)
+  const TRUSTED = trustedHosts()
   const HOSTS = new Set([`127.0.0.1:${port}`, `localhost:${port}`, ...TRUSTED.flatMap(name => [name, `${name}:80`, `${name}:443`])])
 
   /** @type {Map<string, any>} */
@@ -86,7 +88,7 @@ export function runHub({ port }) {
     }
     // A finished session's tab stays for a while so its last lines can still be read.
     for (const [id, own] of sessions) if (!own.alive && Date.now() - own.goneAt > 10 * 60 * 1000) sessions.delete(id)
-    const signature = JSON.stringify([...sessions.values()].map(own => [own.id, own.alive]))
+    const signature = JSON.stringify([...sessions.values()].map(own => [own.id, own.alive, own.reg.startedAt]))
     if (signature !== listSignature) {
       listSignature = signature
       const text = listText()
@@ -111,13 +113,17 @@ export function runHub({ port }) {
 
   const scanner = setInterval(look, 1000)
   const pumper = setInterval(() => {
-    for (const own of sessions.values()) if (own.alive || own.tail.recent.length === 0) own.tail.pump()
+    // Only a live session is read: a finished one's feed path may now belong to another session of the same project.
+    for (const own of sessions.values()) if (own.alive) own.tail.pump()
   }, 150)
   const pinger = setInterval(() => {
     for (const res of everyone) send(res, ': ping\n\n')
     for (const own of sessions.values()) for (const res of own.clients) send(res, ': ping\n\n')
   }, PING_MS)
 
+  const evict = set => {
+    if (set.size >= MAX_CLIENTS) set.values().next().value?.destroy()
+  }
   const stream = res => res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' })
 
   const server = createServer((req, res) => {
@@ -134,18 +140,23 @@ export function runHub({ port }) {
     const own = wanted !== null && ID_PATTERN.test(wanted) ? sessions.get(wanted) : undefined
     if (url.pathname === '/events') {
       if (url.searchParams.get('all') === '1') {
-        if (everyone.size >= MAX_CLIENTS) {
-          res.writeHead(503).end()
-          return
-        }
+        evict(everyone)
         stream(res)
         res.write(': connected\n\n')
         look()
         res.write(listText())
-        for (const one of [...sessions.values()].sort((a, b) => a.reg.startedAt - b.reg.startedAt)) {
-          one.tail.pump()
-          for (const line of one.tail.recent) res.write(frame(one.id, line))
+        const ordered = [...sessions.values()].sort((a, b) => a.reg.startedAt - b.reg.startedAt)
+        for (const one of ordered) {
+          if (one.alive) one.tail.pump()
+          // Every session gets an equal share of the replay, newest lines first, so one connection never queues more than the limit below.
+          const share = Math.floor(REPLAY_BYTES / ordered.length)
+          let used = 0
+          let from = one.tail.recent.length
+          while (from > 0 && used + one.tail.recent[from - 1].length <= share) used += one.tail.recent[--from].length
+          for (const line of one.tail.recent.slice(from)) res.write(frame(one.id, line))
         }
+        // The page counts only what arrives after this as new.
+        res.write('event: ready\ndata: {}\n\n')
         everyone.add(res)
         res.on('close', () => everyone.delete(res))
         return
@@ -154,9 +165,10 @@ export function runHub({ port }) {
         res.writeHead(404).end()
         return
       }
+      evict(own.clients)
       stream(res)
       res.write(': connected\n\n')
-      own.tail.pump()
+      if (own.alive) own.tail.pump()
       for (const line of own.tail.recent) res.write(`data: ${line}\n\n`)
       own.clients.add(res)
       res.on('close', () => own.clients.delete(res))
@@ -179,7 +191,7 @@ export function runHub({ port }) {
         res.end(JSON.stringify({ project: own.reg.project, feed: feedOf(own.reg.project), pid: process.pid, startedAt, linesRead: own.tail.linesRead, badLines: own.tail.badLines, kept: own.tail.recent.length, clients: own.clients.size }))
         return
       }
-      res.end(JSON.stringify({ hub: 'smartworkbench', v: HUB_VERSION, pid: process.pid, port, startedAt, registry: registryDir(port), host: hostname(), sessions: sessions.size, clients: everyone.size }))
+      res.end(JSON.stringify({ hub: 'smartworkbench', v: HUB_VERSION, pid: process.pid, port, startedAt, registry: registryDir(port), host: hostname(), hosts: TRUSTED, sessions: sessions.size, clients: everyone.size }))
       return
     }
     if (url.pathname === '/') {
