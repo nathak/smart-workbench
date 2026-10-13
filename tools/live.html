@@ -127,6 +127,12 @@ kbd{font-family:var(--mono);font-size:var(--fs-xs);border:1px solid var(--border
 nav.tabs{display:flex;gap:var(--sp-2);border-bottom:1px solid var(--border);margin-bottom:var(--sp-4);overflow-x:auto}
 nav.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:var(--sp-3) var(--sp-5);font-size:var(--fs-md);color:var(--fg-muted);min-height:36px;white-space:nowrap}
 nav.tabs button[aria-selected=true]{color:var(--fg);border-bottom-color:var(--focus);font-weight:600}
+nav.stabs[hidden]{display:none}
+nav.stabs{margin-bottom:var(--sp-2)}
+nav.stabs button.gone{opacity:.6;font-style:italic}
+nav.stabs button.sx{padding:var(--sp-3) var(--sp-2);margin-left:calc(-1 * var(--sp-2))}
+nav.stabs .sb{display:inline-block;margin-left:var(--sp-2);padding:0 6px;border-radius:9px;background:var(--border);color:var(--fg);font-size:var(--fs-sm)}
+nav.stabs .sb.ask{background:var(--warn,#b45309);color:#fff}
 .tabpanel[hidden]{display:none}
 .footer{margin-top:var(--sp-5);color:var(--fg-muted);font-size:var(--fs-sm);overflow-wrap:anywhere}
 .footer .r{margin-right:var(--sp-5)}
@@ -246,6 +252,7 @@ button:hover{color:var(--fg)}
     <button class="tile" id="ctx"><span class="k-l" data-i="k-ctx"></span><span class="k-v" id="ctx-t">–</span><span class="cbar"><i id="ctx-f"></i></span><span class="k-s" id="k-ctx-s"></span><span class="k-s" id="ctx-spark"></span></button>
     <button class="tile" id="k-tok"><span class="k-l" data-i="k-tok"></span><span class="k-v" id="k-tok-v">–</span><span class="k-s" id="k-tok-s"></span></button>
   </section>
+  <nav class="tabs stabs" role="tablist" id="stabs" aria-label="sessions" hidden></nav>
   <nav class="tabs" role="tablist" id="tabs" aria-label="views">
     <button role="tab" id="tab-timeline" aria-controls="p-timeline" data-tab="timeline"></button>
     <button role="tab" id="tab-guard" aria-controls="p-guard" data-tab="guard"></button>
@@ -638,19 +645,21 @@ function rebuild(list){
 function selKey(kind, id){ return kind + ':' + id; }
 function buildHash(st){
   var parts = [];
+  if (st.s) parts.push('s=' + encodeURIComponent(st.s));
   if (st.tab) parts.push('tab=' + encodeURIComponent(st.tab));
   if (st.sel) parts.push('sel=' + encodeURIComponent(st.sel));
   if (st.q) parts.push('q=' + encodeURIComponent(st.q));
   return parts.length ? '#' + parts.join('&') : '';
 }
 function parseHash(h){
-  var out = { tab: null, sel: null, q: '' };
+  var out = { tab: null, sel: null, q: '', s: null };
   String(h || '').replace(/^#/, '').split('&').forEach(function(part){
     var i = part.indexOf('=');
     if (i < 0) return;
     var key = part.slice(0, i), val;
     try { val = decodeURIComponent(part.slice(i + 1)); } catch (e) { return; }
-    if (key === 'tab' && /^[a-z]{1,12}$/.test(val)) out.tab = val;
+    if (key === 's' && /^[A-Za-z0-9_-]{1,64}$/.test(val)) out.s = val;
+    else if (key === 'tab' && /^[a-z]{1,12}$/.test(val)) out.tab = val;
     else if (key === 'sel' && /^(call|turn):.{1,200}$/.test(val)) out.sel = val;
     else if (key === 'q') out.q = val.slice(0, 300);
   });
@@ -1836,7 +1845,7 @@ function toggleSel(open){
   queueTl();
 }
 function syncHash(){
-  try { history.replaceState(null, '', buildHash({ tab: tab, sel: tab === 'timeline' ? tl.sel : null, q: tab === 'timeline' ? tlq.text : '' }) || '#'); } catch (e) {}
+  try { history.replaceState(null, '', buildHash({ s: hub ? curId : null, tab: tab, sel: tab === 'timeline' ? tl.sel : null, q: tab === 'timeline' ? tlq.text : '' }) || '#'); } catch (e) {}
 }
 function selectPre(btn){
   var pre = btn.closest('#dw-item').querySelector('pre');
@@ -2199,7 +2208,9 @@ setInterval(function(){ if (!replaying && !playback && !paused && !document.hidd
 var srv = null, srvBase = 0;
 function pollInfo(){
   if (typeof fetch !== 'function') return;
-  fetch('/info', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(info){ srv = info; drawSrv(); }).catch(function(){});
+  if (hub && !curId) return;
+  var asked = curId;
+  fetch(hub ? '/info?session=' + encodeURIComponent(curId) : '/info', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(info){ if (hub && asked !== curId) return; srv = info && !info.missing ? info : null; drawSrv(); }).catch(function(){});
 }
 function drawSrv(){
   var box = $('srv');
@@ -2259,9 +2270,10 @@ function translate(){
   $('theme').textContent = theme === 'dark' ? T('th-light') : T('th-dark');
   $('theme').title = L('switch theme', '테마 바꾸기');
   $('lang').setAttribute('aria-describedby', 'title');
-  [['tl', 'timeline', '타임라인'], ['mini', 'overview of the whole buffer: drag to zoom', '버퍼 전체 개요: 끌어서 확대'], ['tl-q', 'search', '검색'], ['tl-prev', 'previous match', '이전 일치'], ['tl-next', 'next match', '다음 일치'], ['tabs', 'views', '화면'], ['kpis', 'metrics', '지표'], ['helpb', 'help', '도움말'], ['drawer', 'details', '상세']].forEach(function(a){ $(a[0]).setAttribute('aria-label', L(a[1], a[2])); });
+  [['tl', 'timeline', '타임라인'], ['mini', 'overview of the whole buffer: drag to zoom', '버퍼 전체 개요: 끌어서 확대'], ['tl-q', 'search', '검색'], ['tl-prev', 'previous match', '이전 일치'], ['tl-next', 'next match', '다음 일치'], ['tabs', 'views', '화면'], ['stabs', 'sessions', '세션'], ['kpis', 'metrics', '지표'], ['helpb', 'help', '도움말'], ['drawer', 'details', '상세']].forEach(function(a){ $(a[0]).setAttribute('aria-label', L(a[1], a[2])); });
   Object.keys(edgeEl).forEach(function(id){ if (edgeEl[id].hitEl) edgeEl[id].hitEl.setAttribute('aria-label', edgeLabel(id)); });
   syncTools();
+  renderSessions();
   var down = es && es.readyState === 2;
   $('state').textContent = connected ? T('st-live') : down ? T('st-down') : everOpened ? T('st-reconnect') : T('st-wait');
   $('state').className = 'conn ' + (connected ? 'ok' : down ? 'bad' : 'warn');
@@ -2287,13 +2299,124 @@ $('lang').onclick = function(){
 };
 $('clear').onclick = function(){ events = []; pending = []; srvBase = srv ? srv.linesRead : 0; replay(); resetViews(); drawSrv(); };
 
-var connected = false, everOpened = false;
-var es = new EventSource('/events');
-es.onopen = function(){ srvBase = 0; setTimeout(pollInfo, 1500); if (everOpened) { events = []; pending = []; replay(); resetViews(); } connected = true; everOpened = true; translate(); };
-es.onerror = function(){ connected = false; translate(); };
-es.onmessage = function(m){
-  try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) { pageError('event', e); }
-};
+var connected = false, everOpened = false, es = null;
+// One page, many sessions: when the server is a hub, every session has its own buffer and a tab; the one shown is wired to the views above.
+var hub = false, CTX = Object.create(null), ORDER = [], curId = null, closedIds = Object.create(null), badgeTimer = 0;
+function ctxOf(id){
+  var c = CTX[id];
+  if (!c) { c = CTX[id] = { id: id, name: id, project: '', startedAt: 0, alive: true, events: [], pending: [], srv: null, srvBase: 0, badge: { n: 0, ask: 0 }, ui: { tab: null, sel: null, q: '' } }; }
+  return c;
+}
+function renderSessions(){
+  var bar = $('stabs');
+  bar.hidden = !hub;
+  if (!hub) return;
+  var keep = document.activeElement && document.activeElement.parentNode === bar ? document.activeElement.getAttribute('data-sid') : null;
+  while (bar.firstChild) bar.removeChild(bar.firstChild);
+  ORDER.forEach(function(id){
+    var c = CTX[id]; if (!c) return;
+    var on = id === curId;
+    var b = el('button', c.alive ? '' : 'gone');
+    b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; b.setAttribute('data-sid', id);
+    b.appendChild(el('span', 'sn', cut(c.name, 24)));
+    if (!on && c.badge.ask) b.appendChild(el('span', 'sb ask', String(c.badge.ask)));
+    else if (!on && c.badge.n) b.appendChild(el('span', 'sb', c.badge.n > 99 ? '99+' : String(c.badge.n)));
+    b.title = c.project + (c.alive ? '' : '\n' + L('this session has ended', '끝난 세션')) + (c.startedAt ? '\n' + L('started ', '시작 ') + clock(c.startedAt) : '');
+    b.onclick = function(){ switchTo(id); };
+    bar.appendChild(b);
+    if (!c.alive) {
+      var x = el('button', 'sx', '×'); x.setAttribute('data-sid', id);
+      x.title = L('close this ended session', '끝난 세션 닫기'); x.setAttribute('aria-label', x.title);
+      x.onclick = function(){ closeSession(id); };
+      bar.appendChild(x);
+    }
+  });
+  if (keep) { var again = bar.querySelector('button[data-sid="' + keep + '"]'); if (again) again.focus(); }
+}
+function queueBadges(){ if (!badgeTimer) badgeTimer = setTimeout(function(){ badgeTimer = 0; renderSessions(); }, 300); }
+function switchTo(id){
+  if (!CTX[id] || id === curId) return;
+  if (playback) endPlayback(true);
+  if (paused) setPaused(false);
+  var old = CTX[curId];
+  if (old) { old.events = events; old.pending = pending; old.srv = srv; old.srvBase = srvBase; old.ui = { tab: tab, sel: tl.sel, q: tlq.text }; }
+  curId = id;
+  var c = CTX[id];
+  events = c.events; pending = c.pending; srv = c.srv; srvBase = c.srvBase; c.badge = { n: 0, ask: 0 };
+  store('swb-session', id);
+  replay(); resetViews();
+  if (c.ui.sel) { tl.sel = c.ui.sel; tl.pendingReveal = c.ui.sel; }
+  setQuery(c.ui.q || '');
+  showTab(c.ui.tab || tab);
+  drawSrv(); pollInfo(); renderSessions();
+}
+function closeSession(id){
+  closedIds[id] = true;
+  var wasCurrent = id === curId;
+  delete CTX[id];
+  ORDER = ORDER.filter(function(one){ return one !== id; });
+  if (wasCurrent) {
+    curId = null;
+    var next = ORDER.filter(function(one){ return CTX[one].alive; })[0] || ORDER[0];
+    events = []; pending = []; srv = null;
+    if (next) switchTo(next); else { replay(); resetViews(); drawSrv(); }
+  }
+  renderSessions();
+}
+function onSessions(m){
+  try {
+    var data = JSON.parse(m.data);
+    var rows = data && Array.isArray(data.sessions) ? data.sessions : [];
+    var seen = Object.create(null);
+    rows.forEach(function(row){
+      if (!row || !/^[A-Za-z0-9_-]{1,64}$/.test(String(row.id)) || closedIds[row.id]) return;
+      seen[row.id] = true;
+      var c = ctxOf(row.id);
+      c.name = String(row.name || row.id); c.project = String(row.project || ''); c.startedAt = Number(row.startedAt) || 0; c.alive = !!row.alive;
+    });
+    Object.keys(CTX).forEach(function(id){ if (!seen[id] && id !== curId) delete CTX[id]; else if (!seen[id]) CTX[id].alive = false; });
+    ORDER = Object.keys(CTX).sort(function(a, b){ return CTX[a].startedAt - CTX[b].startedAt; });
+    if (!curId || !CTX[curId]) {
+      var want = parseHash(location.hash).s || stored('swb-session');
+      var first = (want && CTX[want]) ? want : ORDER.filter(function(one){ return CTX[one].alive; })[0] || ORDER[0];
+      if (first) { curId = null; events = []; pending = []; switchTo(first); }
+    }
+    renderSessions();
+  } catch (e) { pageError('sessions', e); }
+}
+function onHubLine(m){
+  try {
+    var f = JSON.parse(m.data), ev = f && f.e;
+    if (!f || !ev || typeof ev !== 'object' || !/^[A-Za-z0-9_-]{1,64}$/.test(String(f.s)) || closedIds[f.s]) return;
+    if (f.s === curId) { if (paused || playback) holdBack(ev); else take(ev); return; }
+    var c = ctxOf(f.s);
+    c.events.push(ev); if (c.events.length > 2000) c.events.shift();
+    c.badge.n++;
+    if ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block') c.badge.ask++;
+    queueBadges();
+  } catch (e) { pageError('event', e); }
+}
+function openStream(){
+  es = new EventSource(hub ? '/events?all=1' : '/events');
+  es.onopen = function(){
+    srvBase = 0; setTimeout(pollInfo, 1500);
+    if (hub) { Object.keys(CTX).forEach(function(id){ CTX[id].events = []; CTX[id].pending = []; CTX[id].srvBase = 0; }); }
+    if (everOpened) {
+      if (hub && CTX[curId]) { events = CTX[curId].events; pending = CTX[curId].pending; } else { events = []; pending = []; }
+      replay(); resetViews();
+    }
+    connected = true; everOpened = true; translate();
+  };
+  es.onerror = function(){ connected = false; translate(); };
+  if (hub) { es.addEventListener('sessions', onSessions); es.addEventListener('line', onHubLine); }
+  else es.onmessage = function(m){
+    try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) { pageError('event', e); }
+  };
+}
+window.addEventListener('hashchange', function(){ var w = parseHash(location.hash).s; if (hub && w && w !== curId && CTX[w]) switchTo(w); });
+if (typeof fetch === 'function') {
+  fetch('/info', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(info){ hub = !!(info && info.hub === 'smartworkbench'); }).catch(function(){}).then(openStream);
+} else openStream();
 pollInfo();
 flowBuild();
 uiBuild();

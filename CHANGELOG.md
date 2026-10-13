@@ -5,7 +5,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 ## [Unreleased]
 
 ### Added
-- `/swb live` without a port takes the next free port when another session's view holds 4317 (up to 20 further), so several sessions each get their own view; a named port must be free.
+- One live view for many sessions: sessions on the same port are tabs of one page (project name, badges for new events and for calls waiting on you, ended sessions greyed with a close button, `#s=<session>` in the address). A hub process of its own, started detached by the first session, serves them and ends about 30 s after the last one leaves; sessions register in `~/.claude/smartworkbench-live/<port>/`. Without a port, a port held by another program is skipped (up to 20 further). The hub reads only each project's own feed, never through a link, and ignores registrations that break its rules.
+- The live server's feed reading is shared code that opens a feed without following links, caps the replay buffer by bytes as well as by lines, and empties it through the opened handle.
 
 ### Security
 - A project guard file can only tighten the guard: the stricter of its profile and yours applies, protected checks (secret reads, Codex, remote scripts, MCP deploys) cannot be allowed by a rule, and a rule that asks is still asked under the permissive profile.

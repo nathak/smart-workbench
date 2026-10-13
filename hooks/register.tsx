@@ -960,7 +960,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
       await $.clock.sleep(300).catch(() => undefined)
     }
 
-    return { text: 'Live view stopped; the feed file is removed.' }
+    return { text: 'Left the live view; this session\'s feed file is removed. The view stays up while other sessions use it.' }
   }
   if (liveServer) {
     if (noPrompts) {
@@ -982,9 +982,10 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   feedMissed = 0
   isFeedNoted = false
   await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined, feedError: undefined }))
-  // With no port given, a port another session's view holds is skipped: every session gets its own view, on the next free port.
+  // All sessions on a port share one hub and are its tabs; with no port given, a port that something else holds is skipped.
+  const sessionId = (await read($, liveAtom)).sessionId
   let url = `http://127.0.0.1:${port}`
-  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--port', String(port), ...(isAuto ? ['--auto'] : []), '--watch-parent'] })
+  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.cwd(), '--join', ...(sessionId ? ['--session', sessionId] : []), '--port', String(port), ...(isAuto ? ['--auto'] : []), '--watch-parent'] })
   const iterator = child[Symbol.asyncIterator]()
   let output = ''
   const handle = { url, stop: () => void Promise.resolve(iterator.return?.()).catch(() => undefined) }
@@ -998,7 +999,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
           const step = await iterator.next()
           if (step.done) break
           output += step.value.text
-          const shown = /SmartWorkbench live: (http:\/\/127\.0\.0\.1:\d+)/.exec(output)
+          const shown = /SmartWorkbench live: (http:\/\/127\.0\.0\.1:\d+(?:\/#s=[A-Za-z0-9_-]{1,64})?)/.exec(output)
           if (!isSettled && shown) {
             url = shown[1] ?? url
             handle.url = url
@@ -1015,7 +1016,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     })()
   })
   // Windows can take a while to start node the first time (a virus scanner reads it), so the wait is generous.
-  const timeout = $.clock.sleep(10000).then(
+  const timeout = $.clock.sleep(15000).then(
     () => {
       isSettled = true
       return false
