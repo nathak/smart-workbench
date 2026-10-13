@@ -67,7 +67,7 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 va
 .chips{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
 .chip{display:inline-flex;gap:var(--sp-2);align-items:center;padding:0 var(--sp-3);border-radius:999px;background:var(--surface-2);border:1px solid var(--border-strong);color:var(--fg);font-family:var(--mono);font-size:var(--fs-xs);min-height:22px}
 mark{background:var(--warn-bg);color:var(--fg);outline:1px solid var(--warn);border-radius:2px}
-.trow.ctxrow{opacity:.62}
+.trow.ctxrow .nm .tx,.trow.ctxrow .tm{color:var(--fg-muted)}
 .trow.crit .nm .tx{font-weight:600}
 .trow.crit{box-shadow:inset -3px 0 0 var(--loop)}
 .mini{display:block;width:100%;height:48px;margin-bottom:var(--sp-3);background:var(--surface);border:1px solid var(--border);border-radius:6px;touch-action:none;cursor:crosshair}
@@ -434,11 +434,11 @@ function T(k){ var d = DICT[k]; return d ? d[lang === 'ko' ? 1 : 0] : k; }
 // Pure data model: no DOM, no language, no clock of its own. The feed goes in through ingest(); the views read the result.
 // Run in node by tools/live-check.mjs on synthetic events.
 var MODEL_MAX_SPANS = 4000;
-var STATUS = { ok: 'ok', error: 'error', blocked: 'blocked', declined: 'declined' };
+var STATUS = Object.assign(Object.create(null), { ok: 'ok', error: 'error', blocked: 'blocked', declined: 'declined' });
 function newTrace(){
   return { turns: [], spans: new Map(), byAgent: new Map(), pendingAsk: new Map(), attention: [], agentTok: Object.create(null),
     tok: Object.create(null), ctx: null, ctxHist: [], sessions: Object.create(null), missed: 0, loopPasses: 0, loopActive: false, activeMs: 0,
-    startAt: [], failAt: [], lastAt: 0, events: 0, order: 0 };
+    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0 };
 }
 function turnOf(tr, at, extra){
   var t = { n: tr.turns.length, at: at, end: null, aborted: false, text: '', origin: 'user', loop: false, spans: [], marks: [], warn: [], ctx: null, tokIn: 0, tokOut: 0, models: Object.create(null), early: !!(extra && extra.early) };
@@ -498,7 +498,7 @@ function ingest(tr, ev){
       tr.spans.set(id, sp);
       t.spans.push(sp);
       if (tr.spans.size > MODEL_MAX_SPANS) tr.spans.delete(tr.spans.keys().next().value);
-      if (sp.agent) { var list = tr.byAgent.get(sp.agent) || []; list.push(sp); tr.byAgent.set(sp.agent, list); linkAgent(tr, sp); }
+      if (sp.agent) { var list = tr.byAgent.get(sp.agent) || []; list.push(sp); tr.byAgent.set(sp.agent, list); if (tr.runOf.has(sp.agent)) { sp.parent = tr.runOf.get(sp.agent); sp.est = false; } else linkAgent(tr, sp); }
       tr.startAt.push(at);
       if (sp.policy === 'ask') tr.pendingAsk.set(id, at);
       break;
@@ -511,9 +511,10 @@ function ingest(tr, ev){
       tr.pendingAsk.delete(id);
       if (ev.agentRun) {
         sp.agentRun = String(ev.agentRun);
+        tr.runOf.set(sp.agentRun, sp.id);
         (tr.byAgent.get(sp.agentRun) || []).forEach(function(c){ c.parent = sp.id; c.est = false; });
       }
-      if (statusOf(sp) === 'error' || sp.outcome === 'blocked' || sp.outcome === 'declined') tr.failAt.push(at);
+      if (statusOf(sp) === 'error' || sp.outcome === 'blocked' || sp.outcome === 'declined') { tr.failAt.push(at); tr.failTotal++; }
       break;
     case 'guard.ask': case 'guard.block':
       sp = ev.id != null ? tr.spans.get(String(ev.id)) : null;
@@ -523,8 +524,10 @@ function ingest(tr, ev){
     case 'turn': case 'turn.agent':
       if (ev.kind === 'turn.agent') { if (ev.agent) addTok(tr.agentTok[ev.agent] || (tr.agentTok[ev.agent] = Object.create(null)), ev); addTok(tr.tok, ev); break; }
       t = tr.turns[tr.turns.length - 1];
-      if (!t || t.end !== null) t = turnOf(tr, at, { early: !t });
-      t.end = at; t.aborted = ev.aborted === true;
+      // A turn line that arrives after its turn was already closed (by the next prompt) only adds its numbers; it makes no turn of its own.
+      var closed = !!t && t.end !== null;
+      if (!t) t = turnOf(tr, at, { early: true });
+      if (!closed) { t.end = at; t.aborted = ev.aborted === true; }
       t.tokIn = typeof ev.tokensIn === 'number' ? ev.tokensIn : 0; t.tokOut = typeof ev.tokensOut === 'number' ? ev.tokensOut : 0;
       if (ev.model) addTok(t.models, ev);
       addTok(tr.tok, ev);
@@ -534,8 +537,7 @@ function ingest(tr, ev){
         t.ctx = tr.ctx.p;
         if (pct != null) { tr.ctxHist.push(tr.ctx.p); if (tr.ctxHist.length > 30) tr.ctxHist.shift(); }
       }
-      tr.activeMs += Math.max(0, at - t.at);
-      if (t.aborted) tr.failAt.push(at);
+      if (!closed) { tr.activeMs += Math.max(0, at - t.at); if (t.aborted) { tr.failAt.push(at); tr.failTotal++; } }
       break;
     case 'loop.start': tr.loopActive = true; tr.loopPasses = 0; mark(tr, at, ev); break;
     case 'loop.pass': tr.loopPasses = typeof ev.done === 'number' ? ev.done : tr.loopPasses + 1; mark(tr, at, ev); break;
@@ -596,6 +598,12 @@ function kpis(tr, now){
     ctx: tr.ctx, tokIn: tokIn, tokOut: tokOut,
     turns: tr.turns.filter(function(t){ return !t.early; }).length, activeMs: tr.activeMs, loopPasses: tr.loopPasses, agents: agents, spans: spans, events: tr.events
   };
+}
+// A fresh trace from the events the page still holds, so the model never outgrows the buffer.
+function rebuild(list){
+  var tr = newTrace();
+  list.forEach(function(ev){ try { ingest(tr, ev); } catch (e) {} });
+  return tr;
 }
 // A fixed key for a row, used in the address bar. Looked up in a Map only, never used as a selector.
 function selKey(kind, id){ return kind + ':' + id; }
@@ -725,7 +733,7 @@ function criticalPath(list, now){
   while (cur && guard++ < 5000) {
     out[cur.sp.id] = 1;
     var prev = null;
-    items.forEach(function(x){ if (x !== cur && x.e <= cur.s && (!prev || x.e > prev.e)) prev = x; });
+    items.forEach(function(x){ if (x !== cur && !out[x.sp.id] && x.e <= cur.s && (!prev || x.e > prev.e)) prev = x; });
     cur = prev;
   }
   return out;
@@ -758,7 +766,7 @@ function guardRows(tr, now){
   });
   return rows;
 }
-var RISK_RANK = { low: 0, medium: 1, high: 2 };
+var RISK_RANK = Object.assign(Object.create(null), { low: 0, medium: 1, high: 2 });
 function sortRows(rows, key, dir){
   var out = rows.slice();
   out.sort(function(a, b){
@@ -1070,6 +1078,8 @@ function reset(){
     edits: 0, shells: 0, reads: 0, turn: 0, events: 0, team: null, pass: null, userText: '', ctx: null, ctxHist: [], tok: plain({}), sessions: plain({}), missed: 0 };
   inflight = new Map();
   TR = newTrace();
+  said = { order: 0, fails: 0 };
+  if (typeof tl !== 'undefined') tl.seenOrder = 0;
   flowReset();
 }
 
@@ -1139,7 +1149,8 @@ function render(){
   if (events.length >= 2000) nt.appendChild(el('span', 'badge warn', L('⚠ older events cut (2000 kept)', '⚠ 오래된 이벤트 잘림 (2000개 유지)')));
   var bp = $('b-paused');
   bp.hidden = !paused && !playback;
-  bp.textContent = playback ? L('▶ replaying', '▶ 다시보기 중') : L('‖ paused', '‖ 일시정지') + (pending.length ? ' · +' + pending.length : '');
+  if (!pending.length) heldAsk = 0;
+  bp.textContent = playback ? L('▶ replaying', '▶ 다시보기 중') : L('‖ paused', '‖ 일시정지') + (pending.length ? ' · +' + pending.length : '') + (heldAsk ? ' · ⚠ ' + L(heldAsk + ' ask or block held', '확인·차단 ' + heldAsk + '건 대기') : '');
   showLast();
   queueKpi();
   var cx = S.ctx, lvl = ctxLevel(cx ? cx.p : null);
@@ -1239,7 +1250,7 @@ function handle(ev){
 }
 
 // ---- ui: pause, replay, speed, filters, and the detail drawer ----
-var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null;
+var paused = false, pending = [], playback = null, filters = {}, focus = null, lastTrigger = null, lastTriggerKey = null, heldAsk = 0;
 var FIELDS = ['kind', 'codex', 'codexBg', 'codexWrite', 'tool', 'summary', 'category', 'risk', 'policy', 'outcome', 'ms', 'reason', 'input', 'answer', 'agent', 'subagent', 'session', 'text', 'description', 'count', 'done', 'limit', 'id', 'promptLength', 'contextPercent', 'tokensIn', 'tokensOut', 'model', 'paths', 'skipped', 'missed', 'outputLength', 'agentRun'];
 function store(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
 function stored(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -1251,9 +1262,19 @@ function involves(path){
 }
 function passes(cls, path){ return (!filtering() || filters[cls]) && involves(path); }
 
-function take(ev){ events.push(ev); if (events.length > 2000) events.shift(); handle(ev); }
+function take(ev){
+  events.push(ev); if (events.length > 2000) events.shift();
+  handle(ev);
+  // The model follows the buffer: past twice its size it is rebuilt from the events still held.
+  if (TR.events > 4000) { TR = rebuild(events); said = { order: TR.order, fails: TR.failTotal }; resetViews(); queueView(); }
+}
 function quiet(list){ replaying = true; try { list.forEach(take); } finally { replaying = false; } render(); applyFilter(); queueView(); }
-function holdBack(ev){ pending.push(ev); if (pending.length > 2000) pending.shift(); syncTools(); }
+// While paused the tiles and tables stand still, but a call that waits on you or a block is still spoken and counted in the status bar.
+function holdBack(ev){
+  pending.push(ev); if (pending.length > 2000) pending.shift();
+  if ((ev.kind === 'tool.start' && ev.policy === 'ask') || ev.kind === 'guard.block') { heldAsk++; alertNow(ev); }
+  syncTools(); render();
+}
 
 function setPaused(on){
   paused = on;
@@ -1337,7 +1358,9 @@ function closeDrawer(){
   focus = null;
   $('drawer').hidden = true;
   applyFilter(); syncTools();
-  if (lastTrigger && lastTrigger.focus) lastTrigger.focus();
+  var back = lastTriggerKey ? tl.rows.filter(function(r){ return r.key === lastTriggerKey; })[0] : null;
+  if (back) back.el.focus({ preventScroll: true });
+  else if (lastTrigger && lastTrigger.focus) lastTrigger.focus();
 }
 function drawRefresh(){
   if (!focus) return;
@@ -1438,7 +1461,7 @@ function uiBuild(){
   });
   grid.addEventListener('pointerleave', function(){ tip.hidden = true; });
   $('dw-close').onclick = closeDrawer;
-  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !$('drawer').hidden) closeDrawer(); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !e.defaultPrevented && !$('help').open && !$('drawer').hidden) closeDrawer(); });
   $('pause').onclick = function(){ setPaused(!paused); };
   $('replay').onclick = function(){ if (playback) endPlayback(false); else startPlayback(Number($('replay-n').value) || 20); };
   $('speed').onclick = function(){ speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; store('swb-speed', String(speed)); syncTools(); };
@@ -1454,7 +1477,12 @@ function uiBuild(){
 
 // ---- timeline: turns as collapsible blocks of nested calls with a duration bar; one row per call ----
 var STATUS_ICON = { ok: '✓', error: '▲', blocked: '✕', declined: '⊘', running: '◐', bg: '→', ask: '?' };
-var tl = { turnOpen: {}, spanClosed: {}, sel: null, follow: true, failOnly: false, more: {}, seenOrder: 0, rows: [], byKey: new Map(), dirty: true, programmatic: false };
+var tl = { turnOpen: Object.create(null), spanClosed: Object.create(null), sel: null, follow: true, failOnly: false, more: Object.create(null), seenOrder: 0, rows: [], byKey: new Map(), dirty: true, setTop: 0, pendingReveal: null, openAfter: null, reveal: null };
+// Numbers of turns and ids of calls mean something else after the buffer is cleared or rebuilt, so what hung on them is dropped.
+function resetViews(){
+  tl.turnOpen = Object.create(null); tl.spanClosed = Object.create(null); tl.more = Object.create(null); tlq.runOpen = Object.create(null);
+  tl.seenOrder = TR ? TR.order : 0;
+}
 var tlQueued = false;
 function queueTl(){ tl.dirty = true; if (tab === 'timeline' && !tlQueued) { tlQueued = true; requestAnimationFrame(drawTimeline); } }
 var viewQueued = false;
@@ -1473,11 +1501,14 @@ function whoOf(sp){
 }
 function turnOpen(t, i, n){
   if (tl.turnOpen[t.n] !== undefined) return tl.turnOpen[t.n];
-  return i >= n - 3 || t.spans.some(isFail);
+  var auto = i >= n - 3 || t.spans.some(isFail);
+  // While you read an older turn, a new prompt must not fold the one you are in.
+  if (auto && !tl.follow) tl.turnOpen[t.n] = true;
+  return auto;
 }
 function stWord(st){ return T('s-' + st); }
 function stBadge(st){ return el('span', 'st ' + st, (STATUS_ICON[st] || '•') + ' ' + stWord(st)); }
-var tlq = { text: '', parsed: parseQuery(''), crit: false, range: null, hits: [], hitAt: -1, runOpen: {} };
+var tlq = { text: '', parsed: parseQuery(''), crit: false, range: null, hits: [], hitAt: -1, runOpen: Object.create(null) };
 function setQuery(text){
   tlq.text = text; tlq.parsed = parseQuery(text); tlq.hitAt = -1;
   tl.failOnly = tlq.parsed.tokens.indexOf('is:fail') >= 0;
@@ -1497,11 +1528,22 @@ function hl(node, text){
   if (at < text.length) node.appendChild(document.createTextNode(text.slice(at)));
   return node;
 }
+// Opens what hides a call: its turn, folded parents and the row budget.
+function revealPrep(sp){
+  tl.turnOpen[sp.turn] = true; tl.more[sp.turn] = 100000;
+  var pp = sp, g = 0;
+  while (pp && pp.parent && g++ < 20) { tl.spanClosed[pp.parent] = false; pp = TR.spans.get(pp.parent); }
+}
 function drawTimeline(){
   tlQueued = false;
   if (tab !== 'timeline') return;
   tl.dirty = false;
   var host = $('tl'), prevTop = host.scrollTop;
+  var ae = document.activeElement, hadFocus = host.contains(ae) && ae !== host, focusKey = hadFocus && ae.dataset ? ae.dataset.key : null;
+  if (tl.pendingReveal) {
+    var psp = TR.spans.get(String(tl.pendingReveal).replace(/^call:/, ''));
+    if (psp) { revealPrep(psp); tl.follow = false; tl.reveal = tl.pendingReveal; tl.openAfter = tl.pendingReveal; tl.pendingReveal = null; }
+  }
   host.textContent = '';
   tl.rows = []; tl.byKey = new Map(); tlq.hits = [];
   var turns = TR.turns, now = nowFor() || Date.now(), q = tlq.parsed, hiddenTurns = 0;
@@ -1530,7 +1572,7 @@ function drawTimeline(){
     var open = filtered ? true : turnOpen(t, ti, turns.length);
     var calls = t.spans.length, errs = t.spans.filter(isFail).length;
     var head = el('button', 'turnhead');
-    head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    head.setAttribute('aria-expanded', open ? 'true' : 'false'); head.setAttribute('role', 'treeitem'); head.setAttribute('aria-level', '1');
     head.appendChild(el('span', 'tt', (open ? '▾ ' : '▸ ') + (t.early ? L('before the first prompt', '첫 프롬프트 이전') : '#' + t.n)));
     if (!t.early) head.appendChild(el('span', 'tag ' + (t.loop ? 'loop' : ''), t.loop ? 'LOOP' : t.origin === 'plugin' ? 'PLUGIN' : 'PROMPT'));
     head.appendChild(hl(el('span', 'tx'), t.early ? L('(the start of the feed may have been cut)', '(피드의 앞부분이 잘렸을 수 있음)') : cut(t.text, 140)));
@@ -1551,7 +1593,7 @@ function drawTimeline(){
       var rk = selKey('call', sp.id), who = whoOf(sp), sub = kids[sp.id] || [];
       var isHit = filtered && hasQuery() && direct(sp);
       var row = el('button', 'trow' + (filtered && hasQuery() && !isHit ? ' ctxrow' : '') + (critSet && critSet[sp.id] ? ' crit' : ''));
-      row.setAttribute('role', 'treeitem'); row.setAttribute('aria-level', String(depth + 1)); row.setAttribute('aria-selected', tl.sel === rk ? 'true' : 'false');
+      row.setAttribute('role', 'treeitem'); row.setAttribute('aria-level', String(depth + 2)); row.setAttribute('aria-selected', tl.sel === rk ? 'true' : 'false');
       row.tabIndex = -1; row.dataset.key = rk;
       if (sub.length) row.setAttribute('aria-expanded', tl.spanClosed[sp.id] ? 'false' : 'true');
       var nm = el('span', 'nm'); nm.style.paddingLeft = depth * 16 + 'px';
@@ -1585,7 +1627,7 @@ function drawTimeline(){
         if (item.one) { addRow(item.one, depth, critSet); return; }
         var run = item.run, rid = run[0].id, shown = run.filter(function(sp){ return !filtered || keeps(sp); });
         if (!shown.length) return;
-        if (tlq.runOpen[rid]) { shown.forEach(function(sp){ addRow(sp, depth, critSet); }); return; }
+        if (tlq.runOpen[rid] || (filtered && hasQuery()) || run.some(function(sp){ var kk = selKey('call', sp.id); return kk === tl.sel || kk === tl.reveal; })) { shown.forEach(function(sp){ addRow(sp, depth, critSet); }); return; }
         var f = run.filter(isFail).length, total = run.reduce(function(a, sp){ return a + spanDur(sp, now); }, 0);
         var g = el('button', 'trow');
         var gn = el('span', 'nm'); gn.style.paddingLeft = depth * 16 + 'px';
@@ -1598,7 +1640,7 @@ function drawTimeline(){
         g.appendChild(gn);
         g.appendChild(el('span', 'wf'));
         g.appendChild(el('span', 'ms', fmtMs(total)));
-        g.setAttribute('aria-expanded', 'false');
+        g.setAttribute('aria-expanded', 'false'); g.setAttribute('role', 'treeitem'); g.setAttribute('aria-level', String(depth + 2));
         g.onclick = function(){ tlq.runOpen[rid] = true; queueTl(); };
         host.appendChild(g);
       });
@@ -1621,14 +1663,21 @@ function drawTimeline(){
     pill.onclick = function(){ setFollow(true); };
     host.appendChild(pill);
   }
-  tl.programmatic = true;
   host.scrollTop = tl.follow ? host.scrollHeight : prevTop;
-  setTimeout(function(){ tl.programmatic = false; }, 50);
+  tl.setTop = host.scrollTop;
   if (tl.reveal) {
     var target = tl.rows.filter(function(r){ return r.key === tl.reveal; })[0];
     tl.reveal = null;
-    if (target) { target.el.scrollIntoView({ block: 'center' }); target.el.focus({ preventScroll: true }); }
+    if (target) { target.el.scrollIntoView({ block: 'center' }); tl.setTop = host.scrollTop; target.el.focus({ preventScroll: true }); }
+    if (tl.openAfter) { var oa = tl.openAfter; tl.openAfter = null; openItem(oa); }
   }
+  // A redraw replaces every row; keyboard focus goes back to the selected one so j and k keep working while the stream runs.
+  if (hadFocus && !host.contains(document.activeElement)) {
+    var back = tl.rows.filter(function(r){ return r.key === (focusKey || tl.sel); })[0];
+    (back ? back.el : host).focus({ preventScroll: true });
+  }
+  // Everything directly under the tree is a tree item, so assistive technology reads one consistent structure.
+  Array.prototype.forEach.call(host.children, function(c){ if (!c.getAttribute('role')) { c.setAttribute('role', 'treeitem'); c.setAttribute('aria-level', '2'); } });
   $('tl-note').textContent = tl.sel && !tl.byKey.has(tl.sel) && tl.sel.indexOf('call:') === 0 ? L('the selected call is not in view or no longer in the buffer', '선택한 호출이 보이지 않거나 버퍼에 없습니다') : '';
   drawChips(); drawMini();
   syncTl();
@@ -1747,7 +1796,7 @@ function openItem(key){
   var tabs = el('div', 'dwtabs'); tabs.setAttribute('role', 'tablist');
   [['overview', L('Overview', '개요')], ['input', L('Input', '입력')], ['output', L('Output', '출력')], ['raw', 'Raw']].forEach(function(t){
     var b = el('button', null, t[1]); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', itemTab === t[0] ? 'true' : 'false');
-    b.onclick = function(){ itemTab = t[0]; openItem(key); };
+    b.onclick = function(){ itemTab = t[0]; openItem(key); var cur = $('dw-item').querySelector('[role=tab][aria-selected=true]'); if (cur) cur.focus(); };
     tabs.appendChild(b);
   });
   box.appendChild(tabs);
@@ -1783,7 +1832,7 @@ function openItem(key){
     box.appendChild(cr);
   }
   $('drawer').hidden = false;
-  if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('trow')) lastTrigger = document.activeElement;
+  if (document.activeElement && document.activeElement.dataset && document.activeElement.dataset.key) lastTriggerKey = document.activeElement.dataset.key;
 }
 var keysOff = stored('swb-keys') === 'off';
 var HELP_KEYS = [
@@ -1837,18 +1886,20 @@ function helpBuild(){
   });
 }
 // Screen readers hear a short summary every few seconds, not every call; a call that waits on you or a block is spoken at once.
-var said = { spans: 0, fails: 0 };
+var said = { order: 0, fails: 0 };
 function announce(){
   if (replaying || playback || document.hidden) return;
-  var K = kpis(TR, nowFor() || Date.now()), dn = K.spans - said.spans, df = K.fails - said.fails;
-  said.spans = K.spans; said.fails = K.fails;
+  var dn = TR.order - said.order, df = TR.failTotal - said.fails;
+  said.order = TR.order; said.fails = TR.failTotal;
   if (dn <= 0 && df <= 0) return;
   $('live-polite').textContent = L(Math.max(0, dn) + ' new calls' + (df > 0 ? ', ' + df + ' failed' : ''), '새 호출 ' + Math.max(0, dn) + '개' + (df > 0 ? ', 실패 ' + df + '개' : ''));
 }
 function alertNow(ev){
   if (replaying || playback || Date.now() - loadedAt < 1500 || (ev.at && Date.now() - ev.at > 15000)) return;
   var what = ev.kind === 'guard.block' ? L('Blocked: ', '차단됨: ') + cut(ev.input || ev.tool, 80) : L('Waiting for your answer in the terminal: ', '터미널에서 답을 기다리는 중: ') + cut(ev.summary || ev.tool, 80);
-  $('live-assertive').textContent = what;
+  // A sentence that repeats is spoken again only if the region is emptied first.
+  $('live-assertive').textContent = '';
+  setTimeout(function(){ $('live-assertive').textContent = what; }, 60);
 }
 setInterval(announce, 5000);
 function timelineBuild(){
@@ -1862,16 +1913,16 @@ function timelineBuild(){
   $('tl-q').addEventListener('input', function(){ setQuery($('tl-q').value); });
   $('tl-q').addEventListener('keydown', function(e){
     if (e.key === 'Enter') { e.preventDefault(); jumpHit(e.shiftKey ? -1 : 1); }
-    else if (e.key === 'Escape') { if ($('tl-q').value) setQuery(''); else $('tl-q').blur(); }
+    else if (e.key === 'Escape') { e.preventDefault(); if ($('tl-q').value) setQuery(''); else $('tl-q').blur(); }
   });
   $('tl-next').onclick = function(){ jumpHit(1); };
   $('tl-prev').onclick = function(){ jumpHit(-1); };
   miniBuild();
-  $('tl-expand').onclick = function(){ TR.turns.forEach(function(t){ tl.turnOpen[t.n] = true; }); tl.spanClosed = {}; queueTl(); };
+  $('tl-expand').onclick = function(){ TR.turns.forEach(function(t){ tl.turnOpen[t.n] = true; }); tl.spanClosed = Object.create(null); queueTl(); };
   $('tl-collapse').onclick = function(){ TR.turns.forEach(function(t){ tl.turnOpen[t.n] = false; }); queueTl(); };
   var host = $('tl');
   host.addEventListener('scroll', function(){
-    if (tl.programmatic) return;
+    if (Math.abs(host.scrollTop - tl.setTop) < 2) return;
     var bottom = host.scrollHeight - host.scrollTop - host.clientHeight < 40;
     if (!bottom && tl.follow) { tl.follow = false; tl.seenOrder = TR.order; syncTl(); }
     else if (bottom && !tl.follow) { tl.follow = true; syncTl(); queueTl(); }
@@ -1894,7 +1945,7 @@ function timelineBuild(){
     if (e.key === '/' && !keysOff && tab === 'timeline' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); $('tl-q').focus(); $('tl-q').select(); }
   });
   var h = parseHash(location.hash);
-  if (h.sel) tl.sel = h.sel;
+  if (h.sel) { tl.sel = h.sel; tl.pendingReveal = h.sel; }
   if (h.q) setQuery(h.q);
 }
 
@@ -1902,7 +1953,7 @@ function timelineBuild(){
 function gotoCall(key){
   var sp = TR.spans.get(String(key).replace(/^call:/, ''));
   if (!sp) return;
-  tl.turnOpen[sp.turn] = true; tlq.range = null; tl.sel = key; tl.follow = false; tl.reveal = key;
+  revealPrep(sp); tlq.range = null; tl.sel = key; tl.follow = false; tl.reveal = key;
   setQuery('');
   showTab('timeline');
   openItem(key);
@@ -2043,11 +2094,11 @@ function drawKpis(){
   kpiQueued = false;
   var K = kpis(TR, nowFor() || Date.now());
   $('k-calls-v').textContent = K.callsPerMin;
-  $('k-calls-s').textContent = L(K.spans + ' calls in view', '화면 내 호출 ' + K.spans + '개');
+  $('k-calls-s').textContent = L(K.spans + ' calls in the buffer', '버퍼 내 호출 ' + K.spans + '개');
   spark($('k-calls-sp'), K.callSpark);
   $('k-lat-v').textContent = K.latN ? fmtMs(K.p50) + ' · ' + fmtMs(K.p95) : '–';
   $('k-lat-s').textContent = L('p50 · p95 of ' + K.latN + ' calls', K.latN + '개 호출의 p50 · p95');
-  $('k-lat').title = L('Excludes asks (they wait on a person), blocked calls, Agent and Workflow calls (they only start a run) and calls still running.', '확인을 기다린 호출, 차단된 호출, Agent·Workflow 호출(실행을 시작만 함), 진행 중인 호출은 뺍니다.');
+  $('k-lat').title = L('Excludes asks (they wait on a person), blocked or declined calls, Agent and Workflow calls and Codex background runs (they only start something), calls of zero length and calls still running.', '확인을 기다린 호출, 차단·거절된 호출, Agent·Workflow 호출과 Codex 백그라운드 실행(시작만 함), 길이 0인 호출, 진행 중인 호출은 뺍니다.');
   $('k-fail-v').textContent = (K.fails ? '▲ ' : '') + K.fails;
   $('k-fail-s').textContent = L('blocked ' + K.blocked + ' · errors ' + K.errors + ' · aborted ' + K.aborted, '차단 ' + K.blocked + ' · 오류 ' + K.errors + ' · 중단 ' + K.aborted);
   $('k-fail').className = 'tile' + (K.fails ? ' bad' : '');
@@ -2126,11 +2177,11 @@ $('lang').onclick = function(){
   try { localStorage.setItem('swb-lang', lang); } catch (e) {}
   replay();
 };
-$('clear').onclick = function(){ events = []; pending = []; replay(); };
+$('clear').onclick = function(){ events = []; pending = []; replay(); resetViews(); };
 
 var connected = false, everOpened = false;
 var es = new EventSource('/events');
-es.onopen = function(){ if (everOpened) { events = []; pending = []; replay(); } connected = true; everOpened = true; translate(); };
+es.onopen = function(){ if (everOpened) { events = []; pending = []; replay(); resetViews(); } connected = true; everOpened = true; translate(); };
 es.onerror = function(){ connected = false; translate(); };
 es.onmessage = function(m){
   try { var ev = JSON.parse(m.data); if (!ev || typeof ev !== 'object') return; if (paused || playback) holdBack(ev); else take(ev); } catch (e) {}

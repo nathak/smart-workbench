@@ -221,7 +221,7 @@ for (const theme of ['dark', 'light']) {
 
 // ---- the data model: pure, so it runs here on synthetic events ----
 const modelCode = page.slice(page.indexOf('// model:begin'), page.indexOf('// model:end'))
-const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf, decisionOf, guardRows, sortRows, groupRows, guardStats, attention, kindStats }`)()
+const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf, decisionOf, guardRows, sortRows, groupRows, guardStats, attention, kindStats, rebuild }`)()
 const feedOf = list => { const tr = M.newTrace(); let at = 1000; for (const ev of list) { at += 100; M.ingest(tr, { at, ...ev }) } return tr }
 const tr1 = feedOf([
   { kind: 'tool.start', id: 'x0', tool: 'Read', policy: 'allow' }, { kind: 'tool.end', id: 'x0', outcome: 'ok', ms: 30 },
@@ -335,5 +335,23 @@ check(page.includes('<dialog id="help"') && page.includes('id="keys-off"') && pa
 check((page.match(/aria-live="assertive"/g) ?? []).length === 1 && (page.match(/aria-live="polite"/g) ?? []).length === 1, 'exactly one polite and one assertive live region, the assertive one only for asks and blocks')
 check(page.includes("aria-busy") && page.includes('prefers-reduced-motion'), 'the timeline is marked busy while rebuilding and motion respects the system setting')
 check(page.includes("e.key === '?'") && page.includes("keysOff"), 'shortcuts are bound to keys and can be switched off')
+
+const trBg = feedOf([
+  { kind: 'prompt', text: 'p' },
+  { kind: 'tool.start', id: 'A', tool: 'Agent' }, { kind: 'tool.end', id: 'A', outcome: 'ok', ms: 5, agentRun: 'bg1' },
+  { kind: 'tool.start', id: 'B', tool: 'Agent' },
+  { kind: 'tool.start', id: 'late', tool: 'Read', agent: 'bg1' },
+])
+check(trBg.spans.get('late').parent === 'A' && trBg.spans.get('late').est === false, 'a subagent call that arrives after its Agent call ended is attached to it, not guessed onto another open Agent call')
+const same = Array.from({ length: 40 }, (_, i) => ({ id: 'z' + i, at: 100, end: 100 }))
+const t1 = Date.now()
+check(Object.keys(M.criticalPath(same, 100)).length <= 40 && Date.now() - t1 < 100, 'calls that start and end at the same moment do not make the critical path loop')
+const trG = feedOf([{ kind: 'prompt', text: 'a' }, { kind: 'turn', aborted: false }, { kind: 'turn', aborted: false, tokensIn: 5, model: 'claude-x' }, { kind: 'prompt', text: 'b' }])
+check(trG.turns.length === 2 && trG.activeMs > 0, 'a second turn line after a turn closed adds no empty turn')
+const trF = feedOf([{ kind: 'prompt', text: 'p' }, { kind: 'tool.start', id: 'f1', tool: 'Bash' }, { kind: 'tool.end', id: 'f1', outcome: 'error', ms: 1 }, { kind: 'turn', aborted: true }])
+check(trF.failTotal === 2, 'failures are counted for the screen reader summary whatever the buffer holds')
+const rb = M.rebuild([{ at: 1, kind: 'prompt', text: 'x' }, { at: 2, kind: 'tool.start', id: 'r', tool: 'Read' }, null, { at: 3, kind: 'tool.end', id: 'r', outcome: 'ok', ms: 1 }])
+check(rb.turns.length === 1 && rb.spans.size === 1 && rb.events === 3, 'a rebuilt trace comes from the events given and survives a bad entry')
+check(tr1.spans.get('__proto__') === undefined && M.statusOf({ end: 1, outcome: 'constructor', workflowBg: false }) === 'ok', 'an outcome or id named like an object property is just text')
 
 process.exit(failed === 0 ? 0 : 1)
