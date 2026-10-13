@@ -43,7 +43,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 
 ### Commands
 
-`/swb` is the short alias of `/smartworkbench`; `/workbench` is a deprecated alias kept for now. An unknown argument prints the command list.
+`/swb` is the short alias of `/smartworkbench`; `/workbench` is a deprecated alias kept for now. An unknown argument prints the command list, which names every command below.
 
 | Command | Summary |
 |---|---|
@@ -51,7 +51,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb new` | Start a new task contract |
 | `/swb lock` · `/swb unlock` | Lock or unlock the contract |
 | `/swb team [on\|off]` | Team mode: Opus designs and reviews, Sonnet builds, Haiku explores; opens the Team tab |
-| `/swb live [port\|stop] [--no-prompts]` | Start or stop the live web view of the request flow |
+| `/swb live [port\|stop\|off] [--no-prompts]` | Start or stop (`stop` or `off`) the live web view of the request flow |
 | `/swb loop <count\|inf> <item>[; <item>...]` · `stop` · `status` | Repeat a task; see *Loop* |
 | `/swb team <role> <model> [effort]` | Set a role's model and effort (`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Ask the Opus advisor now |
@@ -107,7 +107,7 @@ Writes a Markdown handoff for the next session or developer, by default to `.cla
 - `/swb policy init`: writes an example file when none exists, then shows it. Edit and commit it to share the rules with the team (see *Project guard file*).
 
 #### `/swb ci`
-Asks the local `gh` CLI for the GitHub Actions runs of the current commit (`git rev-parse HEAD`) and records the latest run of each workflow as `ci` evidence: success counts as passed, failure/cancelled/timed out as failed, a running workflow as observed. While code changes are uncommitted, CI did not test what is on disk, so every result counts only as observed. Running the command again updates the same run's record. Link a done condition to `ci` (conditions mentioning CI are linked automatically). The Evidence tab's `Check CI` button (hotkey `c`) does the same. This is the only feature that reaches the network, and only when you run it.
+Asks the local `gh` CLI for the GitHub Actions runs of the current commit (`git rev-parse HEAD`) and records the latest run of each workflow as `ci` evidence: success counts as passed, failure/cancelled/timed out as failed, a running workflow as observed. While code changes are uncommitted, CI did not test what is on disk, so every result counts only as observed. Running the command again updates the same run's record. Link a done condition to `ci` (conditions mentioning CI are linked automatically). The Evidence tab's `Check CI` button (hotkey `c`) does the same. Besides `/swb issue` with a GitHub reference, this is the only feature that reaches the network, and only when you run it.
 
 #### `/swb issue <ref>`
 Links the task to an issue; it becomes part of the contract (`<issue>`) and the handoff.
@@ -163,7 +163,7 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
 - `/swb team on` switches the session model to Sonnet (the same setting `/model` changes; `/swb team off` puts the previous model back) and adds a short role brief to every prompt. Opus then steps in by itself:
   - **Design first**: before a big edit (more than 6 lines or 400 characters, a second file, a bulk replace, or more than 15 lines of small edits in a turn) the edit is sent back once until the advisor has produced a `DESIGN` (`APPROACH / FILES / STEPS / RISKS / DONE`) in this turn. Small edits and files outside the project pass. A loop pass and the turn after an approved plan keep the design they already have; every other turn asks again. It is asked once per turn, so a lead that ignores it is not stuck, and the audit log records `team.design-required`.
   - **Plan from the design**: `ExitPlanMode` is sent back until the advisor has worked on the plan in this turn; the plan presented is its design.
-  - **Repeated error**: when the same command fails twice in a row, its result tells Claude to consult the advisor with the error output and what it tried (once per command until it does).
+  - **Repeated error**: when the same command fails twice with no pass of it in between (the count carries across turns until it passes), its result tells Claude to consult the advisor with the error output and what it tried (once per command until it does).
   - **Final check**: a turn that changed code is held once at the end until the advisor has looked at it; if Claude finishes anyway, the next stop goes through.
 - `/swb advise [topic]` asks the advisor any time. The Run tab shows team mode and the number of Opus reviews; the band shows `Team`; the audit log records `team.*` events.
 - Haiku here is Haiku 4.5, the current Haiku model.
@@ -174,7 +174,7 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
 - Cross-review: when a turn changed code, the lead runs one read-only `codex-companion review --wait` before the advisor's final check, and gives the findings to the advisor, which decides what to fix. One review per turn; none during `/swb loop` passes. Rescue: after a repeated error the lead may ask Codex one read-only `task`. Codex output is treated as data to verify, not instructions, and the Stop check never requires it, so a Codex failure cannot trap the turn.
 - The Guard asks before any Codex review or task unless you turned the matching switch on; `--write` tasks and `transfer` (sends the session transcript) are asked every time in the forms the Guard recognises, even under `permissive` or a project rule that loosens them, and have no "Allow for session". The unasked review and rescue apply only to a plain `node <plugin script> <op> [--wait|--background] ["text"]` command; anything chained or redirected goes to the Guard. Rescue is one task per turn. Codex's own edits do not pass the guard, so SmartWorkbench offers no general write setting.
 - Image generation needs no switch: with Codex on, a plain `task --write "<what to draw>; save it as assets/<name>.png ..."` runs without asking when the brief names an image and one output file under `assets/`, `images/`, `public/` or `static/`. Codex's imagegen tool makes the picture; its path is only as binding as the brief, since Codex's own writes do not pass the guard. Any other `--write` still asks. After an image run SmartWorkbench compares `git status` before and after and warns (toast, flag in the live view, audit line) when a file outside those picture paths changed; the comparison covers each changed path's size and modification time, so a further edit to a file that was already modified is seen too. It never reverts anything and skips background runs.
-- The live view shows a Codex box and link; The counts are runs of the command, not passes. Background jobs are shown as "state not tracked here".
+- The live view shows a Codex box and link. The counts are runs of the command, not passes. Background jobs are shown as "state not tracked here".
 
 **Team tab** (hotkey `5`, or `/swb team`): turn team mode on or off and pick each role's model and effort from drop-downs. Remote or keyboard: `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`. Each choice is an alias and the list shows the version it usually stands for (`opus (claude-opus-5-5)`); Claude Code decides what an alias resolves to, so the hint can lag behind a newer model.
 
@@ -226,26 +226,26 @@ Watch a request flow in a browser: prompts, tool calls and guard decisions, suba
 - `/swb live [port]` starts the server as a child of the session and prints its address (default `http://127.0.0.1:4317`); open it in a browser. `/swb live stop` ends it, and it also ends with the session. To run it yourself: `node <plugin folder>/tools/live.mjs [project] [--port 4317]`.
 - The server creates `.claude/smartworkbench-live.jsonl` in the project; while it exists the plugin appends one JSON line per event and the server streams it to the page (SSE). The server empties the file in place once it has read past 8 MB. Stopping the server removes the file and the writes stop. With no server, the plugin only checks that the file exists.
 - The page shows the context use (a gauge for the lead's last turn with a short history; subagents are not measured by the engine) and the tokens per model. Click a box or a link to see the prompts that crossed it (your prompt, loop prompts, the brief given to the advisor or an explorer, the text of a Codex task) and the results that came back from a subagent, newest first, and click one to read it whole. A subagent's result is its last answer of the run, shown on the end of the Agent call that started it. The feed keeps up to 2000 characters of each prompt with secrets masked (key and token names, well-known token formats, URL credentials, private keys; a heuristic, so a bare pasted token can slip through). `/swb live --no-prompts` keeps only the first 120 characters of a prompt and no subagent result. Anyone who can open the page, including through a reverse proxy named in `SWB_LIVE_HOSTS`, sees these prompts.
-- The server listens on `127.0.0.1` only. The feed holds the start of each prompt and command summaries, so do not commit it.
+- The server listens on `127.0.0.1` only. The feed holds prompts (up to 2000 characters, secrets masked) and command summaries, so do not commit it.
 - The page is in English by default. The `한국어` / `EN` button in the top right switches it (remembered in the browser); `http://127.0.0.1:4317/?lang=ko` opens it in Korean.
-- A `Workflow` call (Claude Code's script-driven multi-agent tool) is drawn like an unnamed subagent call: lead → guard → dispatcher. The log row shows its name and description and the script (for an inline script) with its args as the input (masked, up to 2000 characters; `--no-prompts` keeps the name and description only). The name and description are read from the script's text without running it, so they say what the script claims, not what it does. `ok` on the row means the run **started** in the background; when it ends, or whether it succeeded, is not tracked here. Whether the agents inside a workflow pass through SmartWorkbench's hooks depends on Claude Code: if they do, they show as ordinary subagent calls (`sub:xxxx`) without saying which workflow they belong to, and the guard sees them; if not, they are not shown and not guarded. A workflow started by a subagent counts as a subagent call. The guard treats the `Workflow` call itself as low risk and does not read the script.
+- A `Workflow` call (Claude Code's script-driven multi-agent tool) is drawn like an unnamed subagent call: lead → guard → dispatcher. The log row shows its name and description and the script (for an inline script) with its args as the input (masked, up to 2000 characters; `--no-prompts` keeps the name and description only). The name and description are read from the script's text without running it, so they say what the script claims, not what it does. The row ends with `→ started` (an `ok` of the call itself): the run **started** in the background; when it ends, or whether it succeeded, is not tracked here. Whether the agents inside a workflow pass through SmartWorkbench's hooks depends on Claude Code: if they do, they show as ordinary subagent calls (`sub:xxxx`) without saying which workflow they belong to, and the guard sees them; if not, they are not shown and not guarded. A workflow started by a subagent counts as a subagent call. The guard treats the `Workflow` call itself as low risk and does not read the script.
 - **Status bar and tiles** (always on top): connection (`● live`, `◌ reconnecting`, `✕ disconnected`), when the last event came, `‖ paused` and how many events wait, the session, and notes about gaps (several sessions mixed, events not written to the feed, the oldest events cut at 2000). The project folder the server watches is shown beside the session (hover for the feed path, the server's start time and how many lines it has read); if the server has read many more lines than the page received, a `⚠ the server read N lines, this page has M` note appears. Starting `/swb live` empties the feed, so a restart or `/reload-plugins` drops everything recorded before it. Six tiles follow: calls per minute, tool latency (p50 · p95), blocks + errors, asks waiting, context window and tokens in / out. The latency leaves out calls that wait on a person (asks), blocked or declined calls, Agent and Workflow calls and Codex background runs (they only start something), calls of zero length and calls still running; the input token count includes the cache. Blocks + errors opens the Timeline on failures, asks waiting opens the Guard tab.
 - **Timeline** (the default tab): each prompt starts a turn, a collapsible block of calls with a duration bar, a status (`✓ ok`, `▲ error`, `✕ blocked`, `⊘ declined`, `? asking`, `◐ running`, `→ started`), the guard's ask or block, and subagent calls nested under the Agent call that started them (a guess, marked as such, while only one Agent call is open; settled when the call ends). An overview strip above it shows every turn, failures and asks; drag across it to zoom. Search words: `word`, `"two words"`, `-word`, `tool:Bash`, `policy:`, `outcome:`, `risk:`, `category:`, `agent:`, `subagent:`, `ms:>500`, `turn:3`, `is:fail|ask|running|slow|bg|block`; every word must match, matches are highlighted, `n` / `N` step through them, and each condition is a chip you can remove. `◆ critical path` marks the chain that decided when a group of calls ended. Three or more of the same call in a row fold into one line; a turn with repeated calls or three failures carries a note. New calls follow the bottom until you scroll up (then a `N new ↓` pill appears). A call opens in the drawer with Overview, Input, Output and Raw; the address (`#tab=timeline&sel=call:<id>&q=…`) selects the same call and query in another tab.
 - **Guard**: what needs a person (asks waiting longest first, holds, a Codex write outside the image folders, a repeated error, events not written), decisions by category, and a sortable table of decisions that can be filtered and grouped. The page cannot answer an ask; answer it in the terminal.
 - **Agents**: subagents by kind (runs, average and p95 time, calls, failures, tokens), each run as a tree, Workflow calls (started only; the end is not reported) and Codex runs.
 - **Flow**: the picture of boxes and links described below. Its toolbar (and the `p` key) pauses the stream: the tiles and tables stand still and events wait until you resume, but a call that waits on you or a block is still spoken and counted in the status bar (`⚠ 1 ask or block held`). The page keeps the last 2000 events; the model behind it is rebuilt from them when it grows past 4000, so what you see never reaches back further than that.
-- **Keys**: `?` lists them: `1`–`4` tabs, `j` / `k` rows, `Enter` details, `/` search, `n` / `N`, `e` failures only, `f` follow, `z` zoom to a turn, `g` / `G`, `p` pause, `t` theme, `Esc`. Single-key shortcuts can be turned off there, and do nothing while you type. The theme follows the system (the `light` / `dark` button overrides it); text and controls meet WCAG contrast, status is never colour alone, and a screen reader hears a short summary every few seconds, with a call that waits for you or a block spoken at once.
+- **Keys**: `?` lists them. `1`–`4` (tabs), `e`, `g` / `G`, `p`, `t` and `/` work anywhere on the page; `j` / `k` (rows), `n` / `N`, `f`, `z` and `Enter` work while the Timeline list has the focus. In short: `1`–`4` tabs, `j` / `k` rows, `Enter` details, `/` search, `n` / `N`, `e` failures only, `f` follow, `z` zoom to a turn, `g` / `G`, `p` pause, `t` theme, `Esc`. Single-key shortcuts can be turned off there, and do nothing while you type. The theme follows the system (the `light` / `dark` button overrides it); text and controls meet WCAG contrast, status is never colour alone, and a screen reader hears a short summary every few seconds, with a call that waits for you or a block spoken at once.
 - What the feed does not carry, so the page cannot show it: the id that links a subagent's call to the Agent call that started it (only guessed or settled afterwards), the output of ordinary tools (only an Agent call's answer), the reason for an ask until it is answered, how long the guard took, a Workflow's end and its inner calls' owner, cost (no price in the feed), and the context use of subagents.
 - Panels of the Flow tab: Opus advisor, user prompt, Sonnet lead, guard decisions (allow / ask / block bars), Haiku dispatcher, worker / explorer / loop.
 - Data flow (Flow tab): each event moves as a dot along the links between the boxes (prompt: user → lead; tool call: lead → guard → worker / dispatcher / Opus; an `ask` waits at the guard until you answer; a finished call walks back; a block returns from the guard in red). Every link shows how many dots crossed it. Subagent calls are attributed to Opus or the explorer by a guess, since the feed carries no parent link.
-- Interaction (Flow tab): click or tap a box or a link for a drawer with what moved through it (tap a row for its fields); hover for a one-line tip. Toolbar: pause / resume (events wait and are applied on resume), replay the last 20 / 50 / 200 events at their real pace, speed 0.5×–4×, motion on / off (also off with the system's reduced-motion setting), and outcome filters. Feed text is always shown as text, never as markup.
+- Interaction (Flow tab): click or tap a box or a link for a drawer with what moved through it (tap a row for its fields); hover for a one-line tip. Toolbar: pause / resume (events wait and are applied on resume), replay the last 20 / 50 / 200 events at their recorded pace (each gap held between 0.1 and 1.5 seconds), speed 0.5×–4×, motion on / off (also off with the system's reduced-motion setting), and outcome filters. Feed text is always shown as text, never as markup.
 - The page serves other Host names only when you list them in the `SWB_LIVE_HOSTS` environment variable (comma separated), for example behind a reverse proxy. Details below.
 
 ![Live view](docs/live-view.png)
 
 #### `SWB_LIVE_HOSTS`: opening the live view under another host name
 
-**What it is.** The live server listens on `127.0.0.1` only, and before it answers any request (the page and the `/events` stream) it compares the request's `Host` header with a list of names it trusts. A request whose `Host` is not on the list gets an empty `403`. This is a defence against DNS rebinding: a web page on another site can make its own host name point at `127.0.0.1` and then read your feed, which holds prompts and commands, from your browser. `SWB_LIVE_HOSTS` adds names to that list.
+**What it is.** The live server listens on `127.0.0.1` only, and before it answers any request (the page, the `/events` stream and `/info`) it compares the request's `Host` header with a list of names it trusts. A request whose `Host` is not on the list gets an empty `403`. This is a defence against DNS rebinding: a web page on another site can make its own host name point at `127.0.0.1` and then read your feed, which holds prompts and commands, from your browser. `SWB_LIVE_HOSTS` adds names to that list.
 
 **What is accepted without it.** Only `127.0.0.1:<port>` and `localhost:<port>`, where `<port>` is the port the server was started on (4317 by default). `http://127.0.0.1:4317/` works; `http://[::1]:4317/` and `http://192.168.0.5:4317/` do not (the server is not even bound to those addresses).
 
@@ -287,7 +287,7 @@ The server already sends `X-Accel-Buffering: no` and a `: ping` comment every 15
 **If it does not work.**
 
 - `403` on the page: the `Host` the browser sent is not on the list. Check it with `curl -s -o /dev/null -w "%{http_code}\n" -H "Host: live.example.com" http://127.0.0.1:4317/` on the machine (`200` once listed).
-- The page loads but stays `● waiting` or shows no events: the proxy is buffering or closing the stream (see the nginx settings), or the plugin cannot write the feed (look for the "live feed cannot be written" notice and `/swb live`).
+- The page loads but stays `◌ connecting` or shows no events: the proxy is buffering or closing the stream (see the nginx settings), or the plugin cannot write the feed (look for the "live feed cannot be written" notice and `/swb live`).
 - Nothing changed after setting the variable: the server was started before it was set, or Claude Code was started from a shell that did not have it. Restart Claude Code and the live view.
 
 ### Project guard file
@@ -345,6 +345,7 @@ Measured in a live session (Claude Code 2.1.295), the mod's own work per event: 
 | `SWB_LIVE_HOSTS` | live server | Extra `Host` names it answers, comma separated: a host name, with `:port` only for a non-standard port; no scheme or path (see *Live view*) |
 | `SWB_LIVE_PING_MS` | live server | Milliseconds between the keep-alive comments on the event stream (default 15000) |
 | `CLAUDE_CONFIG_DIR` | plugin | Where the installed plugin list is read from when looking for the Codex plugin |
+| `HOME` | plugin | Read (with `printenv`) only when the plugin's own path does not show where Claude Code's plugins live, for the same lookup |
 
 **Files the plugin writes** (all inside the project, under `.claude/`)
 
@@ -374,7 +375,7 @@ See [docs/PERMISSIONS.md](docs/PERMISSIONS.md) for the full list of hooks, calls
 
 - No network requests of its own, no extra model calls, no telemetry. `/swb ci` and `/swb issue #n` run the local `gh` CLI only when you call them.
 - State is kept in `$.store` per project (working directory) and restored on restart; state saved by an earlier version is filled in on load. Templates and context sets are kept across projects. Live pin contents, environment variables and the conversation are not stored. History is capped at 100 tool calls and 200 evidence records.
-- Local commands run with argument lists: `git diff -U0 HEAD` at turn end, `git rev-parse --abbrev-ref HEAD` for `/swb new`, `git config user.name` when audit is on, and `git`/`gh` for `/swb ci` and `/swb issue`. Files are written only for the handoff, `policy init`, `share` and the audit log the guard file turns on.
+- Local commands run with argument lists (the full list is in [docs/PERMISSIONS.md](docs/PERMISSIONS.md)): `git diff` at turn end, `git rev-parse` for `/swb new`, `git config user.name` when audit is on, `git`/`gh` for `/swb ci` and `/swb issue`, and `tee`, `node` and `printenv` for the live feed and the Codex lookup. Files are written only for the handoff, `policy init`, `share`, the audit log the guard file turns on, and the live feed while `/swb live` runs.
 - `claude plugin validate .` lists every hook and call the mod uses.
 
 ### Development
@@ -404,6 +405,7 @@ docs/                permissions, live view screenshot
 ```bash
 claude plugin validate .
 claude plugin test .
+node tools/live-check.mjs   # live server and page smoke test (not part of the command above)
 claude --plugin-dir .      # start a session with this folder loaded
 npx tsc -p .               # type-check; needs .claude-plugin/types/, which Claude Code writes when it loads the mod
 ```
@@ -419,7 +421,7 @@ Developed on Claude Code 2.1.292 and checked in a live terminal session on 2.1.2
 ## 한국어
 
 Claude에게 맡긴 작업의 **목표(Intent)·맥락(Context)·실행(Run)·검증(Evidence)** 을 Claude Code 안에서 직접 보고 통제하는 Mod입니다.
-기획서: NAS `claude-mods/smart-workbench/smartworkbench-prd.md` (v0.1). P0(최초 공개 버전), P1(제품성 강화), P2(팀 기능)를 구현했고 실제 터미널 세션에서 확인했습니다.
+제품 기획서(v0.1)를 기준으로, P0(최초 공개 버전), P1(제품성 강화), P2(팀 기능)를 구현했고 실제 터미널 세션에서 확인했습니다.
 [샘플 프로젝트](examples/sample-project/README.md)로 바로 써 볼 수 있고, 설치 전 [권한 문서](docs/PERMISSIONS.md)에서 Mod가 하는 일을 확인할 수 있습니다.
 
 ### 설치
@@ -463,7 +465,7 @@ claude plugin update smartworkbench
 | `/swb new` | 새 작업 계약 시작 |
 | `/swb lock` · `/swb unlock` | 계약 잠금·해제 |
 | `/swb team [on\|off]` | 팀 모드: Opus 설계·검토, Sonnet 구축, Haiku 탐색. Team 탭 열기 |
-| `/swb live [포트\|stop] [--no-prompts]` | 요청 흐름 실시간 웹 화면 시작·종료 |
+| `/swb live [포트\|stop\|off] [--no-prompts]` | 요청 흐름 실시간 웹 화면 시작·종료(`stop`·`off`) |
 | `/swb loop <횟수\|inf> <항목>[; <항목>...]` · `stop` · `status` | 작업 반복. *루프* 참고 |
 | `/swb team <role> <model> [effort]` | 역할별 모델·effort 지정(`lead`, `explorer`, `advisor`) |
 | `/swb advise [topic]` | Opus 조언자에게 바로 묻기 |
@@ -519,7 +521,7 @@ SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍�
 - `/swb policy init`: 파일이 없을 때 예시 파일을 만들고 내용을 보여 줍니다. 고쳐서 커밋하면 팀이 같은 규칙을 씁니다(아래 *프로젝트 Guard 파일* 참고).
 
 #### `/swb ci`
-로컬 `gh` CLI로 현재 커밋(`git rev-parse HEAD`)의 GitHub Actions 실행을 조회해, 워크플로마다 가장 최근 실행을 `ci` 증거로 기록합니다. 성공은 통과, 실패·취소·시간 초과는 실패, 실행 중은 observed입니다. 커밋되지 않은 코드 변경이 있으면 CI가 지금 디스크의 코드를 검사한 것이 아니므로 모든 결과를 observed로만 칩니다. 다시 실행하면 같은 실행의 기록을 갱신합니다. 완료 조건을 `ci`에 연결하세요(CI를 언급한 조건은 자동 연결). Evidence 탭의 `Check CI` 버튼(단축키 `c`)도 같습니다. 네트워크를 쓰는 유일한 기능이며, 직접 실행할 때만 동작합니다.
+로컬 `gh` CLI로 현재 커밋(`git rev-parse HEAD`)의 GitHub Actions 실행을 조회해, 워크플로마다 가장 최근 실행을 `ci` 증거로 기록합니다. 성공은 통과, 실패·취소·시간 초과는 실패, 실행 중은 observed입니다. 커밋되지 않은 코드 변경이 있으면 CI가 지금 디스크의 코드를 검사한 것이 아니므로 모든 결과를 observed로만 칩니다. 다시 실행하면 같은 실행의 기록을 갱신합니다. 완료 조건을 `ci`에 연결하세요(CI를 언급한 조건은 자동 연결). Evidence 탭의 `Check CI` 버튼(단축키 `c`)도 같습니다. GitHub 이슈를 지정한 `/swb issue`와 함께 네트워크를 쓰는 유일한 기능이며, 직접 실행할 때만 동작합니다.
 
 #### `/swb issue <ref>`
 작업에 이슈를 연결합니다. 이슈는 계약(`<issue>`)과 handoff에 들어갑니다.
@@ -575,7 +577,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - `/swb team on`은 세션 모델을 Sonnet으로 바꾸고(`/model`과 같은 설정. `/swb team off`가 이전 모델로 되돌림), 매 프롬프트에 짧은 역할 안내를 붙입니다. 그다음 Opus가 스스로 개입합니다.
   - **설계 먼저**: 큰 수정(6줄 또는 400자 초과, 두 번째 파일, 일괄 치환, 한 턴에 작은 수정이 15줄 초과) 전에 advisor가 이번 턴에 `DESIGN`(`APPROACH / FILES / STEPS / RISKS / DONE`)을 내놓기 전까지 수정을 한 번 돌려보냅니다. 작은 수정과 프로젝트 밖 파일은 통과합니다. 루프 회차와 계획 승인 직후의 턴은 이미 가진 설계를 그대로 쓰고, 그 밖의 턴은 다시 요구합니다. 턴마다 한 번만 요구하므로 무시해도 막히지 않고, 감사 로그에 `team.design-required`가 남습니다.
   - **설계에서 계획으로**: 이번 턴에 advisor가 계획을 다루기 전까지 `ExitPlanMode`를 돌려보냅니다. 제시하는 계획이 곧 그 설계입니다.
-  - **반복 오류**: 같은 명령이 연속 2번 실패하면, 그 결과에 오류 출력과 시도한 내용을 들고 advisor와 상의하라는 안내를 붙입니다(명령마다 상의할 때까지 한 번).
+  - **반복 오류**: 같은 명령이 그 사이 성공 없이 2번 실패하면(횟수는 성공할 때까지 턴을 넘어 이어짐), 그 결과에 오류 출력과 시도한 내용을 들고 advisor와 상의하라는 안내를 붙입니다(명령마다 상의할 때까지 한 번).
   - **마무리 점검**: 코드를 고친 턴은 advisor가 본 뒤에 끝나도록 마지막에 한 번 붙잡습니다. 그래도 끝내면 다음 종료는 통과합니다.
 - `/swb advise [주제]`로 언제든 물을 수 있습니다. Run 탭에 팀 모드와 Opus 검토 횟수가, 밴드에 `Team`이, 감사 로그에 `team.*` 사건이 남습니다.
 - 여기서 Haiku는 현재 Haiku 모델인 Haiku 4.5입니다.
@@ -640,17 +642,17 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - 화면에는 컨텍스트 사용량(리드의 마지막 턴 기준 게이지와 짧은 추이, 서브에이전트는 엔진이 측정하지 않음)과 모델별 토큰이 보입니다. 박스나 링크를 누르면 그곳을 지난 프롬프트(내 입력, 루프 프롬프트, 조언자·탐색 담당에게 준 브리프, Codex 작업 문구)와 서브에이전트가 돌려준 결과가 최신순으로 나오고, 하나를 누르면 전문을 읽을 수 있습니다. 서브에이전트의 결과는 그 실행의 마지막 답변이며, 그것을 시작한 Agent 호출의 종료 줄에 붙어 나옵니다. 피드에는 프롬프트를 한 건당 2000자까지, 비밀을 가려서 저장합니다(키·토큰 이름, 알려진 토큰 형식, URL 속 계정 정보, 개인 키. 휴리스틱이라 접두사 없이 붙여 넣은 토큰은 새어 나갈 수 있습니다). `/swb live --no-prompts`를 쓰면 프롬프트는 앞 120자만 남고 서브에이전트 결과는 기록하지 않습니다. `SWB_LIVE_HOSTS`로 연 리버스 프록시를 포함해 이 페이지를 열 수 있는 사람은 이 프롬프트를 볼 수 있습니다.
 - 서버는 `127.0.0.1` 에만 열립니다. 피드에는 프롬프트(2000자까지, 비밀은 가림)와 명령 요약이 들어 있으므로 커밋하지 마세요.
 - 화면은 기본이 영어입니다. 오른쪽 위의 `한국어` / `EN` 버튼으로 바꾸고(브라우저에 기억됨), `http://127.0.0.1:4317/?lang=ko` 로 열면 처음부터 한글입니다.
-- `Workflow` 호출(Claude Code의 스크립트 기반 다중 에이전트 도구)은 이름 없는 서브에이전트 호출처럼 리드 → 가드 → 디스패처로 그려집니다. 로그 행에는 이름과 설명, 입력으로 인라인 스크립트와 인자가 나옵니다(비밀은 가림, 2000자까지, `--no-prompts`면 이름과 설명만). 이름과 설명은 스크립트를 실행하지 않고 글에서 읽은 값이라 스크립트가 주장하는 내용이며 실제 동작과 다를 수 있습니다. 행의 `ok`는 백그라운드에서 **시작됐다**는 뜻이고, 언제 끝났는지, 성공했는지는 여기서 추적하지 않습니다. 워크플로 안의 에이전트가 SmartWorkbench 훅을 거치는지는 Claude Code에 달려 있습니다. 거치면 어느 워크플로 소속인지 표시되지 않은 일반 서브에이전트 호출(`sub:xxxx`)로 나오고 가드도 받으며, 거치지 않으면 보이지도 가드를 받지도 않습니다. 서브에이전트가 시작한 워크플로는 서브에이전트 호출로 셉니다. 가드는 `Workflow` 호출 자체를 저위험으로 보고 스크립트 내용은 검사하지 않습니다.
+- `Workflow` 호출(Claude Code의 스크립트 기반 다중 에이전트 도구)은 이름 없는 서브에이전트 호출처럼 리드 → 가드 → 디스패처로 그려집니다. 로그 행에는 이름과 설명, 입력으로 인라인 스크립트와 인자가 나옵니다(비밀은 가림, 2000자까지, `--no-prompts`면 이름과 설명만). 이름과 설명은 스크립트를 실행하지 않고 글에서 읽은 값이라 스크립트가 주장하는 내용이며 실제 동작과 다를 수 있습니다. 행은 `→ 시작됨`으로 끝나며, 이는 백그라운드에서 **시작됐다**는 뜻이고, 언제 끝났는지, 성공했는지는 여기서 추적하지 않습니다. 워크플로 안의 에이전트가 SmartWorkbench 훅을 거치는지는 Claude Code에 달려 있습니다. 거치면 어느 워크플로 소속인지 표시되지 않은 일반 서브에이전트 호출(`sub:xxxx`)로 나오고 가드도 받으며, 거치지 않으면 보이지도 가드를 받지도 않습니다. 서브에이전트가 시작한 워크플로는 서브에이전트 호출로 셉니다. 가드는 `Workflow` 호출 자체를 저위험으로 보고 스크립트 내용은 검사하지 않습니다.
 - **상태 표시줄과 타일**(항상 맨 위): 연결 상태(`● 연결됨`, `◌ 다시 연결 중`, `✕ 끊김`), 마지막 이벤트가 온 시각, `‖ 일시정지`와 대기 중인 이벤트 수, 세션, 데이터 공백 알림(여러 세션이 섞임, 피드에 기록되지 못한 이벤트, 2000개를 넘어 잘린 앞부분). 서버가 보는 프로젝트 폴더가 세션 옆에 나오고(올리면 피드 경로, 서버 시작 시각, 읽은 줄 수), 서버가 읽은 줄이 화면이 받은 것보다 훨씬 많으면 `⚠ 서버는 N줄을 읽었는데 화면에는 M개` 알림이 뜹니다. `/swb live`를 시작하면 피드가 비워지므로, 재시작이나 `/reload-plugins` 때는 그 전에 기록된 것이 사라집니다. 그 아래 타일 여섯 개: 분당 호출, 도구 지연(p50 · p95), 차단 + 오류, 확인 대기, 컨텍스트 창, 토큰 입력 / 출력. 지연에서는 사람을 기다린 호출(ask), 차단·거절된 호출, Agent·Workflow 호출과 Codex 백그라운드 실행(시작만 함), 길이 0인 호출, 아직 실행 중인 호출을 뺍니다. 입력 토큰에는 캐시가 포함됩니다. 차단 + 오류는 타임라인을 실패 보기로 열고, 확인 대기는 가드 탭을 엽니다.
 - **타임라인**(기본 탭): 프롬프트마다 턴이 시작되고, 턴은 접을 수 있는 호출 묶음입니다. 호출마다 길이 막대와 상태(`✓ 완료`, `▲ 오류`, `✕ 차단`, `⊘ 거절`, `? 확인 중`, `◐ 실행 중`, `→ 시작됨`), 가드의 확인·차단, 그리고 서브에이전트 호출이 그것을 시작한 Agent 호출 아래에 들여써서 나옵니다(Agent 호출이 하나만 열려 있는 동안은 추정이라고 표시하고, 호출이 끝나면 확정). 위의 개요 띠는 모든 턴과 실패·확인을 보여 주며, 가로로 끌면 그 구간을 확대합니다. 검색어: `단어`, `"두 단어"`, `-단어`, `tool:Bash`, `policy:`, `outcome:`, `risk:`, `category:`, `agent:`, `subagent:`, `ms:>500`, `turn:3`, `is:fail|ask|running|slow|bg|block`. 모든 단어가 일치해야 하고, 일치한 글자는 강조되며, `n` / `N`으로 이동하고, 조건은 칩으로 나와 눌러서 뺄 수 있습니다. `◆ 임계 경로`는 한 묶음의 호출이 언제 끝날지 결정한 연쇄를 표시합니다. 같은 호출이 3번 이상 이어지면 한 줄로 접히고, 반복 호출이나 실패 3개가 있는 턴에는 알림이 붙습니다. 새 호출은 스크롤을 올리기 전까지 맨 아래를 따라가고, 올리면 `새 호출 N개 ↓` 알약이 뜹니다. 호출을 누르면 서랍에 개요·입력·출력·Raw가 열리고, 주소(`#tab=timeline&sel=call:<id>&q=…`)로 다른 탭에서도 같은 호출과 검색어가 선택됩니다.
 - **가드**: 사람이 봐야 할 것(오래 기다린 확인부터, 보류, 이미지 폴더 밖 Codex 쓰기, 반복된 오류, 기록되지 못한 이벤트), 범주별 판정, 정렬·필터·묶기가 되는 판정 표. 페이지에서는 확인에 답할 수 없으니 터미널에서 답하세요.
 - **에이전트**: 종류별 서브에이전트(실행 수, 평균·p95 시간, 호출, 실패, 토큰), 실행별 트리, Workflow 호출(시작만 보고되고 끝은 알 수 없음), Codex 실행.
 - **흐름**: 아래에 설명한 박스와 연결선 그림. 툴바(와 `p` 키)의 일시정지는 타일과 표를 멈추고 이벤트를 재개 때까지 붙잡아 두지만, 사용자를 기다리는 호출이나 차단은 계속 읽어 주고 상태 표시줄에 `⚠ 확인·차단 1건 대기`로 셉니다. 화면은 최근 2000개 이벤트만 유지하며, 뒤의 모델은 4000개를 넘으면 그 이벤트로 다시 만들어지므로 그보다 먼 과거는 보이지 않습니다.
-- **키보드**: `?`로 목록을 봅니다. `1`–`4` 탭, `j` / `k` 행, `Enter` 상세, `/` 검색, `n` / `N`, `e` 실패만, `f` 따라가기, `z` 턴 확대, `g` / `G`, `p` 일시정지, `t` 테마, `Esc`. 한 글자 단축키는 거기서 끌 수 있고 입력창에 쓰는 동안에는 동작하지 않습니다. 테마는 시스템을 따르고(`밝게` / `어둡게` 버튼으로 바꿈), 글자와 컨트롤은 WCAG 명도 대비를 지키며, 상태는 색만으로 구분하지 않고, 화면 낭독기는 몇 초마다 짧은 요약을 듣고 사용자를 기다리는 호출이나 차단은 바로 읽어 줍니다.
+- **키보드**: `?`로 목록을 봅니다. `1`–`4`(탭), `e`, `g` / `G`, `p`, `t`, `/`는 화면 어디서나, `j` / `k`(행), `n` / `N`, `f`, `z`, `Enter`는 타임라인 목록에 포커스가 있을 때 동작합니다. 정리하면 `1`–`4` 탭, `j` / `k` 행, `Enter` 상세, `/` 검색, `n` / `N`, `e` 실패만, `f` 따라가기, `z` 턴 확대, `g` / `G`, `p` 일시정지, `t` 테마, `Esc`. 한 글자 단축키는 거기서 끌 수 있고 입력창에 쓰는 동안에는 동작하지 않습니다. 테마는 시스템을 따르고(`밝게` / `어둡게` 버튼으로 바꿈), 글자와 컨트롤은 WCAG 명도 대비를 지키며, 상태는 색만으로 구분하지 않고, 화면 낭독기는 몇 초마다 짧은 요약을 듣고 사용자를 기다리는 호출이나 차단은 바로 읽어 줍니다.
 - 피드에 없어서 화면에도 없는 것: 서브에이전트 호출과 그것을 시작한 Agent 호출을 잇는 id(추정하거나 끝난 뒤에 확정), 일반 도구의 출력(Agent 답변만 있음), 확인에 답하기 전의 이유, 가드 판정에 걸린 시간, Workflow의 끝과 그 안의 호출의 소속, 비용(피드에 단가가 없음), 서브에이전트의 컨텍스트 사용량.
 - 흐름 탭의 패널: Opus 조언자, 사용자 프롬프트, Sonnet 리드, 가드 판정(allow / ask / block 막대), Haiku 디스패처, worker / explorer / loop.
 - 데이터 흐름(흐름 탭): 이벤트마다 박스 사이 연결선을 따라 점이 움직입니다(프롬프트: 사용자 → 리드, 도구 호출: 리드 → 가드 → worker / 디스패처 / Opus, `ask`는 답할 때까지 가드에서 대기, 끝난 호출은 온 길로 되돌아가고, 차단은 가드에서 빨갛게 돌아옵니다). 연결선마다 지나간 횟수가 표시됩니다. 서브에이전트 호출은 피드에 부모 정보가 없어 Opus인지 explorer인지 추정해서 표시합니다.
-- 상호작용(흐름 탭): 박스나 연결선을 클릭(터치)하면 지나간 내용을 담은 서랍이 열리고(행을 누르면 필드 표시), 마우스를 올리면 한 줄 안내가 뜹니다. 툴바: 일시정지/재개(멈춘 동안 온 이벤트는 재개할 때 반영), 최근 20/50/200개를 실제 간격대로 다시보기, 속도 0.5×~4×, 모션 켬/끔(시스템의 동작 줄이기 설정이면 자동으로 꺼짐), 결과별 필터. 피드의 글자는 항상 글자로만 표시되고 마크업으로 해석되지 않습니다.
+- 상호작용(흐름 탭): 박스나 연결선을 클릭(터치)하면 지나간 내용을 담은 서랍이 열리고(행을 누르면 필드 표시), 마우스를 올리면 한 줄 안내가 뜹니다. 툴바: 일시정지/재개(멈춘 동안 온 이벤트는 재개할 때 반영), 최근 20/50/200개를 기록된 간격대로(간격은 0.1~1.5초로 제한) 다시보기, 속도 0.5×~4×, 모션 켬/끔(시스템의 동작 줄이기 설정이면 자동으로 꺼짐), 결과별 필터. 피드의 글자는 항상 글자로만 표시되고 마크업으로 해석되지 않습니다.
 - 다른 Host 이름은 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분)에 적은 것만 받습니다. 리버스 프록시 뒤에서 쓸 때 설정하세요. 자세한 설명은 아래에 있습니다.
 
 ![실시간 보기](docs/live-view.png)
@@ -699,7 +701,7 @@ location / {
 **동작하지 않을 때.**
 
 - 페이지가 `403`: 브라우저가 보낸 `Host`가 목록에 없습니다. 그 머신에서 `curl -s -o /dev/null -w "%{http_code}\n" -H "Host: live.example.com" http://127.0.0.1:4317/`로 확인하세요(목록에 있으면 `200`).
-- 페이지는 열리는데 `● 대기`에서 멈추거나 이벤트가 안 옴: 프록시가 스트림을 버퍼링하거나 닫고 있거나(위 nginx 설정), 플러그인이 피드를 기록하지 못하는 경우입니다("live feed cannot be written" 알림과 `/swb live`를 보세요).
+- 페이지는 열리는데 `◌ 연결 중`에서 멈추거나 이벤트가 안 옴: 프록시가 스트림을 버퍼링하거나 닫고 있거나(위 nginx 설정), 플러그인이 피드를 기록하지 못하는 경우입니다("live feed cannot be written" 알림과 `/swb live`를 보세요).
 - 변수를 설정했는데 그대로: 서버가 설정 전에 떠 있었거나, 변수가 없는 셸에서 Claude Code를 띄운 것입니다. Claude Code와 실시간 보기를 다시 시작하세요.
 
 ### 프로젝트 Guard 파일
@@ -757,6 +759,7 @@ location / {
 | `SWB_LIVE_HOSTS` | 실시간 서버 | 추가로 받을 `Host` 이름. 쉼표 구분, 호스트 이름을 적고 표준이 아닌 포트일 때만 `:포트`를 붙입니다. `http://`와 경로는 쓰지 않습니다(*실시간 보기* 참고) |
 | `SWB_LIVE_PING_MS` | 실시간 서버 | 이벤트 스트림 유지용 주석을 보내는 간격(밀리초, 기본 15000) |
 | `CLAUDE_CONFIG_DIR` | 플러그인 | Codex 플러그인을 찾을 때 설치 목록을 읽는 위치 |
+| `HOME` | 플러그인 | 같은 탐색에서, 플러그인 자신의 경로로 Claude Code의 플러그인 위치를 알 수 없을 때만 `printenv`로 읽음 |
 
 **플러그인이 쓰는 파일** (모두 프로젝트의 `.claude/` 아래)
 
@@ -786,7 +789,7 @@ hook, 호출, 파일, 명령의 전체 목록은 [docs/PERMISSIONS.md](docs/PERM
 
 - 자체 네트워크 요청 없음, 모델 추가 호출 없음, 텔레메트리 없음. `/swb ci`와 `/swb issue #n`만 직접 실행할 때 로컬 `gh` CLI를 씁니다.
 - 상태는 `$.store`에 프로젝트(작업 디렉터리)별로 저장되어 재시작 후 복원됩니다. 이전 버전에서 저장한 상태도 새 필드를 채워 그대로 읽습니다. 템플릿과 Context set은 프로젝트와 무관하게 저장됩니다. Live Pin 파일 내용, 환경 변수, 대화 기록은 저장하지 않습니다. 툴 기록 100개, 증거 200개로 제한합니다.
-- 로컬 명령은 모두 인자 배열로 실행합니다. 턴 종료 시 `git diff -U0 HEAD`, `/swb new`에서 `git rev-parse --abbrev-ref HEAD`, 감사 로그가 켜져 있으면 `git config user.name`, `/swb ci`·`/swb issue`에서 `git`/`gh`. 파일 쓰기는 handoff, `policy init`, `share`, 그리고 Guard 파일이 켠 감사 로그뿐입니다.
+- 로컬 명령은 모두 인자 배열로 실행합니다(전체 목록은 [docs/PERMISSIONS.md](docs/PERMISSIONS.md)). 턴 종료 시 `git diff`, `/swb new`에서 `git rev-parse`, 감사 로그가 켜져 있으면 `git config user.name`, `/swb ci`·`/swb issue`에서 `git`/`gh`, 실시간 피드와 Codex 탐색에서 `tee`·`node`·`printenv`. 파일 쓰기는 handoff, `policy init`, `share`, Guard 파일이 켠 감사 로그, 그리고 `/swb live`가 도는 동안의 실시간 피드뿐입니다.
 - 사용하는 hook과 호출 목록은 `claude plugin validate .`로 확인할 수 있습니다.
 
 ### 개발
@@ -816,6 +819,7 @@ docs/                권한 문서, 실시간 보기 스크린샷
 ```bash
 claude plugin validate .
 claude plugin test .
+node tools/live-check.mjs   # 실시간 서버·페이지 점검(위 명령에는 포함되지 않음)
 claude --plugin-dir .      # 이 폴더를 불러와 세션 실행
 npx tsc -p .               # 타입 검사. Claude Code가 Mod를 불러올 때 만드는 .claude-plugin/types/가 필요
 ```

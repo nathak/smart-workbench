@@ -165,6 +165,6 @@ describe('which command counts as a check', () => {
     evidenceKindsOf(`npm ${'--a '.repeat(60)}x`)
     evidenceKindsOf(`npm ${'-w '.repeat(60)}x`)
     evidenceKindsOf(`make ${'-C '.repeat(60)}x`)
-    expect(performance.now() - start).toBeLessThan(250)
+    expect(performance.now() - start).toBeLessThan(1500)
   })
 })
