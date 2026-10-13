@@ -274,6 +274,8 @@ describe('risk rules', () => {
     expect(decide(applyRule(classify('Read', { file_path: '.env' }), rules[0]), 'off', false)).toBe('ask')
     expect(decide(applyRule(force, rules[1]), 'off', false)).toBe('ask')
     expect(decide(classify('Edit', { file_path: '.claude/smartworkbench.json' }), 'off', false)).toBe('ask')
+    // A rule that allows editing the guard file does not.
+    expect(decide(applyRule(classify('Edit', { file_path: '.claude/smartworkbench.json' }), { path: '.claude/smartworkbench.json', policy: 'allow' }), 'off', false)).toBe('ask')
     expect(effectiveProfile('off', 'strict')).toBe('strict')
     expect(effectiveProfile('strict', 'permissive')).toBe('strict')
     expect(effectiveProfile('off', undefined)).toBe('off')
