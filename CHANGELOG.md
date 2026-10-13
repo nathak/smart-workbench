@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-13
+
 ### Fixed
 - Live view: calls that follow a finished turn with no new prompt (a background agent finished, a hook resumed the session) start a resumed turn instead of piling into the old one, and a turn with too many calls draws the newest ones with the earlier ones behind a button, so recent advisor and subagent calls are no longer hidden at the far end of a long turn.
 - Live view: the server answers `/info` (project, feed path, start time, lines read) and the page shows the project beside the session and warns when the server read many more lines than the page received.
