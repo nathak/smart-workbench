@@ -879,7 +879,7 @@ test('/swb live reports why the server did not start', async ($, on) => {
 
 test('the live feed appends through tee with the line on stdin, and only while the feed file exists', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
-  world(on, { files: { '.claude/smartworkbench-live.jsonl': '' }, commands: { [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } }, processed: writes })
+  world(on, { files: { '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' }, commands: { [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } }, processed: writes })
   on('prompt.submit', ($, e) => ({ text: e.text }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the login', ...COMPOSER })
@@ -895,7 +895,7 @@ test('the live feed falls back to node when tee is missing or fails, as on Windo
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   const FEED = `${CWD}/.claude/smartworkbench-live.jsonl`
   world(on, {
-    files: { '.claude/smartworkbench-live.jsonl': '' },
+    files: { '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' },
     commands: {
       [`tee -a ${FEED}`]: { exitCode: 127, stdout: '' },
       [`node -e require('fs').appendFileSync(process.argv[1], require('fs').readFileSync(0)) ${FEED}`]: { exitCode: 0, stdout: '' },
@@ -915,7 +915,7 @@ test('the live feed falls back to node when tee is missing or fails, as on Windo
   expect(writes.filter(one => one.argv[0] === 'tee').length).toBe(1)
 })
 
-const FEED_FILES = { '.claude/smartworkbench-live.jsonl': '' }
+const FEED_FILES = { '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' }
 const FEED_RUNS = { [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } }
 const feedLines = (writes: Array<{ argv: string[]; stdin?: string }>) => writes.filter(one => one.argv[0] === 'tee').map(one => JSON.parse(one.stdin ?? '{}') as Record<string, unknown>)
 
@@ -1236,7 +1236,7 @@ test('the live feed stays untouched when no server keeps the feed file', async (
 
 test('the live feed pairs every started call with an end, a blocked one too, and times the finished ones', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
-  world(on, { files: { '.claude/smartworkbench-live.jsonl': '' }, commands: { [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } }, processed: writes })
+  world(on, { files: { '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' }, commands: { [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } }, processed: writes })
   await $.session.start(start)
   await $.tool.call({ tool: 'Bash', command: 'rm -rf /' })
   await $.tool.call({ tool: 'Read', file_path: `${CWD}/a.ts` })
@@ -1318,7 +1318,7 @@ test('with Codex on in team mode: the prompt carries the Codex brief, a review r
   const ran: string[] = []
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, {
-    files: { ...CODEX_FILES, '.claude/smartworkbench-live.jsonl': '' },
+    files: { ...CODEX_FILES, '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' },
     commands: { ...CODEX_RUNS, [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' } },
     ran,
     processed: writes,
