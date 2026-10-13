@@ -53,7 +53,8 @@ function pump() {
     }
     const info = statSync(feed)
     // The file was replaced (another inode, or born later): read the new one from its start.
-    const id = `${info.ino}:${Math.round(info.birthtimeMs)}`
+    // dev and inode only: birth time is not reliable on every file system, and a replaced file shows as a smaller size anyway.
+    const id = `${info.dev}:${info.ino}`
     if (fileId !== '' && id !== fileId) {
       offset = 0
       rest = Buffer.alloc(0)
@@ -221,7 +222,16 @@ server.listen(port, '127.0.0.1', () => {
     if (found) rmSync(feed)
     closeSync(openSync(feed, 'wx'))
     created = true
-    writeFileSync(pidFile, `${hostname()} ${process.pid}`)
+    // The process note gets the same care as the feed: never written through a link.
+    const note = lstatSync(pidFile, { throwIfNoEntry: false })
+    if (note && !note.isFile()) throw Object.assign(new Error('not a regular file'), { code: 'EINVAL' })
+    if (note) rmSync(pidFile)
+    const noteFd = openSync(pidFile, 'wx')
+    try {
+      writeFileSync(noteFd, `${hostname()} ${process.pid}`)
+    } finally {
+      closeSync(noteFd)
+    }
   } catch (err) {
     console.error(`Cannot create ${feed}: ${err.code ?? err.message}`)
     process.exit(1)
