@@ -14,7 +14,7 @@ export function parsePinSpec(spec: string): { path: string; lines?: LineRange } 
   const from = Number(match[2])
   const to = match[3] === undefined ? from : Number(match[3])
 
-  return { path: match[1] ?? clean, lines: { from: Math.max(1, Math.min(from, to)), to: Math.max(from, to) } }
+  return { path: match[1] ?? clean, lines: { from: Math.max(1, Math.min(from, to)), to: Math.max(1, from, to) } }
 }
 
 export function rangeLabel(lines: LineRange | undefined): string {
@@ -34,6 +34,8 @@ export async function sha256(text: string): Promise<string> {
 // What a pin puts in the prompt: a snapshot's saved text, or the file as read now.
 export function pinText(pin: ContextPin, live: string | undefined): string | undefined {
   if (pin.kind === 'note') return pin.text
+  // A snapshot of a line range keeps only those lines; they are not cut again.
+  if (pin.mode === 'snapshot' && pin.snapshot?.sliced) return pin.snapshot.text
   const source = pin.mode === 'snapshot' && pin.snapshot ? pin.snapshot.text : live
 
   return source === undefined ? undefined : sliceLines(source, pin.lines)
@@ -47,7 +49,8 @@ export function serializePins(contents: readonly PinContent[]): string | undefin
       parts.push(`  <note>${escapeXml(pin.text)}</note>`)
       continue
     }
-    const body = pinText(pin, text)
+    // A file's own text cannot close the block it sits in.
+    const body = pinText(pin, text)?.replace(/<\/(file|note|smartworkbench_pins)>/gi, '<\\/$1>')
     if (body === undefined) continue
     const lines = pin.lines ? ` lines="${pin.lines.from}-${pin.lines.to}"` : ''
     const snapshot = pin.mode === 'snapshot' && pin.snapshot ? ` snapshot_sha256="${pin.snapshot.sha256.slice(0, 12)}"` : ''

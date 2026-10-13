@@ -398,6 +398,9 @@ export function addEvidence(wb: Workbench, record: EvidenceRecord): Workbench {
   return { ...wb, evidence: [...wb.evidence, record].slice(-MAX_EVIDENCE) }
 }
 
+// What a long task records of its changes stays bounded; the newest are kept.
+const MAX_CHANGED = 500
+
 export function observe(wb: Workbench, tool: string, path: string, at: number): Workbench {
   const how = EDIT_TOOLS.has(tool) ? 'edited' : 'read'
   const was = wb.context.observed.find(one => one.path === path)
@@ -409,9 +412,10 @@ export function observe(wb: Workbench, tool: string, path: string, at: number): 
     return { ...wb, context: { ...wb.context, observed } }
   }
 
-  const files = wb.changed.files.includes(path) ? wb.changed.files : [...wb.changed.files, path]
+  const files = (wb.changed.files.includes(path) ? wb.changed.files : [...wb.changed.files, path]).slice(-MAX_CHANGED)
+  const edits = Object.fromEntries(Object.entries({ ...wb.changed.edits, [path]: at }).slice(-MAX_CHANGED))
 
-  return { ...wb, context: { ...wb.context, observed }, changed: { ...wb.changed, files, edits: { ...wb.changed.edits, [path]: at } } }
+  return { ...wb, context: { ...wb.context, observed }, changed: { ...wb.changed, files, edits } }
 }
 
 // Hides a file from Suggested; Unhide brings it back.
@@ -424,7 +428,7 @@ export function toggleExcluded(wb: Workbench, path: string): Workbench {
 
 // The diff against HEAD replaces the last one; files changed outside the tools join the list.
 export function applyDiff(wb: Workbench, diff: ParsedDiff): Workbench {
-  const files = [...new Set([...wb.changed.files, ...Object.keys(diff.hunks)])]
+  const files = [...new Set([...wb.changed.files, ...Object.keys(diff.hunks)])].slice(-MAX_CHANGED)
 
   return { ...wb, changed: { ...wb.changed, files, hunks: diff.hunks, added: diff.added, removed: diff.removed } }
 }

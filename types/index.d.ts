@@ -26,7 +26,8 @@ export type DoneCondition = {
 
 export type LineRange = { from: number; to: number }
 
-export type Snapshot = { text: string; sha256: string; at: number }
+// sliced: text holds only the pin's line range, not the whole file.
+export type Snapshot = { text: string; sha256: string; at: number; sliced?: true }
 
 export type ContextPin =
   | { id: string; kind: 'file'; path: string; mode: 'live' | 'snapshot'; lines?: LineRange; snapshot?: Snapshot }

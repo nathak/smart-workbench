@@ -1,6 +1,7 @@
 // Team features that touch no engine API: audit lines, CI results, issue refs and
 // the shared task file. register.tsx does the reading, writing and process runs.
 import type { ContextPin, EvidenceKind, EvidenceRecord, IssueRef, Task, Workbench } from '../types'
+import { redact } from './risk'
 
 // ---- audit log
 
@@ -147,7 +148,8 @@ export function shareText(wb: Workbench, sharedAt: number, sharedBy: string | un
     pins: wb.context.pins,
   }
 
-  return `${JSON.stringify(shared, null, 2)}\n`
+  // The file is committed and pushed: every text in it is masked on the way out, field by field so the JSON stays valid.
+  return `${JSON.stringify(shared, (_key, value) => (typeof value === 'string' ? redact(value) : value), 2)}\n`
 }
 
 export function readShare(text: string): SharedTask | { error: string } {
