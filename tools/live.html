@@ -63,6 +63,16 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 va
 .emptytl{padding:var(--sp-6);color:var(--fg-muted)}
 .dwtabs{display:flex;gap:var(--sp-2);margin:var(--sp-3) 0}
 .dwtabs button[aria-selected=true]{color:var(--fg);border-color:var(--fg)}
+#tl-q{font:inherit;font-size:var(--fs-sm);min-width:220px;flex:1;max-width:420px;padding:3px 8px;background:var(--bg);color:var(--fg);border:1px solid var(--border-strong);border-radius:3px;min-height:28px}
+.chips{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
+.chip{display:inline-flex;gap:var(--sp-2);align-items:center;padding:0 var(--sp-3);border-radius:999px;background:var(--surface-2);border:1px solid var(--border-strong);color:var(--fg);font-family:var(--mono);font-size:var(--fs-xs);min-height:22px}
+mark{background:var(--warn-bg);color:var(--fg);outline:1px solid var(--warn);border-radius:2px}
+.trow.ctxrow{opacity:.62}
+.trow.crit .nm .tx{font-weight:600}
+.trow.crit{box-shadow:inset -3px 0 0 var(--loop)}
+.mini{display:block;width:100%;height:48px;margin-bottom:var(--sp-3);background:var(--surface);border:1px solid var(--border);border-radius:6px;touch-action:none;cursor:crosshair}
+.mini .band{fill:var(--border);fill-opacity:.7}.mini .tick.f{stroke:var(--bad)}.mini .tick.a{stroke:var(--warn)}.mini .brush{fill:var(--focus);fill-opacity:.25;stroke:var(--focus)}
+.mini .lbl{fill:var(--fg-muted);font-size:9px}
 /* KPI tiles */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:var(--sp-3);margin:var(--sp-4) 0}
 .tile{display:flex;flex-direction:column;gap:2px;align-items:flex-start;text-align:left;padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--fg);min-height:88px;position:relative}
@@ -224,12 +234,19 @@ button:hover{color:var(--fg)}
 
   <main>
   <div class="tabpanel" id="p-timeline" role="tabpanel" aria-labelledby="tab-timeline">
+    <svg class="mini" id="mini" viewBox="0 0 1000 48" preserveAspectRatio="none" role="img" aria-label="overview"></svg>
     <div class="tlbar">
+      <input id="tl-q" type="search" autocomplete="off" spellcheck="false" aria-label="search">
+      <span class="muted mono" id="tl-hits"></span>
+      <button id="tl-prev" aria-label="previous match">‹</button><button id="tl-next" aria-label="next match">›</button>
       <button id="tl-follow" aria-pressed="true"></button>
       <button id="tl-fail" aria-pressed="false"></button>
+      <button id="tl-crit" aria-pressed="false"></button>
+      <button id="tl-zoom" hidden></button>
       <button id="tl-expand"></button><button id="tl-collapse"></button>
-      <span class="muted" id="tl-note"></span>
     </div>
+    <div class="chips" id="tl-chips"></div>
+    <div class="muted" id="tl-note" role="status"></div>
     <div id="tl" role="tree" tabindex="0" aria-label="timeline"></div>
   </div>
   <div class="tabpanel" id="p-flow" role="tabpanel" aria-labelledby="tab-flow" hidden>
@@ -362,6 +379,7 @@ var DICT = {
   'tab-timeline': ['Timeline', '타임라인'],
   's-ok': ['ok', '완료'], 's-error': ['error', '오류'], 's-blocked': ['blocked', '차단'], 's-declined': ['declined', '거절'], 's-running': ['running', '실행 중'], 's-bg': ['started', '시작됨'], 's-ask': ['asking', '확인 중'],
   'tl-follow-on': ['↓ following', '↓ 따라가는 중'], 'tl-follow-off': ['↓ follow', '↓ 따라가기'], 'tl-fail-l': ['failures only', '실패만'], 'tl-expand': ['expand all', '모두 펼치기'], 'tl-collapse': ['collapse all', '모두 접기'],
+  'tl-q-ph': ['search · tool:Bash -policy:allow "npm test" ms:>500 is:fail', '검색 · tool:Bash -policy:allow "npm test" ms:>500 is:fail'], 'tl-crit-l': ['◆ critical path', '◆ 임계 경로'], 'tl-zoom-l': ['reset zoom', '확대 해제'],
   'tab-flow': ['Flow', '흐름'], 'tab-log': ['Log', '로그'],
   'st-live': ['● live', '● 연결됨'], 'st-reconnect': ['◌ reconnecting', '◌ 다시 연결 중'], 'st-down': ['✕ disconnected', '✕ 끊김'], 'st-wait': ['◌ connecting', '◌ 연결 중'],
   'k-calls': ['calls / min', '호출 / 분'], 'k-lat': ['tool latency', '도구 지연'], 'k-fail': ['blocks + errors', '차단 + 오류'], 'k-ask': ['asks waiting', '확인 대기'], 'k-ctx': ['context window', '컨텍스트 창'], 'k-tok': ['tokens in / out', '토큰 입력 / 출력'],
@@ -589,6 +607,96 @@ function turnWarns(t){
   if (fails >= 3) warns.push({ kind: 'errors', n: fails });
   if (t.marks.some(function(m){ return m.kind === 'team.repeat-error'; })) warns.push({ kind: 'repeat-error' });
   return warns;
+}
+// Search syntax: words are ANDed, -word excludes, "a phrase" stays whole, field:value narrows (tool, policy, outcome, risk, category,
+// agent, subagent, kind, is:fail|ask|running|slow|bg|block, and turn:/ms: with > < >= <= =). A bare word looks in the tool, summary, input, output and guard reason.
+var QUERY_FIELDS = ['tool', 'policy', 'outcome', 'status', 'risk', 'category', 'agent', 'subagent', 'kind', 'is', 'turn', 'ms'];
+function parseQuery(text){
+  var terms = [], tokens = [], re = /(-?)(?:([a-z]+):)?(?:"([^"]*)"|(\S+))/g, m;
+  text = String(text || '').slice(0, 300);
+  while ((m = re.exec(text))) {
+    var neg = m[1] === '-', field = m[2] || null, val = m[3] != null ? m[3] : m[4], cmp = null;
+    if (val === undefined || val === '') continue;
+    if (field && QUERY_FIELDS.indexOf(field) < 0) { val = field + ':' + val; field = null; }
+    if (field === 'ms' || field === 'turn') {
+      var c = /^(>=|<=|>|<|=)?(\d+)$/.exec(val);
+      if (c) cmp = { op: c[1] || '=', n: Number(c[2]) }; else { val = field + ':' + val; field = null; }
+    }
+    terms.push({ neg: neg, field: field, val: String(val).toLowerCase(), cmp: cmp, token: m[0] });
+    tokens.push(m[0]);
+  }
+  return { terms: terms, tokens: tokens, text: text };
+}
+function cmpOk(c, v){ return c.op === '>' ? v > c.n : c.op === '<' ? v < c.n : c.op === '>=' ? v >= c.n : c.op === '<=' ? v <= c.n : v === c.n; }
+function spanText(sp){
+  var ev = sp.ev || {};
+  return [sp.tool, sp.summary, ev.prompt || '', sp.output || '', sp.guard ? sp.guard.reason + ' ' + ((sp.guard.ev && sp.guard.ev.input) || '') : ''].join('\n').toLowerCase();
+}
+function termMatches(t, sp, now){
+  var st = statusOf(sp), ok;
+  if (t.field === null) ok = spanText(sp).indexOf(t.val) >= 0;
+  else if (t.field === 'tool') ok = sp.tool.toLowerCase().indexOf(t.val) >= 0;
+  else if (t.field === 'policy') ok = String(sp.policy).toLowerCase() === t.val;
+  else if (t.field === 'outcome' || t.field === 'status') ok = st === t.val || String(sp.outcome).toLowerCase() === t.val;
+  else if (t.field === 'risk') ok = String(sp.risk).toLowerCase() === t.val;
+  else if (t.field === 'category') ok = String(sp.category).toLowerCase() === t.val;
+  else if (t.field === 'agent') ok = String(sp.agent || '').toLowerCase().indexOf(t.val) >= 0;
+  else if (t.field === 'subagent') ok = String(sp.subagent).toLowerCase().indexOf(t.val) >= 0;
+  else if (t.field === 'kind') ok = 'tool'.indexOf(t.val) === 0 || String(sp.tool).toLowerCase() === t.val;
+  else if (t.field === 'turn') ok = cmpOk(t.cmp, sp.turn);
+  else if (t.field === 'ms') ok = cmpOk(t.cmp, spanDur(sp, now));
+  else if (t.field === 'is') {
+    ok = t.val === 'fail' ? (st === 'error' || st === 'blocked' || st === 'declined')
+      : t.val === 'ask' ? sp.policy === 'ask'
+      : t.val === 'running' ? st === 'running'
+      : t.val === 'slow' ? spanDur(sp, now) >= 1000
+      : t.val === 'bg' ? st === 'bg'
+      : t.val === 'block' ? (st === 'blocked' || !!(sp.guard && sp.guard.kind === 'block'))
+      : false;
+  } else ok = false;
+  return t.neg ? !ok : ok;
+}
+function matchQuery(q, sp, now){
+  for (var i = 0; i < q.terms.length; i++) if (!termMatches(q.terms[i], sp, now)) return false;
+  return true;
+}
+// Ranges of `text` that a query's plain words point at, merged, for highlighting.
+function marksOf(text, q){
+  var low = String(text).toLowerCase(), ranges = [];
+  q.terms.forEach(function(t){
+    if (t.neg || t.field !== null || !t.val) return;
+    var from = 0, at;
+    while ((at = low.indexOf(t.val, from)) >= 0) { ranges.push([at, at + t.val.length]); from = at + t.val.length; }
+  });
+  ranges.sort(function(a, b){ return a[0] - b[0]; });
+  var out = [];
+  ranges.forEach(function(r){ var last = out[out.length - 1]; if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]); else out.push(r.slice()); });
+  return out;
+}
+// Of calls that may overlap, the chain that decided when the last one ended: from the latest end, back through whatever ended latest before it began.
+function criticalPath(list, now){
+  var items = list.map(function(sp){ return { sp: sp, s: sp.at, e: sp.end !== null ? sp.end : now }; }), out = Object.create(null);
+  var cur = null;
+  items.forEach(function(x){ if (!cur || x.e > cur.e) cur = x; });
+  var guard = 0;
+  while (cur && guard++ < 5000) {
+    out[cur.sp.id] = 1;
+    var prev = null;
+    items.forEach(function(x){ if (x !== cur && x.e <= cur.s && (!prev || x.e > prev.e)) prev = x; });
+    cur = prev;
+  }
+  return out;
+}
+// Runs of three or more neighbours that are the same call, so a loop of retries reads as one line.
+function runsOf(list){
+  var out = [], i = 0;
+  while (i < list.length) {
+    var j = i + 1, key = list[i].tool + '|' + list[i].summary;
+    while (j < list.length && list[j].tool + '|' + list[j].summary === key) j++;
+    if (j - i >= 3) out.push({ run: list.slice(i, j) }); else for (var n = i; n < j; n++) out.push({ one: list[n] });
+    i = j;
+  }
+  return out;
 }
 // model:end
 var S, inflight, TR, events = [];
@@ -1352,10 +1460,25 @@ function turnOpen(t, i, n){
 }
 function stWord(st){ return T('s-' + st); }
 function stBadge(st){ return el('span', 'st ' + st, (STATUS_ICON[st] || '•') + ' ' + stWord(st)); }
-function keepSpan(sp, kids){
-  if (!tl.failOnly) return true;
-  if (isFail(sp) || sp.policy === 'ask' || (sp.guard && sp.guard.kind === 'block')) return true;
-  return (kids[sp.id] || []).some(function(c){ return keepSpan(c, kids); });
+var tlq = { text: '', parsed: parseQuery(''), crit: false, range: null, hits: [], hitAt: -1, runOpen: {} };
+function setQuery(text){
+  tlq.text = text; tlq.parsed = parseQuery(text); tlq.hitAt = -1;
+  tl.failOnly = tlq.parsed.tokens.indexOf('is:fail') >= 0;
+  if ($('tl-q').value !== text) $('tl-q').value = text;
+  syncHash(); queueTl();
+}
+function hasQuery(){ return tlq.parsed.terms.length > 0; }
+function inRange(sp){ return !tlq.range || (sp.at >= tlq.range.a && sp.at <= tlq.range.b); }
+// Adds text with the searched words marked; the pieces go in as text nodes.
+function hl(node, text){
+  var ranges = hasQuery() ? marksOf(text, tlq.parsed) : [], at = 0;
+  ranges.forEach(function(r){
+    if (r[0] > at) node.appendChild(document.createTextNode(text.slice(at, r[0])));
+    node.appendChild(el('mark', null, text.slice(r[0], r[1])));
+    at = r[1];
+  });
+  if (at < text.length) node.appendChild(document.createTextNode(text.slice(at)));
+  return node;
 }
 function drawTimeline(){
   tlQueued = false;
@@ -1363,39 +1486,54 @@ function drawTimeline(){
   tl.dirty = false;
   var host = $('tl'), prevTop = host.scrollTop;
   host.textContent = '';
-  tl.rows = []; tl.byKey = new Map();
-  var turns = TR.turns, now = nowFor() || Date.now();
+  tl.rows = []; tl.byKey = new Map(); tlq.hits = [];
+  var turns = TR.turns, now = nowFor() || Date.now(), q = tlq.parsed, hiddenTurns = 0;
   if (!turns.length) host.appendChild(el('div', 'emptytl', L('waiting for events', '이벤트를 기다리는 중')));
   turns.forEach(function(t, ti){
-    var open = turnOpen(t, ti, turns.length);
-    var calls = t.spans.length, errs = t.spans.filter(isFail).length, end = t.end !== null ? t.end : Math.max(now, t.at);
-    var head = el('button', 'turnhead');
-    head.setAttribute('aria-expanded', open ? 'true' : 'false');
-    head.appendChild(el('span', 'tt', (open ? '▾ ' : '▸ ') + (t.early ? L('before the first prompt', '첫 프롬프트 이전') : '#' + t.n)));
-    if (!t.early) head.appendChild(el('span', 'tag ' + (t.loop ? 'loop' : ''), t.loop ? 'LOOP' : t.origin === 'plugin' ? 'PLUGIN' : 'PROMPT'));
-    head.appendChild(el('span', 'tx', t.early ? L('(the start of the feed may have been cut)', '(피드의 앞부분이 잘렸을 수 있음)') : cut(t.text, 140)));
-    head.appendChild(el('span', 'mt', L(calls + ' calls', '호출 ' + calls) + (errs ? ' · ' + (L('▲ ' + errs + ' failed', '▲ 실패 ' + errs)) : '') + ' · ' + fmtMs(end - t.at) + (t.ctx != null ? ' · ctx ' + t.ctx + '%' : '') + (t.tokIn || t.tokOut ? ' · ' + k(t.tokIn) + '/' + k(t.tokOut) : '') + (t.aborted ? ' · ' + L('aborted', '중단') : t.end === null ? ' · ' + L('running', '진행 중') : '')));
-    turnWarns(t).forEach(function(w){
-      head.appendChild(el('span', 'badge warn', w.kind === 'repeat' ? L('⚠ repeated ' + cut(w.tool, 20), '⚠ 반복 ' + cut(w.tool, 20)) : w.kind === 'errors' ? L('⚠ ' + w.n + ' failures', '⚠ 실패 ' + w.n + '개') : L('⚠ repeated error', '⚠ 같은 오류 반복')));
-    });
-    head.onclick = function(){ tl.turnOpen[t.n] = !open; queueTl(); };
-    host.appendChild(head);
-    if (!open) return;
-    var kids = Object.create(null), roots = [], groups = Object.create(null), ids = Object.create(null);
+    var tEnd = t.end !== null ? t.end : Math.max(now, t.at);
+    if (tlq.range && (tEnd < tlq.range.a || t.at > tlq.range.b)) { hiddenTurns++; return; }
+    var kids = Object.create(null), roots = [], groups = Object.create(null), ids = Object.create(null), memo = Object.create(null);
     t.spans.forEach(function(sp){ ids[sp.id] = 1; });
     t.spans.forEach(function(sp){
       if (sp.parent && ids[sp.parent]) (kids[sp.parent] || (kids[sp.parent] = [])).push(sp);
       else if (sp.agent && !sp.parent) (groups[sp.agent] || (groups[sp.agent] = [])).push(sp);
       else roots.push(sp);
     });
-    var startAt = t.at, span = Math.max(1, end - startAt), budget = 200 + (tl.more[t.n] || 0), drawn = 0, hidden = 0;
-    function addRow(sp, depth){
-      if (!keepSpan(sp, kids)) return;
+    // A call shows when it matches, or when something under it does; the latter are drawn dimmed as context.
+    function direct(sp){ return inRange(sp) && (!hasQuery() || matchQuery(q, sp, now)); }
+    function keeps(sp){
+      if (memo[sp.id] !== undefined) return memo[sp.id];
+      var r = direct(sp) || (kids[sp.id] || []).some(keeps);
+      memo[sp.id] = r;
+      return r;
+    }
+    var filtered = hasQuery() || !!tlq.range;
+    var anyKept = !filtered || t.spans.some(keeps);
+    if (filtered && !anyKept) { hiddenTurns++; return; }
+    var open = filtered ? true : turnOpen(t, ti, turns.length);
+    var calls = t.spans.length, errs = t.spans.filter(isFail).length;
+    var head = el('button', 'turnhead');
+    head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    head.appendChild(el('span', 'tt', (open ? '▾ ' : '▸ ') + (t.early ? L('before the first prompt', '첫 프롬프트 이전') : '#' + t.n)));
+    if (!t.early) head.appendChild(el('span', 'tag ' + (t.loop ? 'loop' : ''), t.loop ? 'LOOP' : t.origin === 'plugin' ? 'PLUGIN' : 'PROMPT'));
+    head.appendChild(hl(el('span', 'tx'), t.early ? L('(the start of the feed may have been cut)', '(피드의 앞부분이 잘렸을 수 있음)') : cut(t.text, 140)));
+    head.appendChild(el('span', 'mt', L(calls + ' calls', '호출 ' + calls) + (errs ? ' · ' + (L('▲ ' + errs + ' failed', '▲ 실패 ' + errs)) : '') + ' · ' + fmtMs(tEnd - t.at) + (t.ctx != null ? ' · ctx ' + t.ctx + '%' : '') + (t.tokIn || t.tokOut ? ' · ' + k(t.tokIn) + '/' + k(t.tokOut) : '') + (t.aborted ? ' · ' + L('aborted', '중단') : t.end === null ? ' · ' + L('running', '진행 중') : '')));
+    turnWarns(t).forEach(function(w){
+      head.appendChild(el('span', 'badge warn', w.kind === 'repeat' ? L('⚠ repeated ' + cut(w.tool, 20), '⚠ 반복 ' + cut(w.tool, 20)) : w.kind === 'errors' ? L('⚠ ' + w.n + ' failures', '⚠ 실패 ' + w.n + '개') : L('⚠ repeated error', '⚠ 같은 오류 반복')));
+    });
+    head.onclick = function(){ tl.turnOpen[t.n] = !open; queueTl(); };
+    host.appendChild(head);
+    if (!open) return;
+    var startAt = t.at, span = Math.max(1, tEnd - startAt), budget = 200 + (tl.more[t.n] || 0), drawn = 0, hidden = 0;
+    var crit = tlq.crit ? criticalPath(roots, now) : null;
+    function addRow(sp, depth, critSet){
+      if (filtered && !keeps(sp)) return;
       if (drawn >= budget) { hidden++; return; }
       drawn++;
       var st = sp.policy === 'ask' && TR.pendingAsk.has(sp.id) ? 'ask' : statusOf(sp);
       var rk = selKey('call', sp.id), who = whoOf(sp), sub = kids[sp.id] || [];
-      var row = el('button', 'trow');
+      var isHit = filtered && hasQuery() && direct(sp);
+      var row = el('button', 'trow' + (filtered && hasQuery() && !isHit ? ' ctxrow' : '') + (critSet && critSet[sp.id] ? ' crit' : ''));
       row.setAttribute('role', 'treeitem'); row.setAttribute('aria-level', String(depth + 1)); row.setAttribute('aria-selected', tl.sel === rk ? 'true' : 'false');
       row.tabIndex = -1; row.dataset.key = rk;
       if (sub.length) row.setAttribute('aria-expanded', tl.spanClosed[sp.id] ? 'false' : 'true');
@@ -1404,7 +1542,8 @@ function drawTimeline(){
       nm.appendChild(stBadge(st));
       nm.appendChild(el('span', 'tm', clock(sp.at)));
       nm.appendChild(el('span', 'who ' + who[1], who[0]));
-      nm.appendChild(el('span', 'tx', sp.tool + ' ' + sp.summary));
+      nm.appendChild(hl(el('span', 'tx'), sp.tool + ' ' + sp.summary));
+      if (critSet && critSet[sp.id]) nm.appendChild(el('span', 'sub2', '◆'));
       if (sp.est) nm.appendChild(el('span', 'sub2', L('(guessed parent)', '(부모 추정)')));
       if (sp.tool === 'Agent' && sp.agentRun) { var as = agentStats(TR, sp); nm.appendChild(el('span', 'sub2', L(as.calls + ' calls', '호출 ' + as.calls) + (as.fails ? ' · ▲ ' + as.fails : '') + (as.tokIn || as.tokOut ? ' · ' + k(as.tokIn) + '/' + k(as.tokOut) : ''))); }
       if (sp.guard) nm.appendChild(el('span', 'tag ' + (sp.guard.kind === 'block' ? 'block' : 'ask'), sp.guard.kind === 'block' ? 'BLOCK' : 'ASK' + (sp.guard.answer ? ' → ' + cut(sp.guard.answer, 12) : '')));
@@ -1417,20 +1556,48 @@ function drawTimeline(){
       row.appendChild(el('span', 'ms', st === 'bg' ? L('open', '열림') : st === 'blocked' ? '–' : fmtMs(d)));
       row.onclick = function(){ selectRow(rk, true); };
       host.appendChild(row);
-      tl.rows.push({ key: rk, el: row, sp: sp, sub: sub });
+      var entry = { key: rk, el: row, sp: sp, sub: sub, hit: isHit };
+      tl.rows.push(entry);
+      if (isHit) tlq.hits.push(entry);
       tl.byKey.set(rk, sp);
-      if (!tl.spanClosed[sp.id]) sub.forEach(function(c){ addRow(c, depth + 1); });
+      if (!tl.spanClosed[sp.id]) addList(sub, depth + 1, tlq.crit ? criticalPath(sub, now) : null);
     }
-    roots.forEach(function(sp){ addRow(sp, 0); });
+    // Neighbours that are the same call three or more times fold into one line that opens on a click.
+    function addList(list, depth, critSet){
+      runsOf(list).forEach(function(item){
+        if (item.one) { addRow(item.one, depth, critSet); return; }
+        var run = item.run, rid = run[0].id, shown = run.filter(function(sp){ return !filtered || keeps(sp); });
+        if (!shown.length) return;
+        if (tlq.runOpen[rid]) { shown.forEach(function(sp){ addRow(sp, depth, critSet); }); return; }
+        var f = run.filter(isFail).length, total = run.reduce(function(a, sp){ return a + spanDur(sp, now); }, 0);
+        var g = el('button', 'trow');
+        var gn = el('span', 'nm'); gn.style.paddingLeft = depth * 16 + 'px';
+        gn.appendChild(el('span', 'caret', '▸'));
+        gn.appendChild(el('span', 'st ' + (f ? 'error' : 'ok'), (f ? '▲ ' : '✓ ') + '×' + run.length));
+        gn.appendChild(el('span', 'tm', clock(run[0].at)));
+        gn.appendChild(el('span', 'who ' + whoOf(run[0])[1], whoOf(run[0])[0]));
+        gn.appendChild(hl(el('span', 'tx'), run[0].tool + ' ' + run[0].summary));
+        gn.appendChild(el('span', 'sub2', L(f + ' failed', '실패 ' + f) + ' · ' + L('click to open', '눌러서 펼치기')));
+        g.appendChild(gn);
+        g.appendChild(el('span', 'wf'));
+        g.appendChild(el('span', 'ms', fmtMs(total)));
+        g.setAttribute('aria-expanded', 'false');
+        g.onclick = function(){ tlq.runOpen[rid] = true; queueTl(); };
+        host.appendChild(g);
+      });
+    }
+    addList(roots, 0, crit);
     Object.keys(groups).forEach(function(ag){
+      if (filtered && !groups[ag].some(keeps)) return;
       var g = el('div', 'trow grp');
       g.appendChild(el('span', 'nm', L('subagent ' + cut(ag, 8) + ': its Agent call is not known yet', '서브에이전트 ' + cut(ag, 8) + ': 시작한 Agent 호출을 아직 알 수 없음')));
       host.appendChild(g);
-      groups[ag].forEach(function(sp){ addRow(sp, 1); });
+      addList(groups[ag], 1, null);
     });
-    if (!tl.failOnly) t.marks.forEach(function(m){ host.appendChild(el('div', 'markrow', clock(m.at) + ' · ' + cut(m.kind, 40) + (m.ev && m.ev.reason ? ' · ' + cut(m.ev.reason, 80) : ''))); });
+    if (!filtered) t.marks.forEach(function(m){ host.appendChild(el('div', 'markrow', clock(m.at) + ' · ' + cut(m.kind, 40) + (m.ev && m.ev.reason ? ' · ' + cut(m.ev.reason, 80) : ''))); });
     if (hidden) { var more = el('button', 'moreb', L('show ' + Math.min(hidden, 200) + ' more of ' + hidden, hidden + '개 중 ' + Math.min(hidden, 200) + '개 더 보기')); more.onclick = function(){ tl.more[t.n] = (tl.more[t.n] || 0) + 200; queueTl(); }; host.appendChild(more); }
   });
+  if (hasQuery() || tlq.range) host.appendChild(el('div', 'markrow', L(hiddenTurns + ' turn(s) have nothing that matches', '조건에 맞는 것이 없는 턴 ' + hiddenTurns + '개')));
   var fresh = TR.order - tl.seenOrder;
   if (!tl.follow && fresh > 0 && turns.length) {
     var pill = el('button', 'pill', L(fresh + ' new ↓', '새 호출 ' + fresh + '개 ↓'));
@@ -1441,13 +1608,72 @@ function drawTimeline(){
   host.scrollTop = tl.follow ? host.scrollHeight : prevTop;
   setTimeout(function(){ tl.programmatic = false; }, 50);
   $('tl-note').textContent = tl.sel && !tl.byKey.has(tl.sel) && tl.sel.indexOf('call:') === 0 ? L('the selected call is not in view or no longer in the buffer', '선택한 호출이 보이지 않거나 버퍼에 없습니다') : '';
+  drawChips(); drawMini();
   syncTl();
+}
+function drawChips(){
+  var box = $('tl-chips'), q = tlq.parsed;
+  box.textContent = '';
+  q.tokens.forEach(function(tok, i){
+    var c = el('button', 'chip', tok + ' ×');
+    c.setAttribute('aria-label', L('remove ', '제거 ') + tok);
+    c.onclick = function(){ setQuery(q.tokens.filter(function(x, n){ return n !== i; }).join(' ')); };
+    box.appendChild(c);
+  });
+  $('tl-hits').textContent = hasQuery() ? (tlq.hits.length ? (tlq.hitAt >= 0 ? tlq.hitAt + 1 : '–') + '/' + tlq.hits.length : L('no match', '일치 없음')) : '';
+}
+// The whole buffer in one strip: turns as bands, failures and asks as ticks; drag across it to look at a stretch of time.
+var miniSpan = { a: 0, b: 1 };
+function drawMini(){
+  var svg = $('mini'), first = TR.turns[0], now = nowFor() || Date.now();
+  svg.textContent = '';
+  if (!first) return;
+  var a = first.at, b = Math.max(now - TR.lastAt < 30000 ? now : TR.lastAt, a + 1), w = b - a;
+  miniSpan = { a: a, b: b };
+  var x = function(t){ return Math.max(0, Math.min(1000, (t - a) / w * 1000)).toFixed(1); };
+  TR.turns.forEach(function(t, i){
+    var e = t.end !== null ? t.end : b;
+    var r = sv('rect', { 'class': 'band', x: x(t.at), y: i % 2 ? 4 : 16, width: Math.max(1, x(e) - x(t.at)), height: 28 });
+    svg.appendChild(r);
+  });
+  TR.spans.forEach(function(sp){
+    var f = isFail(sp), asked = sp.policy === 'ask';
+    if (f || asked) svg.appendChild(sv('line', { 'class': 'tick ' + (f ? 'f' : 'a'), x1: x(sp.at), x2: x(sp.at), y1: f ? 2 : 24, y2: f ? 46 : 46, 'stroke-width': 2 }));
+  });
+  var br = tlq.range || miniBrush;
+  if (br) svg.appendChild(sv('rect', { 'class': 'brush', x: x(br.a), y: 0, width: Math.max(2, x(br.b) - x(br.a)), height: 48 }));
+  $('tl-zoom').hidden = !tlq.range;
+}
+var miniBrush = null;
+function miniBuild(){
+  var svg = $('mini'), down = null;
+  var at = function(e){ var r = svg.getBoundingClientRect(); return miniSpan.a + Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width))) * (miniSpan.b - miniSpan.a); };
+  svg.addEventListener('pointerdown', function(e){ down = { t: at(e), x: e.clientX }; try { svg.setPointerCapture(e.pointerId); } catch (x) {} });
+  svg.addEventListener('pointermove', function(e){ if (!down) return; var t = at(e); miniBrush = { a: Math.min(down.t, t), b: Math.max(down.t, t) }; drawMini(); });
+  svg.addEventListener('pointerup', function(e){
+    if (!down) return;
+    var moved = Math.abs(e.clientX - down.x) > 4, t = at(e);
+    tlq.range = moved ? { a: Math.min(down.t, t), b: Math.max(down.t, t) } : null;
+    down = null; miniBrush = null;
+    queueTl();
+  });
+  $('tl-zoom').onclick = function(){ tlq.range = null; queueTl(); };
+}
+function jumpHit(delta){
+  if (!tlq.hits.length) return;
+  tlq.hitAt = (tlq.hitAt + delta + tlq.hits.length) % tlq.hits.length;
+  var h = tlq.hits[tlq.hitAt];
+  selectRow(h.key, false);
+  h.el.focus({ preventScroll: true });
+  h.el.scrollIntoView({ block: 'center' });
+  drawChips();
 }
 function syncTl(){
   $('tl-follow').textContent = tl.follow ? T('tl-follow-on') : T('tl-follow-off');
   $('tl-follow').setAttribute('aria-pressed', tl.follow ? 'true' : 'false');
   $('tl-fail').textContent = T('tl-fail-l'); $('tl-fail').setAttribute('aria-pressed', tl.failOnly ? 'true' : 'false');
   $('tl-expand').textContent = T('tl-expand'); $('tl-collapse').textContent = T('tl-collapse');
+  $('tl-crit').textContent = T('tl-crit-l'); $('tl-crit').setAttribute('aria-pressed', tlq.crit ? 'true' : 'false'); $('tl-zoom').textContent = T('tl-zoom-l'); $('tl-q').placeholder = T('tl-q-ph');
 }
 function setFollow(on){
   tl.follow = on;
@@ -1476,7 +1702,7 @@ function toggleSel(open){
   queueTl();
 }
 function syncHash(){
-  try { history.replaceState(null, '', buildHash({ tab: tab, sel: tab === 'timeline' ? tl.sel : null, q: '' }) || '#'); } catch (e) {}
+  try { history.replaceState(null, '', buildHash({ tab: tab, sel: tab === 'timeline' ? tl.sel : null, q: tab === 'timeline' ? tlq.text : '' }) || '#'); } catch (e) {}
 }
 function selectPre(btn){
   var pre = btn.closest('#dw-item').querySelector('pre');
@@ -1517,7 +1743,7 @@ function openItem(key){
     if (sp.workflowBg) add(L('note', '비고'), L('started in the background; its end is not reported', '백그라운드에서 시작됨, 끝은 보고되지 않음'));
     add(L('turn', '턴'), sp.turn); add('id', sp.id); add('session', sp.ev && sp.ev.session);
     box.appendChild(dl);
-    var cp = el('button', null, L('copy link', '링크 복사')); cp.onclick = function(){ copyText(location.href.split('#')[0] + buildHash({ tab: 'timeline', sel: selKey('call', sp.id), q: '' }), cp); };
+    var cp = el('button', null, L('copy link', '링크 복사')); cp.onclick = function(){ copyText(location.href.split('#')[0] + buildHash({ tab: 'timeline', sel: selKey('call', sp.id), q: tlq.text }), cp); };
     box.appendChild(cp);
   } else if (itemTab === 'input') {
     var ev = sp.ev || {};
@@ -1539,7 +1765,20 @@ function openItem(key){
 }
 function timelineBuild(){
   $('tl-follow').onclick = function(){ setFollow(!tl.follow); };
-  $('tl-fail').onclick = function(){ tl.failOnly = !tl.failOnly; queueTl(); };
+  $('tl-fail').onclick = function(){
+    var toks = tlq.parsed.tokens, has = toks.indexOf('is:fail') >= 0;
+    setQuery((has ? toks.filter(function(x){ return x !== 'is:fail'; }) : toks.concat(['is:fail'])).join(' '));
+  };
+  $('tl-crit').onclick = function(){ tlq.crit = !tlq.crit; queueTl(); };
+  $('tl-q').placeholder = T('tl-q-ph');
+  $('tl-q').addEventListener('input', function(){ setQuery($('tl-q').value); });
+  $('tl-q').addEventListener('keydown', function(e){
+    if (e.key === 'Enter') { e.preventDefault(); jumpHit(e.shiftKey ? -1 : 1); }
+    else if (e.key === 'Escape') { if ($('tl-q').value) setQuery(''); else $('tl-q').blur(); }
+  });
+  $('tl-next').onclick = function(){ jumpHit(1); };
+  $('tl-prev').onclick = function(){ jumpHit(-1); };
+  miniBuild();
   $('tl-expand').onclick = function(){ TR.turns.forEach(function(t){ tl.turnOpen[t.n] = true; }); tl.spanClosed = {}; queueTl(); };
   $('tl-collapse').onclick = function(){ TR.turns.forEach(function(t){ tl.turnOpen[t.n] = false; }); queueTl(); };
   var host = $('tl');
@@ -1556,9 +1795,18 @@ function timelineBuild(){
     else if (e.key === 'ArrowRight') { e.preventDefault(); toggleSel(true); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); toggleSel(false); }
     else if (e.key === 'Enter' && tl.sel) { e.preventDefault(); openItem(tl.sel); }
+    else if (e.key === 'n') { e.preventDefault(); jumpHit(1); }
+    else if (e.key === 'N') { e.preventDefault(); jumpHit(-1); }
+    else if (e.key === 'f') { e.preventDefault(); setFollow(!tl.follow); }
+    else if (e.key === 'z') { e.preventDefault(); var sp = tl.byKey.get(tl.sel), tt = sp && TR.turns[sp.turn]; if (tt) { tlq.range = { a: tt.at, b: tt.end !== null ? tt.end : TR.lastAt }; queueTl(); } }
+  });
+  document.addEventListener('keydown', function(e){
+    var t = e.target, typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    if (e.key === '/' && tab === 'timeline' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); $('tl-q').focus(); $('tl-q').select(); }
   });
   var h = parseHash(location.hash);
   if (h.sel) tl.sel = h.sel;
+  if (h.q) setQuery(h.q);
 }
 
 // ---- KPI tiles: read from the model, redrawn at most once per frame and once a second so rates decay when nothing happens ----
@@ -1621,8 +1869,8 @@ function tabsBuild(){
   var h = parseHash(location.hash);
   showTab(h.tab || stored('swb-tab') || 'timeline');
   ['k-calls', 'k-lat', 'ctx', 'k-tok'].forEach(function(id){ $(id).onclick = function(){ showTab('timeline'); }; });
-  $('k-fail').onclick = function(){ tl.failOnly = true; showTab('timeline'); queueTl(); };
-  $('k-ask').onclick = function(){ tl.failOnly = true; showTab('timeline'); queueTl(); };
+  $('k-fail').onclick = function(){ showTab('timeline'); setQuery('is:fail'); };
+  $('k-ask').onclick = function(){ showTab('timeline'); setQuery('is:ask'); };
   $('theme').onclick = function(){ theme = theme === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', theme); store('swb-theme', theme); translate(); };
 }
 function translate(){
