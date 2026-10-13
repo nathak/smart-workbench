@@ -221,7 +221,7 @@ for (const theme of ['dark', 'light']) {
 
 // ---- the data model: pure, so it runs here on synthetic events ----
 const modelCode = page.slice(page.indexOf('// model:begin'), page.indexOf('// model:end'))
-const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf }`)()
+const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf, decisionOf, guardRows, sortRows, groupRows, guardStats, attention, kindStats }`)()
 const feedOf = list => { const tr = M.newTrace(); let at = 1000; for (const ev of list) { at += 100; M.ingest(tr, { at, ...ev }) } return tr }
 const tr1 = feedOf([
   { kind: 'tool.start', id: 'x0', tool: 'Read', policy: 'allow' }, { kind: 'tool.end', id: 'x0', outcome: 'ok', ms: 30 },
@@ -302,5 +302,33 @@ const cp = M.criticalPath([spn('a', 0, 100), spn('b', 10, 50), spn('c', 100, 300
 check(Object.keys(cp).sort().join() === 'a,c' && M.criticalPath([], 9) !== null, 'the critical path follows the latest finisher back through what ended before it started')
 check(M.runsOf([{ tool: 'B', summary: 'x' }, { tool: 'B', summary: 'x' }, { tool: 'B', summary: 'x' }, { tool: 'R', summary: 'y' }]).map(r => (r.run ? 'run' + r.run.length : 'one')).join() === 'run3,one' && M.runsOf([{ tool: 'B', summary: 'x' }, { tool: 'B', summary: 'x' }]).every(r => r.one), 'three or more neighbours that are the same call fold into a run; two do not')
 check(page.includes('id="mini"') && page.includes('id="tl-q"') && page.includes('type="search"'), 'the timeline has an overview strip and a search box')
+
+const ds = id => M.decisionOf(tr1.spans.get(id))
+check(ds('a') === 'allow' && ds('c') === 'ask' && ds('d') === 'block' && ds('g') === 'asking', 'a call is allow, asked and answered yes, blocked, or still asking')
+const trD = feedOf([
+  { kind: 'prompt', text: 'p' },
+  { kind: 'tool.start', id: 'p1', tool: 'Bash', policy: 'ask', risk: 'high', category: 'external' }, { kind: 'guard.ask', id: 'p1', reason: 'send', answer: 'declined' }, { kind: 'tool.end', id: 'p1', outcome: 'declined', ms: 10 },
+  { kind: 'tool.start', id: 'p2', tool: 'Bash', policy: 'block', risk: 'high', category: 'destructive' }, { kind: 'guard.block', id: 'p2', reason: 'rm', input: 'rm -rf x' }, { kind: 'tool.end', id: 'p2', outcome: 'blocked', ms: 0 },
+  { kind: 'tool.start', id: 'p3', tool: 'Bash', policy: 'block', risk: 'high', category: 'destructive' }, { kind: 'guard.block', id: 'p3', reason: 'rm', input: 'rm -rf y' }, { kind: 'tool.end', id: 'p3', outcome: 'blocked', ms: 0 },
+  { kind: 'tool.start', id: 'p4', tool: 'Read', policy: 'allow', risk: 'low', category: 'read' }, { kind: 'tool.end', id: 'p4', outcome: 'ok', ms: 3 },
+  { kind: 'tool.start', id: 'p5', tool: 'Bash', policy: 'ask', risk: 'high', category: 'external' },
+  { kind: 'feed.recovered', missed: 4 }, { kind: 'team.final-check-required' },
+])
+check(M.decisionOf(trD.spans.get('p1')) === 'declined', 'an ask a person answered no is declined')
+const gr = M.guardRows(trD, 9999)
+check(M.groupRows(gr.filter(r => r.decision === 'block')).length === 1 && M.groupRows(gr.filter(r => r.decision === 'block'))[0].n === 2, 'blocks of the same tool and reason are one line counted twice')
+check(M.sortRows(gr, 'risk', -1)[0].risk === 'high' && M.sortRows(gr, 'at', -1)[0].key === 'call:p5' && M.sortRows(gr, 'at', 1)[0].key === 'call:p1', 'rows sort by risk rank and by time in either direction')
+const gs = M.guardStats(trD)
+check(gs.destructive.block === 2 && gs.external.declined === 1 && gs.external.asking === 1 && gs.read.allow === 1, 'decisions are counted per category')
+const at1 = M.attention(trD, 99999)
+check(at1[0].type === 'ask' && at1[0].sp.id === 'p5' && at1.slice(1).map(a => a.kind).join() === 'team.final-check-required,feed.recovered', 'attention lists waiting asks first, then notes newest first')
+const kstat = M.kindStats(feedOf([
+  { kind: 'prompt', text: 'p' },
+  { kind: 'tool.start', id: 'k1', tool: 'Agent', subagent: 'smartworkbench:explorer' }, { kind: 'tool.end', id: 'k1', outcome: 'ok', ms: 100 },
+  { kind: 'tool.start', id: 'k2', tool: 'Agent', subagent: 'smartworkbench:explorer' }, { kind: 'tool.end', id: 'k2', outcome: 'ok', ms: 300 },
+  { kind: 'tool.start', id: 'k3', tool: 'Agent', subagent: 'smartworkbench:advisor' },
+]), 9999)
+check(kstat.length === 2 && kstat.find(e => e.kind === 'explorer').runs === 2 && kstat.find(e => e.kind === 'explorer').avg === 200 && kstat.find(e => e.kind === 'advisor').avg === null, 'agents are summed by kind with the average of the runs that ended')
+check(!/addLog|addFlag|id="log"|id="flags"/.test(page), 'the old log and flag lists are gone')
 
 process.exit(failed === 0 ? 0 : 1)
