@@ -196,7 +196,8 @@ async function agentOutput($: $, result: unknown): Promise<Record<string, unknow
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
   try {
     const path = `${await $.session.cwd()}/${LIVE_FILE}`
-    if (!(await $.fs.exists(path))) return
+    // The feed is written only while a live server owns it: its process note must be beside it, so a feed file that was committed to the repository is never appended to.
+    if (!(await $.fs.exists(path)) || !(await $.fs.exists(`${await $.session.cwd()}/${PID_FILE}`))) return
     const session = (await read($, liveAtom)).sessionId
     // Every text the feed carries is masked here, so a command summary or a URL cannot carry a secret around the prompt masking.
     const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? redact(scanned(value)) : value]))
