@@ -4,11 +4,27 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Security
+- A project guard file can only tighten the guard: the stricter of its profile and yours applies, protected checks (secret reads, Codex, remote scripts, MCP deploys) cannot be allowed by a rule, and a rule that asks is still asked under the permissive profile.
+- Quoted or escaped flags and words (`rm "-rf"`, `'git' push`, `git -C "a b" push -f`) are read as the shell reads them; scripts piped into a path, `sudo -u` or a bare interpreter are asked; Codex rules hold when `node` has options; `Grep` and `Glob` that reach secrets files are asked; more key and credential files count as secrets; Windows paths and upper-case guard file names are matched.
+- "Allow for session" is keyed by category, has no key for a command with a hidden second command (`&`, `$(...)`, backticks), and covers a secrets read only by its whole command.
+- Pins must be project paths that are not secrets files, whether typed, from a template or from a shared file; a shared task arrives unlocked and is rebuilt from its known fields.
+- A feed that is a link, or a second live view for one project, is refused; the feed is written only while the server's process note is beside it.
+- Tokens given as the next word of a flag are masked in the feed and in the audit log; `/swb export` and `/swb share` mask secrets, stay inside the project and never overwrite a named file.
+
+### Fixed
+- The mod's own files (the live feed, the audit log) no longer count as work in an infinite loop; no unasked Codex review runs inside a loop; `requireContract` lets the `/swb` commands through; a failed store write cannot let an asked call run; a failure in the records after a call cannot run it twice; subagent calls get no repeat-error nudge; a background advisor opens the design and final-check gates only when its run ends.
+- A failing check is no longer hidden by a later passing one of another kind; format-only and no-test runs are not checks; a diff line that is a deleted `-- x` or an added `++ x` is not read as a file header; quoted (non-ASCII) paths in `git diff` are read; snapshots keep only the pinned range; `/swb new`, `load` and `pickup` ask whenever any part of a task exists; open proposals are cleared with the task; `/swb clear` keeps team settings.
+- Live feed: a half-written Korean character is no longer damaged (the feed is read as bytes), lines that are not JSON are dropped and counted, a replaced file is read from its start, one look is capped, and a failed write stretch is reported every time.
+- Live page: keyboard focus survives redraws, calls cut short by an abort or a new prompt stop waiting, the newest calls of a long turn are drawn first, the page rebuilds without announcing everything as new, and labels follow the language.
+
 ## [0.16.1] - 2026-10-13
+
+### Added
+- Live view: the server answers `/info` (project, feed path, start time, lines read) and the page shows the project beside the session and warns when the server read many more lines than the page received.
 
 ### Fixed
 - Live view: calls that follow a finished turn with no new prompt (a background agent finished, a hook resumed the session) start a resumed turn instead of piling into the old one, and a turn with too many calls draws the newest ones with the earlier ones behind a button, so recent advisor and subagent calls are no longer hidden at the far end of a long turn.
-- Live view: the server answers `/info` (project, feed path, start time, lines read) and the page shows the project beside the session and warns when the server read many more lines than the page received.
 - Live view: a failure while reading an event or drawing a view is shown in the status bar and logged to the console instead of being swallowed.
 
 ## [0.16.0] - 2026-10-13

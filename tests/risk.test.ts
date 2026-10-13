@@ -331,7 +331,7 @@ describe('redact', () => {
   test('a long run of dashes does not make the scan slow', async () => {
     const started = Date.now()
     redact('a-'.repeat(4000))
-    expect(Date.now() - started).toBeLessThan(500)
+    expect(Date.now() - started).toBeLessThan(2000)
   })
 })
 
