@@ -331,4 +331,9 @@ const kstat = M.kindStats(feedOf([
 check(kstat.length === 2 && kstat.find(e => e.kind === 'explorer').runs === 2 && kstat.find(e => e.kind === 'explorer').avg === 200 && kstat.find(e => e.kind === 'advisor').avg === null, 'agents are summed by kind with the average of the runs that ended')
 check(!/addLog|addFlag|id="log"|id="flags"/.test(page), 'the old log and flag lists are gone')
 
+check(page.includes('<dialog id="help"') && page.includes('id="keys-off"') && page.includes('id="helpb"'), 'a keyboard help dialog with a switch for single-key shortcuts exists')
+check((page.match(/aria-live="assertive"/g) ?? []).length === 1 && (page.match(/aria-live="polite"/g) ?? []).length === 1, 'exactly one polite and one assertive live region, the assertive one only for asks and blocks')
+check(page.includes("aria-busy") && page.includes('prefers-reduced-motion'), 'the timeline is marked busy while rebuilding and motion respects the system setting')
+check(page.includes("e.key === '?'") && page.includes("keysOff"), 'shortcuts are bound to keys and can be switched off')
+
 process.exit(failed === 0 ? 0 : 1)
