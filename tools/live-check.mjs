@@ -287,6 +287,6 @@ check(stA.calls === 2 && stA.fails === 1 && stA.tokIn === 7 && stA.tokOut === 3,
 const trW = feedOf([{ kind: 'prompt', text: 'p' }, ...[1, 2, 3].flatMap(i => [{ kind: 'tool.start', id: 'r' + i, tool: 'Bash', summary: 'npm test' }, { kind: 'tool.end', id: 'r' + i, outcome: 'error', ms: 9 }])])
 check(M.turnWarns(trW.turns[0]).map(w => w.kind).join() === 'repeat,errors', 'the same call three times in a row, and three failures, each raise a note on the turn')
 check(M.turnWarns(feedOf([{ kind: 'prompt', text: 'p' }, { kind: 'tool.start', id: 'q1', tool: 'Bash', summary: 'a' }, { kind: 'tool.start', id: 'q2', tool: 'Bash', summary: 'b' }, { kind: 'tool.start', id: 'q3', tool: 'Bash', summary: 'a' }]).turns[0]).length === 0, 'different calls in a row raise no note')
-check(page.includes('role="tree"') && page.includes('role="treeitem"'), 'the timeline is a tree of tree items')
+check(page.includes('role="tree"') && page.includes("'treeitem'"), 'the timeline is a tree of tree items')
 
 process.exit(failed === 0 ? 0 : 1)
