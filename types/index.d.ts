@@ -97,7 +97,8 @@ export type Risk = 'low' | 'medium' | 'high'
 
 export type Policy = 'allow' | 'ask' | 'block'
 
-export type GuardProfile = 'permissive' | 'balanced' | 'strict'
+// 'off' is only ever the person's own choice: a guard file, a template or a shared task cannot set it.
+export type GuardProfile = 'off' | 'permissive' | 'balanced' | 'strict'
 
 export type CallOutcome = 'running' | 'ok' | 'error' | 'blocked' | 'declined'
 

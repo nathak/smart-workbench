@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { classify, commandPrefix, decide, normalisePath, redact, sessionScope } from '../hooks/risk'
+import { classify, commandPrefix, decide, effectiveProfile, normalisePath, redact, sessionScope } from '../hooks/risk'
 
 describe('risk rules', () => {
   test('destructive git and recursive delete are blocked', async () => {
@@ -263,6 +263,14 @@ describe('risk rules', () => {
     expect(decide(edit, 'strict', false)).toBe('ask')
     expect(decide(edit, 'balanced', true)).toBe('ask')
     expect(decide(force, 'permissive', false)).toBe('block')
+    // Off lets the built-in rules' blocks and questions through; the pause switch still asks, and a rule the project wrote still holds.
+    expect(decide(force, 'off', false)).toBe('allow')
+    expect(decide(classify('Bash', { command: 'cat .env' }), 'off', false)).toBe('allow')
+    expect(decide(edit, 'off', true)).toBe('ask')
+    expect(decide({ ...push, category: 'project-rule', policy: 'block' }, 'off', false)).toBe('block')
+    expect(effectiveProfile('off', 'strict')).toBe('strict')
+    expect(effectiveProfile('strict', 'permissive')).toBe('strict')
+    expect(effectiveProfile('off', undefined)).toBe('off')
     expect(decide(push, 'permissive', false)).toBe('allow')
   })
   test('Codex commands ask: reviews send code out, a write or a transfer asks even under permissive', async () => {

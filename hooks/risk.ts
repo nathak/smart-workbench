@@ -344,8 +344,22 @@ export function classify(tool: string, input: unknown): Verdict {
 // Asked even under the permissive profile.
 export const ALWAYS_ASK = new Set(['project-rule', 'secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec', 'codex-send', 'codex-write', 'codex-transfer'])
 
+const PROFILE_RANK: Record<GuardProfile, number> = { off: -1, permissive: 0, balanced: 1, strict: 2 }
+
+// A checked-in guard file may only tighten the person's own setting: the stricter of the two applies.
+export function effectiveProfile(own: GuardProfile, file: GuardProfile | undefined): GuardProfile {
+  return file !== undefined && PROFILE_RANK[file] > PROFILE_RANK[own] ? file : own
+}
+
 // Applies the profile and the pause switch on top of the default (balanced) rule set.
 export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolean): Policy {
+  // Off: nothing the built-in rules find is stopped. A rule the project wrote itself still holds, and so does the pause switch.
+  if (profile === 'off') {
+    if (verdict.category === 'project-rule') return verdict.policy
+
+    return isPaused && verdict.risk !== 'low' ? 'ask' : 'allow'
+  }
+
   if (verdict.policy === 'block') {
     return 'block'
   }

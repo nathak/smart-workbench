@@ -62,6 +62,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb load <name>` | Start a task from a template |
 | `/swb templates` | List templates and context sets |
 | `/swb export [path]` | Write a Markdown handoff |
+| `/swb guard [high\|medium\|low\|off]` | Show or set the guard sensitivity (see *Guard sensitivity*) |
 | `/swb policy [init\|reload]` | Show, create or re-read the project guard file |
 | `/swb ci` | Import CI results for the current commit |
 | `/swb issue <ref>` | Link the task to an issue |
@@ -195,6 +196,19 @@ Choices are kept per project. The tab also shows the session's current model set
 - `/swb loop status` shows the passes done; `/swb loop stop` ends it after the current turn. A prompt you type yourself also ends it, so you always take the session back.
 - To stop an `inf` loop: `/swb loop stop`, or press Esc and type any prompt. An `inf` loop also ends by itself after 3 passes in a row that change no file: no Edit, Write, MultiEdit or NotebookEdit edit and, in a git repository, no change to the working tree (so edits made by shell commands count there; outside git they do not). The tree is compared by hash (git's changed paths plus each one's size and modification time, read with `git status` and one small read-only node call) at the start of an `inf` loop and at the end of each of its passes. A file touched without a change in size counts too, since its modification time moves. Build output that is not git-ignored and changes every pass keeps an `inf` loop alive until you stop it. Each pass costs a full turn (and, with team mode, an Opus final check when code changed), so prefer a count unless you are watching.
 - Loop state lives in the session only; a restart never resumes one. The audit log records `loop.start`, `loop.pass`, `loop.done`, `loop.stop` and `loop.cancel`.
+
+### Guard sensitivity
+
+`/swb guard high|medium|low|off` (also `strict`, `balanced`, `permissive`; `상`, `중`, `하` in Korean), or the Guard profile selector in the panel. It is your own setting, kept per project.
+
+| Level | What changes |
+|---|---|
+| high (strict) | Medium-risk calls (edits, installs, …) are asked too |
+| medium (balanced) | The default: the rules below |
+| low (permissive) | Most questions are skipped; blocks, secrets, remote scripts, MCP deploys, Codex sends and project rules are still asked or blocked |
+| off | The built-in rules stop nothing: no question, no block. A rule your own project guard file wrote and the *Pause risky calls* switch still apply |
+
+A checked-in guard file can only raise the level (the stricter of the two applies) and can never set `off`; a template or a shared task cannot either. Every change is written to the audit log (`guard.profile`). Calls are still recorded in the live view with their risk, so you can see what went through.
 
 ### Built-in guard rules (Balanced)
 
@@ -476,6 +490,7 @@ claude plugin update smartworkbench
 | `/swb load <name>` | 템플릿으로 작업 시작 |
 | `/swb templates` | 템플릿·Context set 목록 |
 | `/swb export [path]` | Markdown handoff 쓰기 |
+| `/swb guard [high\|medium\|low\|off]` | Guard 민감도 보기·설정(*Guard 민감도* 참고) |
 | `/swb policy [init\|reload]` | 프로젝트 Guard 파일 보기·생성·다시 읽기 |
 | `/swb ci` | 현재 커밋의 CI 결과 가져오기 |
 | `/swb issue <ref>` | 작업에 이슈 연결 |
@@ -609,6 +624,19 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - `/swb loop status` 로 진행 횟수를 보고, `/swb loop stop` 으로 현재 턴이 끝난 뒤 종료합니다. 직접 프롬프트를 입력해도 종료되어 세션은 항상 사용자에게 돌아옵니다.
 - `inf` 루프를 멈추려면 `/swb loop stop`, 또는 Esc 를 누르고 아무 프롬프트나 입력하세요. `inf` 루프는 파일을 바꾸지 않은 회차가 3번 이어지면 스스로 끝납니다. 편집 도구(Edit·Write·MultiEdit·NotebookEdit)로 바꾼 것이 없고, git 저장소라면 작업 트리도 그대로일 때입니다(git 저장소에서는 셸 명령으로 고친 것도 변경으로 칩니다. git이 아니면 세지 않습니다). `inf` 루프는 시작할 때와 매 회차 끝에 작업 트리를 해시로 비교합니다(git이 알려 주는 변경 경로와 그 파일의 크기·수정 시각을 `git status`와 읽기 전용 node 호출 1번으로 읽습니다). 크기가 같아도 수정 시각이 바뀌면 변경으로 칩니다. `.gitignore`에 없는 빌드 산출물이 매 회차 바뀌면 `inf` 루프는 멈추기 전까지 계속됩니다. 한 회차가 한 턴 분량의 비용(팀 모드에서 코드를 바꾸면 Opus 최종 점검 포함)이므로 지켜보지 않을 때는 횟수를 지정하세요.
 - 루프 상태는 세션에만 있어 재시작해도 이어지지 않습니다. 감사 로그에 `loop.start`·`loop.pass`·`loop.done`·`loop.stop`·`loop.cancel` 이 남습니다.
+
+### Guard 민감도
+
+`/swb guard high|medium|low|off`(`strict`·`balanced`·`permissive`, 한글 `상`·`중`·`하`도 됨) 또는 패널의 Guard 프로필 선택으로 바꿉니다. 본인의 설정이고 프로젝트별로 저장됩니다.
+
+| 단계 | 달라지는 점 |
+|---|---|
+| high (strict) | 위험도 중간인 호출(편집, 설치 등)도 묻습니다 |
+| medium (balanced) | 기본값: 아래 규칙 |
+| low (permissive) | 대부분의 질문을 건너뜁니다. 차단, 비밀, 원격 스크립트, MCP 배포, Codex 전송, 프로젝트 규칙은 그대로 묻거나 막습니다 |
+| off | 기본 규칙이 아무것도 막지 않습니다(질문도 차단도 없음). 프로젝트 Guard 파일에 직접 쓴 규칙과 *Pause risky calls* 스위치는 계속 적용됩니다 |
+
+저장소의 Guard 파일은 단계를 높이기만 할 수 있고(둘 중 엄격한 쪽 적용) `off`로는 못 바꿉니다. 템플릿과 공유된 작업도 마찬가지입니다. 바꿀 때마다 감사 로그에 `guard.profile`이 남고, 실시간 화면에는 통과한 호출도 위험도와 함께 기록됩니다.
 
 ### 기본 Guard 규칙 (Balanced)
 

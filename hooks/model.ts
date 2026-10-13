@@ -21,6 +21,7 @@ import { parsePinSpec, rangeLabel } from './context'
 import { lastCheckedEdit, type ParsedDiff } from './diff'
 import { completionOf, guessLink } from './evidence'
 import { categoryOf } from './files'
+import { effectiveProfile } from './risk'
 
 export const MAX_CALLS = 100
 export const MAX_EVIDENCE = 200
@@ -267,7 +268,8 @@ export function applyTemplate(wb: Workbench, template: Template): Workbench {
     ...wb,
     task,
     context: { ...wb.context, pins: safePins(template.pins).map(one => ({ ...one, id: newId('p') })) },
-    execution: { ...wb.execution, profile: template.profile },
+    // A saved template never turns the guard off.
+    execution: { ...wb.execution, profile: template.profile === 'off' ? wb.execution.profile : template.profile },
     evidence: [],
     changed: emptyChanged(),
     proposals: [],
@@ -442,7 +444,7 @@ export function cut(text: string, width: number): string {
 }
 
 export function guardLabel(wb: Workbench, live: Live): string {
-  const profile = live.policy?.profile ?? wb.execution.profile
+  const profile = effectiveProfile(wb.execution.profile, live.policy?.profile)
 
   return wb.execution.isPaused ? 'PAUSED' : `${profile.toUpperCase()}${live.policy ? '*' : ''}`
 }

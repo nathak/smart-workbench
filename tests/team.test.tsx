@@ -324,6 +324,28 @@ test('the guard file edit is never offered "Allow for session"', async ($, on) =
   expect(asked).toEqual(['Allow|Block'])
 })
 
+test('/swb guard sets the sensitivity; off lets a blocked call through', async ($, on) => {
+  const asked: string[] = []
+  world(on, {
+    ask: labels => {
+      asked.push(labels.join('|'))
+      return 'Block'
+    },
+  })
+
+  expect((await $.command.run({ command: 'swb', args: 'guard', ...COMMAND })).text).toContain('medium (balanced)')
+  expect((await $.command.run({ command: 'swb', args: 'guard huge', ...COMMAND })).text).toContain('Usage')
+  const forced = await $.tool.call({ tool: 'Bash', command: 'git push --force origin main' })
+  expect('block' in forced || 'deny' in forced).toBe(true)
+
+  expect((await $.command.run({ command: 'swb', args: 'guard off', ...COMMAND })).text).toContain('guard is off')
+  const through = await $.tool.call({ tool: 'Bash', command: 'git push --force origin main' })
+  expect('block' in through || 'deny' in through).toBe(false)
+  expect(asked).toEqual([])
+
+  expect((await $.command.run({ command: 'swb', args: 'guard 상', ...COMMAND })).text).toContain('high (strict)')
+})
+
 const PROPOSE = 'mcp__smartworkbench__propose_contract_change'
 
 test('Claude proposes a contract change; the person approves it in the panel', async ($, on) => {
