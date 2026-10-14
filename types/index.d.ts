@@ -170,7 +170,7 @@ export type Workbench = {
 
 export type TeamRoleName = 'lead' | 'explorer' | 'advisor'
 
-// A model alias or id (sonnet, opus[1m], claude-haiku-4-5-20251001) and an effort level.
+// A model alias or id (sonnet, opus[1m], claude-haiku-5-5) and an effort level.
 export type TeamRole = { model: string; effort: string }
 
 // What team mode may do with the OpenAI Codex plugin. Off by default: Codex sends code to OpenAI.
