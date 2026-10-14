@@ -176,7 +176,7 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
   - **Repeated error**: when the same command fails twice with no pass of it in between (the count carries across turns until it passes), its result tells Claude to consult the advisor with the error output and what it tried (once per command until it does).
   - **Final check**: a turn that changed code is held once at the end until the advisor has looked at it; if Claude finishes anyway, the next stop goes through.
 - `/swb advise [topic]` asks the advisor any time. The Run tab shows team mode and the number of Opus reviews; the band shows `Team`; the audit log records `team.*` events.
-- Haiku here is Haiku 4.5, the current Haiku model.
+- Haiku here is Haiku 5.5, the current Haiku model.
 
 **Codex (OpenAI), optional.** If the Codex plugin (`/plugin install codex@openai-codex`) is installed, team mode can use it as a second opinion. It is off by default, because Codex sends the diff and the files it reads to OpenAI under your Codex account (billed there, secrets are not filtered out by SmartWorkbench).
 
@@ -619,7 +619,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
   - **반복 오류**: 같은 명령이 그 사이 성공 없이 2번 실패하면(횟수는 성공할 때까지 턴을 넘어 이어짐), 그 결과에 오류 출력과 시도한 내용을 들고 advisor와 상의하라는 안내를 붙입니다(명령마다 상의할 때까지 한 번).
   - **마무리 점검**: 코드를 고친 턴은 advisor가 본 뒤에 끝나도록 마지막에 한 번 붙잡습니다. 그래도 끝내면 다음 종료는 통과합니다.
 - `/swb advise [주제]`로 언제든 물을 수 있습니다. Run 탭에 팀 모드와 Opus 검토 횟수가, 밴드에 `Team`이, 감사 로그에 `team.*` 사건이 남습니다.
-- 여기서 Haiku는 현재 Haiku 모델인 Haiku 4.5입니다.
+- 여기서 Haiku는 현재 Haiku 모델인 Haiku 5.5입니다.
 
 **Codex(OpenAI), 선택 사항.** Codex 플러그인(`/plugin install codex@openai-codex`)이 설치되어 있으면 팀 모드가 이를 교차검증용 두 번째 의견으로 쓸 수 있습니다. 기본은 꺼짐입니다. Codex는 diff와 읽은 파일을 사용자의 Codex 계정으로 OpenAI에 보내고(비용도 그쪽에 청구), SmartWorkbench는 비밀 값을 걸러 주지 않기 때문입니다.
 
