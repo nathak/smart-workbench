@@ -4,8 +4,16 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-14
+
 ### Added
 - Decision ledger (off until `/swb ledger on`): prompts, answers, tool calls, guard decisions, edits and observed commits are kept as JSON lines inside the git directory, and `/swb why <file[:line]|commit>` shows the turn behind a change through `git blame`. Local only; sharing between people, search and notes come later.
+
+### Fixed
+- The side panel's prompt rows no longer squeeze the prompt text to one letter per line.
+
+### Changed
+- The README opens with a short overview naming team mode and live monitoring.
 
 ## [0.17.1] - 2026-10-14
 
