@@ -4,6 +4,9 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- Decision ledger (off until `/swb ledger on`): prompts, answers, tool calls, guard decisions, edits and observed commits are kept as JSON lines inside the git directory, and `/swb why <file[:line]|commit>` shows the turn behind a change through `git blame`. Local only; sharing between people, search and notes come later.
+
 ## [0.17.1] - 2026-10-14
 
 ### Fixed

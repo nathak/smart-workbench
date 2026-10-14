@@ -5,6 +5,7 @@ import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardPr
 import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
+import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, ledgerLine, locate, parseLedger, turnReport, whyTarget, type Found, type LedgerEvent } from './ledger'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -54,6 +55,8 @@ const HELP = [
   '  /smartworkbench load <name>      start a task from a template',
   '  /smartworkbench templates        list templates and context sets',
   '  /smartworkbench export [path]    write a Markdown handoff (default .claude/smartworkbench-handoff.md)',
+  '  /smartworkbench ledger [on|off]  record conversation, actions and guard decisions beside the repository (off until turned on)',
+  '  /smartworkbench why <file[:line]|commit>  show the turn, decisions and guard calls behind a change',
   '  /smartworkbench guard [high|medium|low|off]   how strict the guard is (medium is the default)',
   '  /smartworkbench policy [init|reload]  show, create or re-read the project guard file (.claude/smartworkbench.json)',
   '  /smartworkbench ci               import CI results for the current commit (uses the gh CLI)',
@@ -236,6 +239,8 @@ async function agentOutput($: $, result: unknown): Promise<Record<string, unknow
 }
 
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
+  // The prompt's full text is recorded where it is received; every other event is the feed's event.
+  if (ledger && kind !== 'prompt') await record($, kind, detail)
   try {
     const path = `${await $.session.root()}/${LIVE_FILE}`
     // The feed is written only while a live server owns it: its process note must be beside it, so a feed file that was committed to the repository is never appended to.
@@ -293,6 +298,150 @@ async function audit($: $, event: string, detail: Record<string, unknown> = {}):
   } catch (error) {
     $.ui.log(`SmartWorkbench: audit write failed: ${error instanceof Error ? error.message : String(error)}`, { to: 'debug' })
   }
+}
+
+// ---- decision ledger: off until /swb ledger on. One JSON line per event in a file of its own for each run of a session, beside the repository's
+// git data (so it is never committed by accident), kept as the source of truth; later readers (/swb why) only read it.
+type LedgerState = { dir: string; session: string; seq: number; turn: number; head?: string; goal?: string }
+let ledger: LedgerState | undefined
+let isLedgerNoted = false
+
+async function ledgerDirOf($: $): Promise<string> {
+  const root = await $.session.root()
+  const ran = await $.process.run(['git', 'rev-parse', '--git-common-dir'], { cwd: root }).catch(() => undefined)
+  const out = ran?.exitCode === 0 ? ran.stdout.trim() : ''
+  if (out === '') return `${root}/.claude/swb-ledger`
+
+  return `${/^(?:[A-Za-z]:)?[\\/]/.test(out) ? out : `${root}/${out}`}/swb-ledger`
+}
+
+const MKDIR_SCRIPT = "require('fs').mkdirSync(process.argv[1], { recursive: true })"
+// The newest session files, whole, up to a size: the reader never holds the whole history.
+const READ_LEDGER_SCRIPT =
+  "const fs=require('fs'),p=require('path');const d=p.join(process.argv[1],'sessions');let out=[],used=0;try{const files=fs.readdirSync(d).filter(f=>f.endsWith('.jsonl')).map(f=>({f,t:fs.statSync(p.join(d,f)).mtimeMs})).sort((a,b)=>b.t-a.t);for(const {f} of files){const text=fs.readFileSync(p.join(d,f),'utf8');used+=text.length;if(used>8e6)break;out.push(text)}}catch{}process.stdout.write(out.join('\\n'))"
+
+const ledgerText = (text: string): string => redact(text.length <= LEDGER_TEXT_MAX ? text : text.slice(0, LEDGER_TEXT_MAX).replace(/\S*$/, ''))
+
+async function gitOut($: $, argv: string[]): Promise<string | undefined> {
+  const ran = await $.process.run(['git', '-c', 'core.quotePath=false', ...argv], { cwd: await $.session.root() }).catch(() => undefined)
+
+  return ran?.exitCode === 0 ? ran.stdout : undefined
+}
+
+// Never throws: a ledger that cannot be written is told once and the work goes on.
+async function record($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
+  const one = ledger
+  if (!one) return
+  try {
+    const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? ledgerText(value) : value]))
+    const event: LedgerEvent = { ...masked, v: LEDGER_VERSION, seq: ++one.seq, at: await $.clock.now(), session: one.session, turn: one.turn, kind }
+    await appendLine($, `${one.dir}/sessions/${one.session}.jsonl`, `\n${ledgerLine(event)}\n`)
+  } catch (error) {
+    if (!isLedgerNoted) {
+      isLedgerNoted = true
+      $.ui.toast(`SmartWorkbench: the ledger cannot be written (${model.cut(error instanceof Error ? error.message : String(error), 120)}); this session's history will have gaps.`)
+    }
+  }
+}
+
+async function ledgerStart($: $, force = false): Promise<void> {
+  ledger = undefined
+  isLedgerNoted = false
+  const dir = await ledgerDirOf($)
+  if (!force && !(await $.fs.exists(`${dir}/enabled`))) return
+  await $.process.run(['node', '-e', MKDIR_SCRIPT, '--', `${dir}/sessions`]).catch(() => undefined)
+  const live = await read($, liveAtom)
+  const now = await $.clock.now()
+  const head = (await gitOut($, ['rev-parse', 'HEAD']))?.trim()
+  ledger = { dir, session: `${(live.sessionId ?? 'local').slice(0, 8)}-${now.toString(36)}`, seq: 0, turn: 0, ...(head ? { head } : {}) }
+  const name = (await gitOut($, ['config', 'user.name']))?.trim()
+  const branch = (await gitOut($, ['rev-parse', '--abbrev-ref', 'HEAD']))?.trim()
+  await record($, 'session.start', { ...(name ? { user: name } : {}), ...(branch ? { branch } : {}), ...(head ? { head } : {}) })
+}
+
+// Commits made since the last look, with the files each one touched; `via` says where it was noticed (a commit noticed at the next prompt may have been made by hand).
+async function noteCommits($: $, via: 'tool' | 'turn' | 'prompt'): Promise<void> {
+  const one = ledger
+  if (!one) return
+  const sha = (await gitOut($, ['rev-parse', 'HEAD']))?.trim()
+  if (!sha || sha === one.head) return
+  const log = await gitOut($, one.head ? ['log', '--reverse', '-n', '20', '--format=%H%x09%s', `${one.head}..${sha}`] : ['log', '-n', '1', '--format=%H%x09%s', sha])
+  one.head = sha
+  for (const row of (log ?? '').split('\n')) {
+    const [id, ...rest] = row.split('\t')
+    if (!id) continue
+    const files = (await gitOut($, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', id]))?.split('\n').filter(Boolean).slice(0, 50) ?? []
+    await record($, 'commit', { sha: id, subject: rest.join('\t'), files, via })
+  }
+}
+
+async function readLedger($: $, dir: string): Promise<LedgerEvent[]> {
+  const ran = await $.process.run(['node', '-e', READ_LEDGER_SCRIPT, '--', dir]).catch(() => undefined)
+
+  return ran?.exitCode === 0 ? parseLedger(ran.stdout) : []
+}
+
+async function ledgerCommand($: $, name: string): Promise<{ text: string }> {
+  const dir = await ledgerDirOf($)
+  const isOn = await $.fs.exists(`${dir}/enabled`)
+  if (name === 'on') {
+    await $.process.run(['node', '-e', MKDIR_SCRIPT, '--', `${dir}/sessions`])
+    await $.fs.write(`${dir}/enabled`, '1\n')
+    await ledgerStart($, true)
+
+    return { text: `Ledger on. From now on this session's prompts, answers, actions, guard decisions, edits and commits are written to ${dir}/sessions (masked; local only, never committed). /swb why <file[:line]|commit> reads it. /swb ledger off stops recording and keeps what was written.` }
+  }
+  if (name === 'off') {
+    await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', `${dir}/enabled`]).catch(() => undefined)
+    ledger = undefined
+
+    return { text: `Ledger off. What was written stays in ${dir}/sessions.` }
+  }
+  if (name !== '' && name !== 'status') return { text: 'Usage: /swb ledger [on|off|status]' }
+  const events = isOn ? await readLedger($, dir) : []
+  const sessions = new Set(events.map(one => one.session)).size
+
+  return { text: `Ledger: ${isOn ? 'on' : 'off'} (${dir}).${isOn ? ` ${events.length} events from ${sessions} session runs; this run ${ledger?.session ?? 'is not recording'}.` : '\n/swb ledger on records the conversation, actions and guard decisions of this project beside its git data, so /swb why can say why a change was made.'}` }
+}
+
+async function whyCommand($: $, arg: string): Promise<{ text: string }> {
+  const dir = await ledgerDirOf($)
+  const events = await readLedger($, dir)
+  if (events.length === 0) return { text: `The ledger has no entries (${dir}). It records only from the moment /swb ledger on is run.` }
+  const root = await $.session.root()
+  const paths = new Map<string, boolean>()
+  for (const word of [arg.trim(), arg.trim().replace(/:\d+$/, '')]) paths.set(word, word !== '' && (await $.fs.exists(await rooted($, word))))
+  const target = whyTarget(arg, word => paths.get(word) === true)
+  if (!target) return { text: 'Usage: /swb why <file[:line]|commit>' }
+  const fileOf = (file: string): string => repoPath(file, root) ?? file
+  const shas: string[] = []
+  const file = target.kind === 'commit' ? undefined : fileOf(target.file)
+  const found: Found[] = []
+  if (target.kind === 'line') {
+    const blamed = await gitOut($, ['blame', '-L', `${target.line},${target.line}`, '--porcelain', '--', file as string])
+    const sha = blamed?.split('\n')[0]?.split(' ')[0] ?? ''
+    if (/^0+$/.test(sha)) found.push(...editedTurns(events, file as string).slice(0, 1))
+    else if (sha) shas.push(sha)
+    else return { text: `git blame could not read ${target.file}:${target.line}.` }
+  } else if (target.kind === 'file') {
+    const dirty = (await gitOut($, ['status', '--porcelain', '--', file as string]))?.trim() !== ''
+    if (dirty) found.push(...editedTurns(events, file as string).slice(0, 1))
+    shas.push(...((await gitOut($, ['log', '-n', '5', '--format=%H', '--', file as string])) ?? '').split('\n').filter(Boolean))
+  } else {
+    const full = (await gitOut($, ['rev-parse', '--verify', `${target.sha}^{commit}`]))?.trim()
+    if (!full) return { text: `${target.sha} is not a commit in this repository.` }
+    shas.push(full)
+  }
+  for (const sha of shas) {
+    const files = ((await gitOut($, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha])) ?? '').split('\n').filter(Boolean)
+    const stamp = Number((await gitOut($, ['show', '-s', '--format=%ct', sha]))?.trim()) * 1000
+    const at = locate(events, sha, files, Number.isFinite(stamp) ? stamp : undefined)
+    if (at) found.push(at)
+  }
+  const seen = new Set<string>()
+  const reports = found.filter(one => !seen.has(`${one.session}:${one.turn}`) && seen.add(`${one.session}:${one.turn}`)).map(one => turnReport(events, one, file))
+
+  return { text: reports.length === 0 ? `No ledger entry explains ${arg.trim()}: its commits were made before the ledger was turned on, outside a recorded session, or on another machine.` : reports.join('\n\n────────\n\n') }
 }
 
 async function setLive($: $, change: (live: Live) => Live): Promise<void> {
@@ -1304,6 +1453,10 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     return { text: entries.length === 0 ? `No audit entries in ${config.path} yet.` : `${config.path} (last ${Math.min(count, entries.length)} of ${entries.length}):\n${formatAudit(entries, count)}` }
   }
 
+  if (word === 'ledger') return ledgerCommand($, name.toLowerCase())
+
+  if (word === 'why') return whyCommand($, args.trim().slice(word.length))
+
   if (word === 'guard') {
     const names: Record<string, GuardProfile> = { high: 'strict', strict: 'strict', 상: 'strict', medium: 'balanced', mid: 'balanced', balanced: 'balanced', 중: 'balanced', low: 'permissive', permissive: 'permissive', 하: 'permissive', off: 'off' }
     const label: Record<GuardProfile, string> = { strict: 'high (strict)', balanced: 'medium (balanced)', permissive: 'low (permissive)', off: 'off' }
@@ -2012,8 +2165,9 @@ export const register: Register = on => {
     feedMissed = 0
     isFeedNoted = false
     treeRoot = undefined
+    ledger = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
-    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|why|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
@@ -2044,6 +2198,7 @@ export const register: Register = on => {
     await registerRole($, 'advisor')
     const codexPath = await detectCodex($)
     await setLive($, live => ({ ...live, codexPath }))
+    await ledgerStart($).catch(() => undefined)
 
     if ((await read($, liveAtom)).policy?.audit) {
       const name = await $.process.run(['git', 'config', 'user.name'], { cwd: await $.session.root() }).catch(() => undefined)
@@ -2111,6 +2266,16 @@ export const register: Register = on => {
     // Own work only, for checking the performance targets with --debug.
     $.ui.log(`SmartWorkbench timing: prompt.submit ${(await $.clock.now()) - startedAt}ms before the prompt went on`, { to: 'debug' })
 
+    if (ledger) {
+      await noteCommits($, 'prompt')
+      ledger.turn++
+      const goal = wb.task.goal.trim()
+      if (goal !== '' && goal !== ledger.goal) {
+        ledger.goal = goal
+        await record($, 'contract', { goal, done: wb.task.doneConditions.map(one => one.text).join(' | ') })
+      }
+      await record($, 'prompt', { origin: e.origin.kind, text: e.text })
+    }
     await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(scanned(e.text)).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
 
     // A loop pass that rides on a typed prompt carries no Codex brief either.
@@ -2300,6 +2465,8 @@ export const register: Register = on => {
       'file_path' in e && typeof e.file_path === 'string' ? e.file_path : typeof notebookPath === 'string' ? notebookPath : undefined
     const inRepo = rawPath === undefined ? undefined : repoPath(rawPath, cwd)
     const path = inRepo ?? rawPath
+    if (ledger && isOk && path !== undefined && model.isEditTool(e.tool)) await record($, 'edit', { file: path, tool: e.tool })
+    if (ledger && isOk && e.tool === 'Bash' && isGitCommit(e.command)) await noteCommits($, 'tool')
     // A Bash run that was interrupted or sent to the background has no known outcome: it neither counts as a failure nor clears one.
     const bashResult = e.tool === 'Bash' && !ran.isError ? (ran.result as { interrupted?: boolean; backgroundTaskId?: string } | undefined) : undefined
     const isUnsettled = bashResult?.interrupted === true || bashResult?.backgroundTaskId !== undefined
@@ -2406,6 +2573,8 @@ export const register: Register = on => {
       return ran
     }
 
+    if (ledger && typeof e.answer === 'string' && e.answer !== '') await record($, 'reply', { text: e.answer })
+    if (ledger) await noteCommits($, 'turn')
     const ctx = await refreshUsage($).catch(() => ({}))
     await emit($, 'turn', { aborted: e.isAborted === true, ...ctx, ...usageOf(e.usage) })
 

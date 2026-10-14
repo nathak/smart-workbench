@@ -1024,6 +1024,80 @@ test('the live feed carries the masked input and output of an ordinary tool call
   expect(secret?.toolIn).toBeUndefined()
 })
 
+const LEDGER_DIR = `${CWD}/.git/swb-ledger`
+const ledgerRuns = (extra: Record<string, { exitCode: number; stdout: string }> = {}) => ({
+  'git rev-parse --git-common-dir': { exitCode: 0, stdout: '.git\n' },
+  'git -c core.quotePath=false rev-parse HEAD': { exitCode: 0, stdout: 'aaaa1111\n' },
+  'git -c core.quotePath=false config user.name': { exitCode: 0, stdout: 'Kim\n' },
+  'git -c core.quotePath=false rev-parse --abbrev-ref HEAD': { exitCode: 0, stdout: 'main\n' },
+  [`node -e ${'x'} -- x`]: { exitCode: 0, stdout: '' },
+  ...extra,
+})
+const ledgerEvents = (writes: Array<{ argv: string[]; stdin?: string }>) =>
+  writes.filter(one => one.argv[0] === 'tee' && one.argv[2]?.startsWith(LEDGER_DIR)).map(one => JSON.parse(one.stdin ?? '{}') as Record<string, unknown>)
+
+test('the ledger is off until turned on, then records prompt, actions, answer and a commit it saw, masked', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const commands = new Proxy(ledgerRuns(), {
+    get: (target, key: string) => (key in target ? target[key as keyof typeof target] : key.startsWith('tee -a') || key.startsWith('node -e') ? { exitCode: 0, stdout: '' } : undefined),
+  }) as Record<string, { exitCode: number; stdout: string }>
+  world(on, { commands, processed: writes })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'before it is on', ...COMPOSER })
+  expect(ledgerEvents(writes)).toEqual([])
+
+  expect((await $.command.run({ command: 'swb', args: 'ledger on', ...COMMAND })).text).toContain('Ledger on')
+  await $.prompt.submit({ text: 'fix the login bug API_KEY=abc123', ...COMPOSER })
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  await $.turn.complete({ answer: 'Fixed it in src/login.ts.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+
+  const events = ledgerEvents(writes)
+  expect(events.map(one => one.kind)).toEqual(expect.arrayContaining(['session.start', 'prompt', 'tool.start', 'tool.end', 'reply']))
+  const prompt = events.find(one => one.kind === 'prompt') as Record<string, unknown>
+  expect(String(prompt.text)).toContain('fix the login bug')
+  expect(String(prompt.text)).not.toContain('abc123')
+  expect(prompt.turn).toBe(1)
+  expect((events.find(one => one.kind === 'reply') as Record<string, unknown>).text).toBe('Fixed it in src/login.ts.')
+  expect(new Set(events.map(one => one.session)).size).toBe(1)
+
+  expect((await $.command.run({ command: 'swb', args: 'ledger off', ...COMMAND })).text).toContain('Ledger off')
+  const before = ledgerEvents(writes).length
+  await $.prompt.submit({ text: 'after it is off', ...COMPOSER })
+  expect(ledgerEvents(writes).length).toBe(before)
+})
+
+test('/swb why finds the turn behind a line through git blame and says when the ledger has nothing', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const lines = [
+    { v: 1, seq: 1, at: 1000, session: 's1', turn: 1, kind: 'prompt', text: 'make login retry' },
+    { v: 1, seq: 2, at: 1100, session: 's1', turn: 1, kind: 'reply', text: 'Added a retry' },
+    { v: 1, seq: 3, at: 1200, session: 's1', turn: 1, kind: 'commit', sha: 'abc1234567', subject: 'Add retry', files: ['src/a.ts'], via: 'tool' },
+  ].map(one => JSON.stringify(one)).join('\n')
+  let stored = ''
+  const commands = new Proxy(
+    {
+      ...ledgerRuns(),
+      'git -c core.quotePath=false blame -L 3,3 --porcelain -- src/a.ts': { exitCode: 0, stdout: 'abc1234567 3 3 1\nauthor x\n' },
+      'git -c core.quotePath=false diff-tree --no-commit-id --name-only -r --root abc1234567': { exitCode: 0, stdout: 'src/a.ts\n' },
+      'git -c core.quotePath=false show -s --format=%ct abc1234567': { exitCode: 0, stdout: '2\n' },
+    },
+    {
+      get: (target, key: string) => (key.includes('readdirSync') ? { exitCode: 0, stdout: stored } : key in target ? target[key as keyof typeof target] : key.startsWith('tee -a') || key.startsWith('node -e') ? { exitCode: 0, stdout: '' } : undefined),
+    },
+  ) as Record<string, { exitCode: number; stdout: string }>
+  world(on, { commands, processed: writes })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'why src/a.ts:3', ...COMMAND })).text).toContain('no entries')
+  stored = lines
+  const text = (await $.command.run({ command: 'swb', args: 'why src/a.ts:3', ...COMMAND })).text
+  expect(text).toContain('Asked: make login retry')
+  expect(text).toContain('Answered: Added a retry')
+  expect(text).toContain('was made in this turn')
+  expect((await $.command.run({ command: 'swb', args: 'why src/zzz.ts', ...COMMAND })).text).toContain('No ledger entry explains')
+})
+
 test('the live feed carries what a subagent answered on the end of the Agent call that ran it, masked and cut', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, agentId: 'sub-1' })

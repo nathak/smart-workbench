@@ -63,6 +63,8 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb templates` | List templates and context sets |
 | `/swb export [path]` | Write a Markdown handoff |
 | `/swb guard [high\|medium\|low\|off]` | Show or set the guard sensitivity (see *Guard sensitivity*) |
+| `/swb ledger [on\|off]` | Record conversation, actions and guard decisions beside the repository (see *Decision ledger*) |
+| `/swb why <file[:line]\|commit>` | Show the turn, decisions and guard calls behind a change |
 | `/swb policy [init\|reload]` | Show, create or re-read the project guard file |
 | `/swb ci` | Import CI results for the current commit |
 | `/swb issue <ref>` | Link the task to an issue |
@@ -209,6 +211,12 @@ Choices are kept per project. The tab also shows the session's current model set
 | off | The built-in rules stop nothing: no question, no block. A rule your own project guard file wrote (with the policy it asks for), edits of that file, and the *Pause risky calls* switch still apply; turning it off asks once |
 
 A checked-in guard file can only raise the level (the stricter of the two applies) and can never set `off`; a template or a shared task cannot either. Every change is written to the audit log (`guard.profile`). Calls are still recorded in the live view with their risk, so you can see what went through.
+
+### Decision ledger
+
+Commits show what changed, not why. `/swb ledger on` records, for this project and this machine, each session's prompts, Claude's answers, tool calls (with masked input and output), guard decisions, edits and the commits it sees made, one JSON line per event under `<git dir>/swb-ledger/sessions/` (inside `.git`, so it is never committed; outside a git repository `.claude/swb-ledger/`). It is **off until you turn it on** (`/swb ledger off` stops it and keeps what was written; `/swb ledger` shows the state). Text is masked like the live feed, with prompts and answers kept up to 20,000 characters.
+
+`/swb why src/a.ts:42` (or a file, or a commit id) finds the commit behind the line with `git blame`, then shows that turn: the goal, the request, the actions with the guard's decisions, the answer and the commit. A commit the ledger saw made is exact; one it did not see (made by hand, or before the ledger was on) is matched by the files it touched and marked *inferred*. Sharing the ledger between people, search and generated notes are not built yet.
 
 ### Built-in guard rules (Balanced)
 
@@ -491,6 +499,8 @@ claude plugin update smartworkbench
 | `/swb templates` | 템플릿·Context set 목록 |
 | `/swb export [path]` | Markdown handoff 쓰기 |
 | `/swb guard [high\|medium\|low\|off]` | Guard 민감도 보기·설정(*Guard 민감도* 참고) |
+| `/swb ledger [on\|off]` | 대화·행동·Guard 판정을 저장소 옆에 기록(*결정 기록* 참고) |
+| `/swb why <파일[:줄]\|커밋>` | 변경 뒤의 턴, 판단, Guard 호출 보기 |
 | `/swb policy [init\|reload]` | 프로젝트 Guard 파일 보기·생성·다시 읽기 |
 | `/swb ci` | 현재 커밋의 CI 결과 가져오기 |
 | `/swb issue <ref>` | 작업에 이슈 연결 |
@@ -637,6 +647,12 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 | off | 기본 규칙이 아무것도 막지 않습니다(질문도 차단도 없음). 프로젝트 Guard 파일에 직접 쓴 규칙(그 규칙이 요구한 대로), 그 파일의 수정, *Pause risky calls* 스위치는 계속 적용됩니다. 끌 때는 한 번 확인을 묻습니다 |
 
 저장소의 Guard 파일은 단계를 높이기만 할 수 있고(둘 중 엄격한 쪽 적용) `off`로는 못 바꿉니다. 템플릿과 공유된 작업도 마찬가지입니다. 바꿀 때마다 감사 로그에 `guard.profile`이 남고, 실시간 화면에는 통과한 호출도 위험도와 함께 기록됩니다.
+
+### 결정 기록(Ledger)
+
+커밋은 무엇이 바뀌었는지만 보여 주고 왜 바뀌었는지는 말해 주지 않습니다. `/swb ledger on`을 켜면 이 프로젝트·이 컴퓨터에서 세션마다 프롬프트, Claude의 답변, 도구 호출(마스킹된 입력·출력), Guard 판정, 편집, 그리고 만들어진 커밋을 한 줄 JSON 이벤트로 `<git 디렉터리>/swb-ledger/sessions/`에 기록합니다(`.git` 안이라 커밋되지 않고, git 저장소가 아니면 `.claude/swb-ledger/`). **켜기 전까지는 꺼져 있습니다**(`/swb ledger off`는 기록을 멈추고 이미 쓴 것은 남기며, `/swb ledger`는 상태를 보여 줍니다). 텍스트는 실시간 보기와 같이 마스킹하고, 프롬프트와 답변은 20,000자까지 보관합니다.
+
+`/swb why src/a.ts:42`(파일이나 커밋 id도 가능)는 `git blame`으로 그 줄의 커밋을 찾아, 그 턴의 목표, 요청, 도구 호출과 Guard 판정, 답변, 커밋을 보여 줍니다. 기록이 직접 본 커밋은 정확하고, 보지 못한 커밋(손으로 한 커밋, 기록을 켜기 전)은 건드린 파일로 맞추며 *추정*이라고 표시합니다. 사람 사이의 공유, 검색, 자동 노트는 아직 없습니다.
 
 ### 기본 Guard 규칙 (Balanced)
 
