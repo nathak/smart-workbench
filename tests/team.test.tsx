@@ -1068,6 +1068,37 @@ test('the ledger is off until turned on, then records prompt, actions, answer an
   expect(ledgerEvents(writes).length).toBe(before)
 })
 
+test('the ledger records the commit a turn made, not the commits a pull brought in, and keeps itself out of git where it sits in the work tree', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const log = 'git -c core.quotePath=false log -g --format=%H%x09%gs -n 50 HEAD'
+  const commands = new Proxy(
+    {
+      ...ledgerRuns({ 'git rev-parse --git-common-dir': { exitCode: 1, stdout: '' } }),
+      // HEAD: at the start and the prompt aaaa1111; when the commit is noticed it is cccc3333, with the pull's bbbb2222 between
+      'git -c core.quotePath=false rev-parse HEAD': [{ exitCode: 0, stdout: 'aaaa1111\n' }, { exitCode: 0, stdout: 'aaaa1111\n' }, { exitCode: 0, stdout: 'cccc3333\n' }] as never,
+      [log]: { exitCode: 0, stdout: 'cccc3333\tcommit: Mine\nbbbb2222\tpull --rebase (finish): returning\naaaa1111\tcommit: old\n' },
+      'git -c core.quotePath=false log -1 --format=%s cccc3333': { exitCode: 0, stdout: 'Mine\n' },
+      'git -c core.quotePath=false diff-tree --no-commit-id --name-only -r --root --relative cccc3333': { exitCode: 0, stdout: 'src/a.ts\n' },
+    },
+    { get: (target, key: string) => (key in target ? target[key as keyof typeof target] : key.startsWith('tee -a') || key.startsWith('node -e') ? { exitCode: 0, stdout: '' } : undefined) },
+  ) as Record<string, { exitCode: number; stdout: string }>
+  const files: Record<string, string> = {}
+  world(on, { commands, processed: writes, files })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'ledger on', ...COMMAND })
+  await $.prompt.submit({ text: 'pull then commit', ...COMPOSER })
+  await $.tool.call({ tool: 'Bash', command: 'git pull --rebase' })
+  await $.tool.call({ tool: 'Bash', command: 'git commit -am Mine' })
+
+  const ledgerWrites = writes.filter(one => one.argv[0] === 'tee' && String(one.argv[2]).includes('swb-ledger')).map(one => JSON.parse(one.stdin ?? '{}') as Record<string, unknown>)
+  const commits = ledgerWrites.filter(one => one.kind === 'commit')
+  expect(commits.map(one => one.sha)).toEqual(['cccc3333'])
+  expect(commits[0]?.files).toEqual(['src/a.ts'])
+  expect(Object.keys(files).some(name => name.endsWith('.claude/swb-ledger/.gitignore'))).toBe(true)
+})
+
 test('/swb why finds the turn behind a line through git blame and says when the ledger has nothing', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   const lines = [
