@@ -10,6 +10,13 @@ A Claude Code mod for seeing and steering the **Intent, Context, Run and Evidenc
 Implements P0 (first public release), P1 (product hardening) and P2 (team features) of the product spec (v0.1), checked in a live terminal session.
 Try it on the [sample project](examples/sample-project/README.md); review what it may do in [PERMISSIONS](docs/PERMISSIONS.md).
 
+**What it is, in short**
+
+- **Team mode** splits the work between models: Sonnet builds, **Haiku explores** (several read-only explorers at once), **Opus designs and reviews** (a design before a big edit, a check before a turn ends, help after a repeated error), with an optional Codex second opinion. `/swb team on`; see [Team mode](#team-mode).
+- **Live monitoring** shows what Claude is doing in a browser as it happens: a timeline of every prompt, tool call (with its masked input and output) and guard decision, the agents and their runs, a flow picture, tokens and context use. One page shows every session of the machine as tabs, and a phone can open it through a reverse proxy. `/swb live`; see [Live view](#live-view).
+- **A task contract and a guard** underneath: a locked goal and done conditions ride along with every prompt, risky calls are asked or blocked (`/swb guard high|medium|low|off`), and the Evidence tab says what has been checked.
+- **A decision ledger** (optional, off by default): keeps the conversation and decisions behind each commit, so `/swb why <file:line>` can say why a change was made. See [Decision ledger](#decision-ledger).
+
 ### Install
 
 At the Claude Code prompt:
@@ -257,7 +264,7 @@ Watch a request flow in a browser: prompts, tool calls and guard decisions, suba
 - **Agents**: subagents by kind (runs, average and p95 time, calls, failures, tokens), each run as a tree, Workflow calls (started only; the end is not reported) and Codex runs.
 - **Flow**: the picture of boxes and links described below. Its toolbar (and the `p` key) pauses the stream: the tiles and tables stand still and events wait until you resume, but a call that waits on you or a block is still spoken and counted in the status bar (`⚠ 1 ask or block held`). The page keeps the last 2000 events; the model behind it is rebuilt from them when it grows past 4000, so what you see never reaches back further than that.
 - **Keys**: `?` lists them. `1`–`4` (tabs), `e`, `g` / `G`, `p`, `t` and `/` work anywhere on the page; `j` / `k` (rows), `n` / `N`, `f`, `z` and `Enter` work while the Timeline list has the focus. In short: `1`–`4` tabs, `j` / `k` rows, `Enter` details, `/` search, `n` / `N`, `e` failures only, `f` follow, `z` zoom to a turn, `g` / `G`, `p` pause, `t` theme, `Esc`. Single-key shortcuts can be turned off there, and do nothing while you type. The theme follows the system (the `light` / `dark` button overrides it); text and controls meet WCAG contrast, status is never colour alone, and a screen reader hears a short summary every few seconds, with a call that waits for you or a block spoken at once.
-- What the feed does not carry, so the page cannot show it: the id that links a subagent's call to the Agent call that started it (only guessed or settled afterwards), the output of ordinary tools (only an Agent call's answer), the reason for an ask until it is answered, how long the guard took, a Workflow's end and its inner calls' owner, cost (no price in the feed), and the context use of subagents.
+- What the feed does not carry, so the page cannot show it: the id that links a subagent's call to the Agent call that started it (only guessed or settled afterwards), the input and output of a call that touches a secrets file (other tools carry up to 2000 masked characters of each), the reason for an ask until it is answered, how long the guard took, a Workflow's end and its inner calls' owner, cost (no price in the feed), and the context use of subagents.
 - Panels of the Flow tab: Opus advisor, user prompt, Sonnet lead, guard decisions (allow / ask / block bars), Haiku dispatcher, worker / explorer / loop.
 - Data flow (Flow tab): each event moves as a dot along the links between the boxes (prompt: user → lead; tool call: lead → guard → worker / dispatcher / Opus; an `ask` waits at the guard until you answer; a finished call walks back; a block returns from the guard in red). Every link shows how many dots crossed it. Subagent calls are attributed to Opus or the explorer by a guess, since the feed carries no parent link.
 - Interaction (Flow tab): click or tap a box or a link for a drawer with what moved through it (tap a row for its fields); hover for a one-line tip. Toolbar: pause / resume (events wait and are applied on resume), replay the last 20 / 50 / 200 events at their recorded pace (each gap held between 0.1 and 1.5 seconds), speed 0.5×–4×, motion on / off (also off with the system's reduced-motion setting), and outcome filters. Feed text is always shown as text, never as markup.
@@ -445,6 +452,13 @@ Developed on Claude Code 2.1.292 and checked in a live terminal session on 2.1.2
 Claude에게 맡긴 작업의 **목표(Intent)·맥락(Context)·실행(Run)·검증(Evidence)** 을 Claude Code 안에서 직접 보고 통제하는 Mod입니다.
 제품 기획서(v0.1)를 기준으로, P0(최초 공개 버전), P1(제품성 강화), P2(팀 기능)를 구현했고 실제 터미널 세션에서 확인했습니다.
 [샘플 프로젝트](examples/sample-project/README.md)로 바로 써 볼 수 있고, 설치 전 [권한 문서](docs/PERMISSIONS.md)에서 Mod가 하는 일을 확인할 수 있습니다.
+
+**한눈에 보기**
+
+- **팀 모드**는 일을 모델별로 나눕니다. Sonnet이 만들고, **Haiku가 탐색**하고(읽기 전용 탐색기를 여러 개 동시에), **Opus가 설계와 검토**를 합니다(큰 수정 전 설계, 턴을 끝내기 전 점검, 같은 오류가 반복될 때 도움). 선택하면 Codex의 두 번째 의견도 받습니다. `/swb team on`, [팀 모드](#팀-모드) 참고.
+- **실시간 모니터링**은 Claude가 하는 일을 브라우저에서 바로 보여 줍니다. 모든 프롬프트, 도구 호출(마스킹된 입력·출력 포함), Guard 판정의 타임라인, 에이전트와 실행, 흐름도, 토큰과 컨텍스트 사용량을 보여 주고, 한 화면에 이 컴퓨터의 모든 세션이 탭으로 나뉘며, 역방향 프록시를 거쳐 휴대폰에서도 열 수 있습니다. `/swb live`, [실시간 보기](#실시간-보기) 참고.
+- **작업 계약과 Guard**가 바탕에 있습니다. 잠근 목표와 완료 조건이 모든 프롬프트에 함께 가고, 위험한 호출은 묻거나 막으며(`/swb guard high|medium|low|off`), Evidence 탭이 무엇을 확인했는지 알려 줍니다.
+- **결정 기록(Ledger)**(선택, 기본 꺼짐)은 각 커밋 뒤의 대화와 판단을 남겨, `/swb why <파일:줄>`로 왜 바뀌었는지 볼 수 있게 합니다. [결정 기록](#결정-기록ledger) 참고.
 
 ### 설치
 
@@ -693,7 +707,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - **에이전트**: 종류별 서브에이전트(실행 수, 평균·p95 시간, 호출, 실패, 토큰), 실행별 트리, Workflow 호출(시작만 보고되고 끝은 알 수 없음), Codex 실행.
 - **흐름**: 아래에 설명한 박스와 연결선 그림. 툴바(와 `p` 키)의 일시정지는 타일과 표를 멈추고 이벤트를 재개 때까지 붙잡아 두지만, 사용자를 기다리는 호출이나 차단은 계속 읽어 주고 상태 표시줄에 `⚠ 확인·차단 1건 대기`로 셉니다. 화면은 최근 2000개 이벤트만 유지하며, 뒤의 모델은 4000개를 넘으면 그 이벤트로 다시 만들어지므로 그보다 먼 과거는 보이지 않습니다.
 - **키보드**: `?`로 목록을 봅니다. `1`–`4`(탭), `e`, `g` / `G`, `p`, `t`, `/`는 화면 어디서나, `j` / `k`(행), `n` / `N`, `f`, `z`, `Enter`는 타임라인 목록에 포커스가 있을 때 동작합니다. 정리하면 `1`–`4` 탭, `j` / `k` 행, `Enter` 상세, `/` 검색, `n` / `N`, `e` 실패만, `f` 따라가기, `z` 턴 확대, `g` / `G`, `p` 일시정지, `t` 테마, `Esc`. 한 글자 단축키는 거기서 끌 수 있고 입력창에 쓰는 동안에는 동작하지 않습니다. 테마는 시스템을 따르고(`밝게` / `어둡게` 버튼으로 바꿈), 글자와 컨트롤은 WCAG 명도 대비를 지키며, 상태는 색만으로 구분하지 않고, 화면 낭독기는 몇 초마다 짧은 요약을 듣고 사용자를 기다리는 호출이나 차단은 바로 읽어 줍니다.
-- 피드에 없어서 화면에도 없는 것: 서브에이전트 호출과 그것을 시작한 Agent 호출을 잇는 id(추정하거나 끝난 뒤에 확정), 일반 도구의 출력(Agent 답변만 있음), 확인에 답하기 전의 이유, 가드 판정에 걸린 시간, Workflow의 끝과 그 안의 호출의 소속, 비용(피드에 단가가 없음), 서브에이전트의 컨텍스트 사용량.
+- 피드에 없어서 화면에도 없는 것: 서브에이전트 호출과 그것을 시작한 Agent 호출을 잇는 id(추정하거나 끝난 뒤에 확정), 비밀 파일을 다루는 호출의 입력·출력(다른 도구는 마스킹된 텍스트를 각각 2000자까지 가짐), 확인에 답하기 전의 이유, 가드 판정에 걸린 시간, Workflow의 끝과 그 안의 호출의 소속, 비용(피드에 단가가 없음), 서브에이전트의 컨텍스트 사용량.
 - 흐름 탭의 패널: Opus 조언자, 사용자 프롬프트, Sonnet 리드, 가드 판정(allow / ask / block 막대), Haiku 디스패처, worker / explorer / loop.
 - 데이터 흐름(흐름 탭): 이벤트마다 박스 사이 연결선을 따라 점이 움직입니다(프롬프트: 사용자 → 리드, 도구 호출: 리드 → 가드 → worker / 디스패처 / Opus, `ask`는 답할 때까지 가드에서 대기, 끝난 호출은 온 길로 되돌아가고, 차단은 가드에서 빨갛게 돌아옵니다). 연결선마다 지나간 횟수가 표시됩니다. 서브에이전트 호출은 피드에 부모 정보가 없어 Opus인지 explorer인지 추정해서 표시합니다.
 - 상호작용(흐름 탭): 박스나 연결선을 클릭(터치)하면 지나간 내용을 담은 서랍이 열리고(행을 누르면 필드 표시), 마우스를 올리면 한 줄 안내가 뜹니다. 툴바: 일시정지/재개(멈춘 동안 온 이벤트는 재개할 때 반영), 최근 20/50/200개를 기록된 간격대로(간격은 0.1~1.5초로 제한) 다시보기, 속도 0.5×~4×, 모션 켬/끔(시스템의 동작 줄이기 설정이면 자동으로 꺼짐), 결과별 필터. 피드의 글자는 항상 글자로만 표시되고 마크업으로 해석되지 않습니다.
