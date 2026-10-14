@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-14
+
 ### Fixed
 - The timeline's input and output tabs were empty for ordinary tool calls: the feed now carries each call's input and result text (secrets masked, cut at 2000 characters, none for a call that touches a secrets file, none with `--no-prompts`).
 
