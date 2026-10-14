@@ -1007,6 +1007,23 @@ test('the live feed says whether a prompt was cut or only partly scanned, not by
   expect(scanned?.promptScanned).toBe(8000)
 })
 
+test('the live feed carries the masked input and output of an ordinary tool call, and none for a secrets file', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Bash', command: 'npm test API_KEY=abc123' })
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/.env` }).catch(() => undefined)
+
+  const lines = feedLines(writes)
+  const start1 = lines.find(one => one.kind === 'tool.start' && one.tool === 'Bash') as Record<string, unknown>
+  expect(String(start1.toolIn)).toContain('npm test')
+  expect(String(start1.toolIn)).not.toContain('abc123')
+  const end1 = lines.find(one => one.kind === 'tool.end' && one.id === start1.id) as Record<string, unknown>
+  expect(end1.toolOut).toBe('ok')
+  const secret = lines.find(one => one.kind === 'tool.start' && one.tool === 'Read') as Record<string, unknown> | undefined
+  expect(secret?.toolIn).toBeUndefined()
+})
+
 test('the live feed carries what a subagent answered on the end of the Agent call that ran it, masked and cut', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, agentId: 'sub-1' })

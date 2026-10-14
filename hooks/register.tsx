@@ -159,7 +159,7 @@ function scanned(text: string): string {
 }
 
 // key: 'prompt' for what is sent to a model, 'output' for what a subagent sent back; the Length, Cut and Scanned fields follow it.
-function promptOf(live: Live, text: string, key: 'prompt' | 'output' = 'prompt'): Record<string, unknown> {
+function promptOf(live: Live, text: string, key: 'prompt' | 'output' | 'toolIn' | 'toolOut' = 'prompt'): Record<string, unknown> {
   if (live.livePrompts === false) return {}
   const masked = redact(scanned(text))
 
@@ -169,6 +169,36 @@ function promptOf(live: Live, text: string, key: 'prompt' | 'output' = 'prompt')
     // Masking alone can shorten a text, so "cut" and "only the start was scanned" are sent as facts, not guessed from lengths.
     ...(masked.length > PROMPT_MAX ? { [`${key}Cut`]: true } : {}),
     ...(text.length > PROMPT_SCAN ? { [`${key}Scanned`]: PROMPT_SCAN } : {}),
+  }
+}
+
+// The input and the result of an ordinary tool call, as text for the call's input and output tabs. Agent, Workflow and Codex calls carry their own fields.
+// A call that touches a secrets file shows neither, and every text goes through the same masking and length limits as a prompt.
+const NO_IO = new Set(['secret-output', 'secret-file', 'guard-policy'])
+
+function inputText(input: unknown): string {
+  const args = (input ?? {}) as Record<string, unknown>
+  if (typeof args.command === 'string') return args.command
+  const shown = Object.fromEntries(Object.entries(args).filter(([key]) => key !== 'tool' && key !== 'tool_use_id' && key !== 'agentId').map(([key, value]) => [key, typeof value === 'string' && value.length > 4000 ? `${value.slice(0, 4000)}…` : value]))
+
+  return JSON.stringify(shown, null, 2)
+}
+
+function resultText(result: unknown): string {
+  if (typeof result === 'string') return result
+  if (typeof result !== 'object' || result === null) return ''
+  const one = result as Record<string, unknown>
+  const streams = [one.stdout, one.stderr].filter((part): part is string => typeof part === 'string' && part !== '')
+  if (streams.length > 0) return streams.join('\n')
+  const content = one.content
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.map(part => (typeof part === 'object' && part !== null && typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : '')).filter(Boolean).join('\n')
+  const file = one.file
+  if (typeof file === 'object' && file !== null && typeof (file as { content?: unknown }).content === 'string') return (file as { content: string }).content
+  try {
+    return JSON.stringify(result, null, 2).slice(0, 20000)
+  } catch {
+    return ''
   }
 }
 
@@ -2190,6 +2220,7 @@ export const register: Register = on => {
       ...(e.tool === 'Agent' && typeof (e as unknown as Record<string, unknown>).prompt === 'string' ? promptOf(live, (e as unknown as Record<string, string>).prompt as string) : {}),
       ...(codexRun && e.tool === 'Bash' ? promptOf(live, e.command) : {}),
       ...(e.tool === 'Workflow' ? workflowFields(live, e) : {}),
+      ...(e.tool !== 'Agent' && e.tool !== 'Workflow' && !codexRun && !NO_IO.has(verdict.category) ? promptOf(live, inputText(e), 'toolIn') : {}),
     })
 
     if (policy === 'block') {
@@ -2263,6 +2294,7 @@ export const register: Register = on => {
     // A finished Workflow call only means the run started in the background; nothing here tells when or how it ends.
     const bg = e.tool === 'Workflow' && ran.deny === undefined && !ran.isError ? { workflowBg: true } : {}
     const agentOut = e.tool === 'Agent' && ran.deny === undefined && !ran.isError ? await agentOutput($, ran.result) : {}
+    const toolOut = e.tool !== 'Agent' && e.tool !== 'Workflow' && !codexRun && !NO_IO.has(verdict.category) && ran.deny === undefined && resultText(ran.result) !== '' ? promptOf(await read($, liveAtom), resultText(ran.result), 'toolOut') : {}
     const notebookPath = (e as unknown as Record<string, unknown>).notebook_path
     const rawPath =
       'file_path' in e && typeof e.file_path === 'string' ? e.file_path : typeof notebookPath === 'string' ? notebookPath : undefined
@@ -2330,12 +2362,12 @@ export const register: Register = on => {
         await audit($, 'team.repeat-error', { tool: e.tool, input: call.summary, count: track.failures[key] ?? 0 })
         // This branch returns early, so the badge and the end of the call are recorded here.
         await badge($, { ...call, outcome })
-        await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut, ...bg })
+        await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut, ...toolOut, ...bg })
         return { ...ran, context: [...(ran.context ?? []), crew.repeatNudge(track.failures[key] ?? crew.REPEAT_LIMIT)] }
       }
     }
     await badge($, { ...call, outcome })
-    await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut, ...bg })
+    await emit($, 'tool.end', { id: call.id, outcome, ms: endedAt - startedAt, ...agentOut, ...toolOut, ...bg })
 
     return ran
     } catch {
