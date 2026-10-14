@@ -5,7 +5,7 @@ import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardPr
 import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
-import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, ledgerLine, locate, parseLedger, turnReport, whyTarget, type Found, type LedgerEvent } from './ledger'
+import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, parseLedger, turnReport, whyTarget, type Found, type LedgerEvent } from './ledger'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -318,7 +318,7 @@ async function ledgerDirOf($: $): Promise<string> {
 const MKDIR_SCRIPT = "require('fs').mkdirSync(process.argv[1], { recursive: true })"
 // The newest session files, whole, up to a size: the reader never holds the whole history.
 const READ_LEDGER_SCRIPT =
-  "const fs=require('fs'),p=require('path');const d=p.join(process.argv[1],'sessions');let out=[],used=0;try{const files=fs.readdirSync(d).filter(f=>f.endsWith('.jsonl')).map(f=>({f,t:fs.statSync(p.join(d,f)).mtimeMs})).sort((a,b)=>b.t-a.t);for(const {f} of files){const text=fs.readFileSync(p.join(d,f),'utf8');used+=text.length;if(used>8e6)break;out.push(text)}}catch{}process.stdout.write(out.join('\\n'))"
+  "const fs=require('fs'),p=require('path');const d=p.join(process.argv[1],'sessions');let out=[],used=0;try{const files=fs.readdirSync(d).filter(f=>f.endsWith('.jsonl')).map(f=>({f,t:fs.statSync(p.join(d,f)).mtimeMs})).sort((a,b)=>b.t-a.t);for(const {f} of files){let text=fs.readFileSync(p.join(d,f),'utf8');if(text.length>8e6)text=text.slice(-8e6).replace(/^[^\\n]*\\n/,'');used+=text.length;if(used>8e6)break;out.push(text)}}catch{}process.stdout.write(out.join('\\n'))"
 
 const ledgerText = (text: string): string => redact(text.length <= LEDGER_TEXT_MAX ? text : text.slice(0, LEDGER_TEXT_MAX).replace(/\S*$/, ''))
 
@@ -350,6 +350,8 @@ async function ledgerStart($: $, force = false): Promise<void> {
   const dir = await ledgerDirOf($)
   if (!force && !(await $.fs.exists(`${dir}/enabled`))) return
   await $.process.run(['node', '-e', MKDIR_SCRIPT, '--', `${dir}/sessions`]).catch(() => undefined)
+  // Where git's own directory cannot be found the ledger sits in the work tree: it ignores itself, so one `git add -A` cannot publish a conversation.
+  if (!(await $.fs.exists(`${dir}/.gitignore`))) await $.fs.write(`${dir}/.gitignore`, '*\n').catch(() => undefined)
   const live = await read($, liveAtom)
   const now = await $.clock.now()
   const head = (await gitOut($, ['rev-parse', 'HEAD']))?.trim()
@@ -359,19 +361,29 @@ async function ledgerStart($: $, force = false): Promise<void> {
   await record($, 'session.start', { ...(name ? { user: name } : {}), ...(branch ? { branch } : {}), ...(head ? { head } : {}) })
 }
 
-// Commits made since the last look, with the files each one touched; `via` says where it was noticed (a commit noticed at the next prompt may have been made by hand).
+// Commits made since the last look, with the files each one touched. Only what the reflog says was committed (commit, amend, cherry-pick, revert) is
+// recorded as made here; a pull, checkout, merge or reset moves HEAD over other people's commits, which are not this session's work.
+// `via` says where it was noticed (a commit noticed at the next prompt may have been made by hand).
 async function noteCommits($: $, via: 'tool' | 'turn' | 'prompt'): Promise<void> {
   const one = ledger
   if (!one) return
   const sha = (await gitOut($, ['rev-parse', 'HEAD']))?.trim()
   if (!sha || sha === one.head) return
-  const log = await gitOut($, one.head ? ['log', '--reverse', '-n', '20', '--format=%H%x09%s', `${one.head}..${sha}`] : ['log', '-n', '1', '--format=%H%x09%s', sha])
+  const before = one.head
   one.head = sha
-  for (const row of (log ?? '').split('\n')) {
+  const reflog = await gitOut($, ['log', '-g', '--format=%H%x09%gs', '-n', '50', 'HEAD'])
+  if (reflog === undefined) return
+  const made: string[] = []
+  for (const row of reflog.split('\n')) {
     const [id, ...rest] = row.split('\t')
     if (!id) continue
-    const files = (await gitOut($, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', id]))?.split('\n').filter(Boolean).slice(0, 50) ?? []
-    await record($, 'commit', { sha: id, subject: rest.join('\t'), files, via })
+    if (id === before) break
+    if (isOwnCommit(rest.join('\t'))) made.push(id)
+  }
+  for (const id of made.reverse()) {
+    const subject = (await gitOut($, ['log', '-1', '--format=%s', id]))?.trim() ?? ''
+    const files = (await gitOut($, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', '--relative', id]))?.split('\n').filter(Boolean).slice(0, 50) ?? []
+    await record($, 'commit', { sha: id, subject, files, via })
   }
 }
 
@@ -389,7 +401,7 @@ async function ledgerCommand($: $, name: string): Promise<{ text: string }> {
     await $.fs.write(`${dir}/enabled`, '1\n')
     await ledgerStart($, true)
 
-    return { text: `Ledger on. From now on this session's prompts, answers, actions, guard decisions, edits and commits are written to ${dir}/sessions (masked; local only, never committed). /swb why <file[:line]|commit> reads it. /swb ledger off stops recording and keeps what was written.` }
+    return { text: `Ledger on. From now on this session's prompts, answers, actions, guard decisions, edits and commits are written to ${dir}/sessions (masked; local only, never committed). /swb why <file[:line]|commit> reads it. /swb ledger off stops recording and keeps what was written (other sessions already running stop at their next start).` }
   }
   if (name === 'off') {
     await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', `${dir}/enabled`]).catch(() => undefined)
@@ -433,7 +445,7 @@ async function whyCommand($: $, arg: string): Promise<{ text: string }> {
     shas.push(full)
   }
   for (const sha of shas) {
-    const files = ((await gitOut($, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha])) ?? '').split('\n').filter(Boolean)
+    const files = ((await gitOut($, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', '--relative', sha])) ?? '').split('\n').filter(Boolean)
     const stamp = Number((await gitOut($, ['show', '-s', '--format=%ct', sha]))?.trim()) * 1000
     const at = locate(events, sha, files, Number.isFinite(stamp) ? stamp : undefined)
     if (at) found.push(at)

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { editedTurns, isGitCommit, ledgerLine, locate, parseLedger, turnReport, whyTarget, type LedgerEvent } from '../hooks/ledger'
+import { editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, parseLedger, turnReport, whyTarget, type LedgerEvent } from '../hooks/ledger'
 
 const ev = (seq: number, at: number, kind: string, turn: number, rest: Record<string, unknown> = {}): LedgerEvent => ({ v: 1, seq, at, session: 's1', turn, kind, ...rest })
 
@@ -10,7 +10,7 @@ test('a ledger line round-trips and a torn or foreign line is skipped', () => {
 })
 
 test('git commit is found as a command, with git options and after separators, not inside other words', () => {
-  for (const yes of ['git commit -m x', 'git -C sub commit -am "x"', 'git -c user.name=a commit', 'npm test && git commit -m x', 'cd a; git commit']) expect(isGitCommit(yes)).toBe(true)
+  for (const yes of ['git commit -m x', 'git -C sub commit -am "x"', 'git -c user.name=a commit', 'npm test && git commit -m x', 'cd a; git commit', 'git add .\ngit commit -m x', 'GIT_AUTHOR_DATE=now git commit -m x']) expect(isGitCommit(yes)).toBe(true)
   for (const no of ['git log --oneline', 'git commit-tree abc', 'echo git commit', 'git status']) expect(isGitCommit(no)).toBe(false)
 })
 
@@ -63,4 +63,9 @@ test('uncommitted edits are found by file, newest turn first', () => {
   expect(editedTurns(history, 'src/other.ts')).toEqual([{ session: 's1', turn: 2, how: 'inferred', sha: '' }])
   expect(turnReport(history, { session: 's1', turn: 2, how: 'inferred', sha: '' })).toContain('Not committed yet')
   expect(editedTurns(history, 'nope.ts')).toEqual([])
+})
+
+test('only a commit, an amend, a cherry-pick or a revert is a commit made here; a pull, checkout or reset is not', () => {
+  for (const yes of ['commit: Fix it', 'commit (amend): Fix it', 'commit (merge): x', 'commit (initial): x', 'cherry-pick: x', 'revert: x']) expect(isOwnCommit(yes)).toBe(true)
+  for (const no of ['pull --rebase (finish): returning to refs/heads/main', 'checkout: moving from a to b', 'reset: moving to HEAD~1', 'merge feature: Fast-forward', 'rebase (pick): theirs', '']) expect(isOwnCommit(no)).toBe(false)
 })

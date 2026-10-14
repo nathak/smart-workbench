@@ -28,8 +28,8 @@ export function parseLedger(text: string): LedgerEvent[] {
   return out
 }
 
-// `git commit` as a command of its own, after any shell separator and with git's own options (-C dir, -c k=v) before the subcommand.
-const GIT_COMMIT = /(?:^|[;&|(]\s*)git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*\s+commit(?:\s|$)/
+// `git commit` as a command of its own, after any shell separator or line break, with variables before it and git's own options (-C dir, -c k=v) before the subcommand.
+const GIT_COMMIT = /(?:^|[;&|(\n]\s*)(?:\w+=\S*\s+)*git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*\s+commit(?:\s|$)/
 
 export function isGitCommit(command: string): boolean {
   return GIT_COMMIT.test(command)
@@ -52,6 +52,11 @@ const cut = (text: unknown, max: number): string => {
   const one = String(text ?? '').replace(/\s+/g, ' ').trim()
 
   return one.length > max ? `${one.slice(0, max - 1)}…` : one
+}
+
+// What a reflog entry's message says moved HEAD: only these make a commit that was made here; a pull, checkout, merge-less move or reset brings in commits that are not this session's work.
+export function isOwnCommit(message: string): boolean {
+  return /^(?:commit|cherry-pick|revert)(?:\b|:|\s|$)/.test(message.trim())
 }
 
 export type Found = { session: string; turn: number; how: 'observed' | 'inferred'; sha: string }
