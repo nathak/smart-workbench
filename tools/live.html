@@ -543,7 +543,7 @@ function ingest(tr, ev){
       sp = tr.spans.get(id);
       if (!sp) break;
       sp.end = at; sp.outcome = ev.outcome || 'ok'; sp.ms = typeof ev.ms === 'number' ? ev.ms : null;
-      sp.output = typeof ev.output === 'string' ? ev.output : ''; sp.workflowBg = ev.workflowBg === true; sp.endEv = ev;
+      sp.output = typeof ev.output === 'string' ? ev.output : (typeof ev.toolOut === 'string' ? ev.toolOut : ''); sp.workflowBg = ev.workflowBg === true; sp.endEv = ev;
       tr.pendingAsk.delete(id);
       if (ev.agentRun) {
         sp.agentRun = clean(ev.agentRun, 40);
@@ -726,7 +726,7 @@ function parseQuery(text){
 function cmpOk(c, v){ return c.op === '>' ? v > c.n : c.op === '<' ? v < c.n : c.op === '>=' ? v >= c.n : c.op === '<=' ? v <= c.n : v === c.n; }
 function spanText(sp){
   var ev = sp.ev || {};
-  return [sp.tool, sp.summary, ev.prompt || '', sp.output || '', sp.guard ? sp.guard.reason + ' ' + ((sp.guard.ev && sp.guard.ev.input) || '') : ''].join('\n').toLowerCase();
+  return [sp.tool, sp.summary, ev.prompt || ev.toolIn || '', sp.output || '', sp.guard ? sp.guard.reason + ' ' + ((sp.guard.ev && sp.guard.ev.input) || '') : ''].join('\n').toLowerCase();
 }
 function termMatches(t, sp, now){
   var st = statusOf(sp), ok;
@@ -1890,13 +1890,19 @@ function openItem(key){
     box.appendChild(cp);
   } else if (itemTab === 'input') {
     var ev = sp.ev || {};
-    if (typeof ev.prompt === 'string' && ev.prompt) {
-      box.appendChild(el('div', 'muted', (ev.promptLength || ev.prompt.length) + L(' chars', ' 자') + (ev.promptCut ? L(' · cut at 2000', ' · 2000자에서 잘림') : '') + (ev.promptScanned ? L(' · only the first ' + ev.promptScanned + ' characters were scanned for secrets', ' · 앞 ' + ev.promptScanned + '자만 비밀 검사') : '')));
-      box.appendChild(el('pre', 'full', keep(ev.prompt)));
-    } else box.appendChild(el('div', 'empty', L('The feed carries no input for this call (only Agent, Workflow and Codex briefs are recorded).', '이 호출의 입력은 피드에 없습니다(Agent·Workflow·Codex 입력만 기록됨).')));
+    var inText = typeof ev.prompt === 'string' && ev.prompt ? ev.prompt : typeof ev.toolIn === 'string' ? ev.toolIn : '';
+    if (inText) {
+      var inLen = typeof ev.promptLength === 'number' ? ev.promptLength : typeof ev.toolInLength === 'number' ? ev.toolInLength : inText.length;
+      var inCut = ev.promptCut || ev.toolInCut, inScan = ev.promptScanned || ev.toolInScanned;
+      box.appendChild(el('div', 'muted', inLen + L(' chars', ' 자') + (inCut ? L(' · cut at 2000', ' · 2000자에서 잘림') : '') + (inScan ? L(' · only the first ' + inScan + ' characters were scanned for secrets', ' · 앞 ' + inScan + '자만 비밀 검사') : '')));
+      box.appendChild(el('pre', 'full', keep(inText)));
+    } else box.appendChild(el('div', 'empty', L('The feed carries no input for this call (it touches a secrets file, or prompt text is turned off).', '이 호출의 입력은 피드에 없습니다(비밀 파일을 다루거나 프롬프트 표시가 꺼져 있음).')));
   } else if (itemTab === 'output') {
-    if (sp.output) { box.appendChild(el('div', 'muted', ((sp.endEv && sp.endEv.outputLength) || sp.output.length) + L(' chars', ' 자'))); box.appendChild(el('pre', 'full', keep(sp.output))); }
-    else box.appendChild(el('div', 'empty', L('The feed carries no output for this call (only an Agent call answer is recorded).', '이 호출의 출력은 피드에 없습니다(Agent 답변만 기록됨).')));
+    if (sp.output) {
+      var outEv = sp.endEv || {}, outLen = outEv.outputLength || outEv.toolOutLength || sp.output.length;
+      box.appendChild(el('div', 'muted', outLen + L(' chars', ' 자') + (outEv.outputCut || outEv.toolOutCut ? L(' · cut at 2000', ' · 2000자에서 잘림') : '')));
+      box.appendChild(el('pre', 'full', keep(sp.output)));
+    } else box.appendChild(el('div', 'empty', L('The feed carries no output for this call (it is still running, produced no text, touches a secrets file, or prompt text is turned off).', '이 호출의 출력은 피드에 없습니다(실행 중이거나 출력이 없거나 비밀 파일을 다루거나 프롬프트 표시가 꺼져 있음).')));
   } else {
     var raw = el('pre', 'full', keep(JSON.stringify({ start: sp.ev, end: sp.endEv || null, guard: sp.guard ? sp.guard.ev : null }, null, 2)));
     box.appendChild(raw);
