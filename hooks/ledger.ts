@@ -13,6 +13,21 @@ export function ledgerLine(event: LedgerEvent): string {
   return JSON.stringify(event)
 }
 
+const SESSION_ID = /^[A-Za-z0-9-]{1,64}$/
+const finite = (value: unknown): boolean => typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+// An event is trusted only in shape: shared sessions are written by other people, so an id that could name another path, a time that is not a number
+// or a commit id too short to be one never reaches the readers.
+export function isEvent(one: unknown): one is LedgerEvent {
+  if (typeof one !== 'object' || one === null) return false
+  const e = one as Record<string, unknown>
+  if (typeof e.kind !== 'string' || e.kind.length > 40 || typeof e.session !== 'string' || !SESSION_ID.test(e.session)) return false
+  if (!finite(e.at) || !finite(e.seq) || !finite(e.turn)) return false
+  if (e.kind === 'commit' && !(typeof e.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(e.sha))) return false
+
+  return true
+}
+
 // One JSON object per line; a torn or foreign line is skipped, never an error.
 export function parseLedger(text: string): LedgerEvent[] {
   const out: LedgerEvent[] = []
@@ -21,7 +36,7 @@ export function parseLedger(text: string): LedgerEvent[] {
     if (line === '') continue
     try {
       const one = JSON.parse(line) as unknown
-      if (typeof one === 'object' && one !== null && typeof (one as LedgerEvent).kind === 'string' && typeof (one as LedgerEvent).session === 'string') out.push(one as LedgerEvent)
+      if (isEvent(one)) out.push(one)
     } catch {
       // A half-written line.
     }
@@ -84,7 +99,7 @@ export function turnReport(events: LedgerEvent[], found: Found, file?: string): 
   const lines: string[] = []
   const when = (at: number): string => new Date(at).toISOString().slice(0, 16).replace('T', ' ')
   const first = here[0]
-  lines.push(`Turn ${found.turn} of session ${found.session.slice(0, 8)}${start?.user || start?.shared ? ` (${[start?.user ? String(start.user) : '', start?.shared ? 'shared' : ''].filter(Boolean).join(', ')})` : ''}${first ? ` · ${when(first.at)}` : ''}`)
+  lines.push(`Turn ${found.turn} of session ${found.session}${start?.user || start?.shared ? ` (${[start?.user ? String(start.user) : '', start?.shared ? 'shared' : ''].filter(Boolean).join(', ')})` : ''}${first ? ` · ${when(first.at)}` : ''}`)
   if (found.sha !== '') lines.push(found.how === 'observed' ? `Commit ${found.sha.slice(0, 8)} was made in this turn.` : `Commit ${found.sha.slice(0, 8)} is matched by the files it touched (inferred; the ledger did not see it made).`)
   else lines.push('Not committed yet (matched by the edits made in this turn).')
   const contract = events.filter(one => one.session === found.session && one.kind === 'contract' && one.seq <= (first?.seq ?? Infinity)).at(-1)
@@ -182,12 +197,14 @@ export type Personal = { seq: number; kind: string; what: 'email' | 'ip'; snippe
 export function personalHits(events: LedgerEvent[]): Personal[] {
   const out: Personal[] = []
   for (const one of events) {
-    for (const [key, value] of Object.entries(one)) {
-      if (typeof value !== 'string') continue
-      for (const [pattern, what] of [[EMAIL, 'email'], [IPV4, 'ip'], [IPV6, 'ip']] as const) {
-        for (const match of value.matchAll(new RegExp(pattern.source, pattern.flags))) {
-          const at = match.index ?? 0
-          out.push({ seq: one.seq, kind: `${one.kind}.${key}`, what, snippet: value.slice(Math.max(0, at - 20), at + match[0].length + 20).replace(/\s+/g, ' ') })
+    for (const [key, raw] of Object.entries(one)) {
+      for (const value of Array.isArray(raw) ? raw : [raw]) {
+        if (typeof value !== 'string') continue
+        for (const [pattern, what] of [[EMAIL, 'email'], [IPV4, 'ip'], [IPV6, 'ip']] as const) {
+          for (const match of value.matchAll(new RegExp(pattern.source, pattern.flags))) {
+            const at = match.index ?? 0
+            out.push({ seq: one.seq, kind: `${one.kind}.${key}`, what, snippet: value.slice(Math.max(0, at - 20), at + match[0].length + 20).replace(/\s+/g, ' ') })
+          }
         }
       }
     }
@@ -219,7 +236,7 @@ export function sessionNote(events: LedgerEvent[]): string {
   const first = list[0]
   const session = first?.session ?? ''
   const start = list.find(one => one.kind === 'session.start')
-  const lines = [`${BLOCK_START} session=${session} v=1 -->`, `# Session ${session.slice(0, 8)}${start?.user ? ` — ${String(start.user)}` : ''}${start || first ? ` · ${day((start ?? first)?.at ?? 0)}` : ''}`]
+  const lines = [`${BLOCK_START} session=${session} v=1 -->`, `# Session ${session}${start?.user ? ` — ${String(start.user)}` : ''}${start || first ? ` · ${day((start ?? first)?.at ?? 0)}` : ''}`]
   if (start?.branch || start?.head) lines.push(`Branch: ${String(start.branch ?? '?')} · started at ${String(start.head ?? '?').slice(0, 8)}`)
   const goal = list.filter(one => one.kind === 'contract').at(-1)
   if (goal?.goal) lines.push(`Goal: ${cut(goal.goal, 300)}`)
@@ -327,7 +344,7 @@ export function searchLedger(events: LedgerEvent[], q: SearchQuery, limit = 20):
     const last = Math.max(...here.map(one => one.at))
     const turn = here[0]?.turn ?? 0
     const kinds = [...new Set(here.map(one => (one.kind.startsWith('guard.') ? 'guard' : one.kind)).filter(kind => ['prompt', 'reply', 'edit', 'commit', 'guard'].includes(kind)))]
-    hits.push({ at: last, line: `${new Date(last).toISOString().slice(0, 16).replace('T', ' ')}  ${users.get(session) ?? '?'}${here.some(one => one.shared) ? ' (shared)' : ''}  ${session.slice(0, 8)} t${turn}  [${kinds.join(',')}]  ${cut(around.slice(at), 120)}` })
+    hits.push({ at: last, line: `${new Date(last).toISOString().slice(0, 16).replace('T', ' ')}  ${users.get(session) ?? '?'}${here.some(one => one.shared) ? ' (shared)' : ''}  ${session} t${turn}  [${kinds.join(',')}]  ${cut(around.slice(at), 120)}` })
   }
   hits.sort((a, b) => b.at - a.at)
 

@@ -44,8 +44,8 @@ test('a commit the ledger saw made is observed; one it did not is matched by its
   expect(locate(history, 'ffff', ['src/other.ts'], 3000)).toEqual({ session: 's1', turn: 2, how: 'inferred', sha: 'ffff' })
   expect(locate(history, 'ffff', ['src/other.ts'], 1500)).toBeUndefined()
   expect(locate(history, 'ffff', [], 3000)).toBeUndefined()
-  const byHand = [...history, ev(12, 2500, 'commit', 2, { sha: 'dddd', files: [], via: 'prompt' })]
-  expect(locate(byHand, 'dddd', [], undefined)?.how).toBe('inferred')
+  const byHand = [...history, ev(12, 2500, 'commit', 2, { sha: 'dddd1234567', files: [], via: 'prompt' })]
+  expect(locate(byHand, 'dddd1234567', [], undefined)?.how).toBe('inferred')
 })
 
 test('the report names the request, the goal, the actions with the guard decision, the answer and the commit', () => {
@@ -184,4 +184,25 @@ test('the guard file can forbid publishing the ledger and can never switch it on
   expect(parsePolicy('{"ledger":{"share":"ask"}}', 'f').ledger).toBeUndefined()
   expect(parsePolicy('{"ledger":{"share":"auto"}}', 'f').errors[0]).toContain('ledger.share')
   expect(parsePolicy('{"ledger":"yes"}', 'f').errors[0]).toContain('ledger.share')
+})
+
+test('events from a shared session are trusted only in shape: a path-like id, a bad time or a short commit id is dropped', () => {
+  const good = ledgerLine(ev(1, 5, 'prompt', 1, { text: 'ok' }))
+  const lines = [
+    good,
+    JSON.stringify({ ...ev(2, 5, 'prompt', 1), session: 'zz99/../../../x' }),
+    JSON.stringify({ ...ev(3, 5, 'prompt', 1), at: 'soon' }),
+    JSON.stringify({ ...ev(4, 5, 'prompt', 1), at: null }),
+    JSON.stringify({ ...ev(5, 5, 'commit', 1, { sha: 'a' }) }),
+    JSON.stringify({ ...ev(6, 5, 'prompt', -1) }),
+    JSON.stringify({ ...ev(7, 5, 'commit', 1, { sha: 'abcdef1' }) }),
+  ].join('\n')
+  expect(parseLedger(lines).map(one => one.seq)).toEqual([1, 7])
+  const shared = parseLedger(lines)
+  expect(() => searchLedger(shared, parseSearch('ok'))).not.toThrow()
+})
+
+test('emails inside a list (the files of a commit) are found too', () => {
+  const hits = personalHits([ev(1, 1, 'commit', 1, { sha: 'abcdef1', files: ['docs/kim@example.com.md'] })])
+  expect(hits.map(one => one.what)).toEqual(['email'])
 })
