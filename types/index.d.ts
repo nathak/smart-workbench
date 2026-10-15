@@ -89,6 +89,8 @@ export type ProjectPolicy = {
   audit?: AuditConfig
   // Prompts are held back until a locked contract with done conditions exists.
   requireContract?: boolean
+  // "ledger": { "share": "off" } forbids publishing the decision ledger; no setting publishes by itself.
+  ledger?: { share: 'off' }
   rules: ProjectRule[]
   errors: string[]
 }

@@ -124,9 +124,19 @@ export function parsePolicy(text: string, source: string = POLICY_PATH): Project
     errors.push('requireContract must be true or false')
   }
 
+  // "ledger": { "share": "off" } forbids publishing the decision ledger from this project. It only tightens: there is no value that publishes by itself.
+  const ledger = (value as { ledger?: unknown }).ledger
+  let ledgerShare: 'off' | undefined
+  if (ledger !== undefined) {
+    const share = typeof ledger === 'object' && ledger !== null ? (ledger as { share?: unknown }).share : undefined
+    if (typeof ledger !== 'object' || ledger === null || Array.isArray(ledger) || (share !== undefined && share !== 'off' && share !== 'ask')) errors.push('ledger.share must be "off" or "ask"')
+    else if (share === 'off') ledgerShare = 'off'
+  }
+
   return {
     source,
     ...(profile ? { profile } : {}),
+    ...(ledgerShare ? { ledger: { share: ledgerShare } } : {}),
     rules,
     templates,
     ...(typeof defaultTemplate === 'string' && templates.some(one => one.name === defaultTemplate) ? { defaultTemplate } : {}),

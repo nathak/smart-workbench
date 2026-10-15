@@ -37,7 +37,7 @@ type WorldOptions = {
   // Collects the commands (or tool names) that actually ran.
   ran?: string[]
   // Collects every process.run call with its stdin.
-  processed?: Array<{ argv: string[]; stdin?: string }>
+  processed?: Array<{ argv: string[]; stdin?: string; env?: Record<string, string> }>
   // Makes these commands fail as a non-zero exit would.
   fail?: (command: string) => boolean
   // Collects the toasts shown.
@@ -86,7 +86,7 @@ function world(on: On, options: WorldOptions = {}) {
     return { value: undefined }
   })
   on('process.run', ($, e) => {
-    options.processed?.push({ argv: e.argv, stdin: e.init?.stdin })
+    options.processed?.push({ argv: e.argv, stdin: e.init?.stdin, env: e.init?.env })
     const answer = commands[e.argv.join(' ')]
     // A list answers one call after another, the last one for every call after that.
     const run = (Array.isArray(answer) ? (answer.length > 1 ? answer.shift() : answer[0]) : answer) ?? { exitCode: 1, stdout: '', stderr: `unexpected: ${e.argv.join(' ')}` }
@@ -1097,6 +1097,123 @@ test('the ledger records the commit a turn made, not the commits a pull brought 
   expect(commits.map(one => one.sha)).toEqual(['cccc3333'])
   expect(commits[0]?.files).toEqual(['src/a.ts'])
   expect(Object.keys(files).some(name => name.endsWith('.claude/swb-ledger/.gitignore'))).toBe(true)
+})
+
+const G = 'git -c core.quotePath=false'
+const SHARED_LINES = [
+  { v: 1, seq: 1, at: 1000, session: 's1-abc', turn: 0, kind: 'session.start', user: 'Kim', branch: 'main', head: 'aaaa1111' },
+  { v: 1, seq: 2, at: 1100, session: 's1-abc', turn: 1, kind: 'prompt', text: 'fix login for kim@example.com' },
+  { v: 1, seq: 3, at: 1200, session: 's1-abc', turn: 1, kind: 'tool.start', id: 'c1', tool: 'Bash', summary: 'npm test', toolIn: 'SECRETIN' },
+  { v: 1, seq: 4, at: 1300, session: 's1-abc', turn: 1, kind: 'reply', text: 'Fixed' },
+].map(one => JSON.stringify(one)).join('\n')
+
+// A mock git for sharing: answers by command prefix, remembers every call, and lets a test change single answers.
+function shareWorld(on: Parameters<typeof world>[0], answers: Record<string, { exitCode: number; stdout: string; stderr?: string } | Array<{ exitCode: number; stdout: string; stderr?: string }>> = {}, asks: string[] = [], reply = 'Publish', files: Record<string, string> = {}) {
+  const writes: Array<{ argv: string[]; stdin?: string; env?: Record<string, string> }> = []
+  const ok = { exitCode: 0, stdout: '' }
+  const base: Record<string, { exitCode: number; stdout: string; stderr?: string } | Array<{ exitCode: number; stdout: string; stderr?: string }>> = {
+    'git rev-parse --git-common-dir': { exitCode: 0, stdout: '.git\n' },
+    [`${G} remote`]: ok,
+    [`${G} config --get branch.swb-ledger.remote`]: { exitCode: 1, stdout: '' },
+    [`${G} config user.name`]: { exitCode: 0, stdout: 'Kim\n' },
+    [`${G} worktree list --porcelain`]: { exitCode: 0, stdout: 'worktree /work\nbranch refs/heads/main\n' },
+    [`${G} for-each-ref --format=%(refname) refs/heads/swb-ledger refs/remotes/*/swb-ledger`]: ok,
+    [`${G} rev-parse -q --verify refs/heads/swb-ledger^{commit}`]: { exitCode: 1, stdout: '' },
+    [`${G} read-tree --empty`]: ok,
+    [`${G} hash-object -w --no-filters --stdin`]: [{ exitCode: 0, stdout: 'blob1\n' }, { exitCode: 0, stdout: 'blob2\n' }],
+    [`${G} update-index --add --cacheinfo 100644,blob1,sessions/1970-01/s1-abc.jsonl`]: ok,
+    [`${G} update-index --add --cacheinfo 100644,blob2,notes/1970-01/s1-abc.md`]: ok,
+    [`${G} write-tree`]: { exitCode: 0, stdout: 'tree1\n' },
+    [`${G} commit-tree tree1 -m ledger: s1-abc by Kim`]: { exitCode: 0, stdout: 'commit1\n' },
+    [`${G} update-ref -m swb ledger publish refs/heads/swb-ledger commit1 `]: ok,
+    ...answers,
+  }
+  const commands = new Proxy(base, {
+    get: (target, key: string) => (key in target ? target[key as keyof typeof target] : key.includes('readdirSync') ? { exitCode: 0, stdout: SHARED_LINES } : key.startsWith('node -e') ? ok : undefined),
+  }) as never
+  world(on, { commands, files, processed: writes as never, ask: labels => { asks.push(labels.join('|')); return reply } })
+  return writes
+}
+
+test('/swb ledger publish asks first, sends a summary built on a temporary index, and moves neither the work tree nor the current branch', async ($, on) => {
+  const asks: string[] = []
+  const writes = shareWorld(on, {}, asks)
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'ledger publish', ...COMMAND })).text
+  expect(asks).toEqual(['Publish|Publish, mask emails and addresses|Cancel'])
+  expect(text).toContain('Written to the local swb-ledger branch')
+  const calls = writes.map(one => one.argv.join(' '))
+  const order = ['read-tree --empty', 'hash-object', 'update-index --add', 'write-tree', 'commit-tree', 'update-ref'].map(word => calls.findIndex(one => one.includes(word)))
+  expect(order.every(at => at >= 0)).toBe(true)
+  expect([...order].sort((a, b) => a - b)).toEqual(order)
+  expect(calls.filter(one => one.startsWith('git') && /\b(checkout|switch|reset|push)\b/.test(one))).toEqual([])
+  expect(writes.filter(one => /read-tree|write-tree|update-index/.test(one.argv.join(' '))).every(one => one.env?.GIT_INDEX_FILE?.includes('swb-ledger/publish-s1-abc.index'))).toBe(true)
+  const sent = writes.filter(one => one.argv.includes('hash-object')).map(one => one.stdin ?? '').join('\n')
+  expect(sent).toContain('fix login')
+  expect(sent).not.toContain('SECRETIN')
+  expect(calls.find(one => one.includes('update-ref'))?.endsWith('commit1 ')).toBe(true)
+})
+
+test('Cancel stops before any git write', async ($, on) => {
+  const writes = shareWorld(on, {}, [], 'Cancel')
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'ledger publish', ...COMMAND })).text).toBe('Not published.')
+  expect(writes.some(one => one.argv.includes('hash-object'))).toBe(false)
+})
+
+test('publishing is refused when the guard file forbids it', async ($, on) => {
+  const asks: string[] = []
+  const writes = shareWorld(on, {}, asks, 'Publish', { '.claude/smartworkbench.json': '{"ledger":{"share":"off"}}' })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'ledger publish', ...COMMAND })).text).toContain('Publishing is off')
+  expect(asks).toEqual([])
+  expect(writes.some(one => one.argv.includes('hash-object'))).toBe(false)
+})
+
+test('a push that others beat is fetched again and retried on top of the new tip, never forced', async ($, on) => {
+  const push = `${G} push --porcelain --no-verify origin refs/heads/swb-ledger:refs/heads/swb-ledger`
+  const writes = shareWorld(on, {
+    [`${G} remote`]: { exitCode: 0, stdout: 'origin\n' },
+    [`${G} fetch --no-tags --quiet origin +refs/heads/swb-ledger:refs/remotes/origin/swb-ledger`]: { exitCode: 0, stdout: '' },
+    [`${G} rev-parse -q --verify refs/remotes/origin/swb-ledger^{commit}`]: [{ exitCode: 1, stdout: '' }, { exitCode: 0, stdout: 'remote9\n' }],
+    [`${G} read-tree remote9`]: { exitCode: 0, stdout: '' },
+    [`${G} hash-object -w --no-filters --stdin`]: [{ exitCode: 0, stdout: 'blob1\n' }, { exitCode: 0, stdout: 'blob2\n' }, { exitCode: 0, stdout: 'blob1\n' }, { exitCode: 0, stdout: 'blob2\n' }],
+    [`${G} rev-parse remote9^{tree}`]: { exitCode: 0, stdout: 'othertree\n' },
+    [`${G} commit-tree tree1 -p remote9 -m ledger: s1-abc by Kim`]: { exitCode: 0, stdout: 'commit2\n' },
+    [`${G} update-ref -m swb ledger publish refs/heads/swb-ledger commit2 `]: { exitCode: 0, stdout: '' },
+    [push]: [{ exitCode: 1, stdout: '!\trefs/heads/swb-ledger:refs/heads/swb-ledger\t[rejected] (fetch first)', stderr: '' }, { exitCode: 0, stdout: 'Done', stderr: '' }],
+  })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'ledger publish', ...COMMAND })).text
+  expect(text).toContain('Published to origin/swb-ledger')
+  const calls = writes.map(one => one.argv.join(' '))
+  expect(calls.filter(one => one === push).length).toBe(2)
+  expect(calls.filter(one => one.includes('swb-ledger') && one.includes('fetch')).length).toBe(2)
+  expect(calls.some(one => one.includes('--force') || one.includes(' -f '))).toBe(false)
+})
+
+test('/swb ledger search and /swb why read what teammates published, marked as shared', async ($, on) => {
+  const theirs = SHARED_LINES.replace(/s1-abc/g, 's9-lee').replace('Kim', 'Lee')
+  shareWorld(on, {
+    [`${G} for-each-ref --format=%(refname) refs/heads/swb-ledger refs/remotes/*/swb-ledger`]: { exitCode: 0, stdout: 'refs/remotes/origin/swb-ledger\n' },
+    [`${G} ls-tree -r -l refs/remotes/origin/swb-ledger -- sessions/`]: { exitCode: 0, stdout: `100644 blob deadbeef1234      ${theirs.length}\tsessions/2026-10/s9-lee.jsonl\n` },
+    [`${G} cat-file --batch`]: { exitCode: 0, stdout: `deadbeef1234 blob ${theirs.length}\n${theirs}\n` },
+  })
+  await $.session.start(start)
+  const found = (await $.command.run({ command: 'swb', args: 'ledger search login user:Lee', ...COMMAND })).text
+  expect(found).toContain('Lee (shared)')
+  expect(found).toContain('s9-lee'.slice(0, 8))
+  expect((await $.command.run({ command: 'swb', args: 'ledger search zzzz', ...COMMAND })).text).toContain('No turn matches')
+})
+
+test('/swb ledger forget asks, deletes the local copy and says the branch history keeps it', async ($, on) => {
+  const asks: string[] = []
+  const writes = shareWorld(on, {}, asks, 'Delete')
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'ledger forget s1-abc', ...COMMAND })).text
+  expect(asks).toEqual(['Delete|Cancel'])
+  expect(text).toContain('Deleted the local copy')
+  expect(writes.some(one => one.argv[0] === 'node' && one.argv.at(-1)?.endsWith('sessions/s1-abc.jsonl'))).toBe(true)
 })
 
 test('/swb why finds the turn behind a line through git blame and says when the ledger has nothing', async ($, on) => {
