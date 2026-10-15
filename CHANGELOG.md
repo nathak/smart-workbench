@@ -5,6 +5,12 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 ## [Unreleased]
 
 ### Added
+- `/swb ledger export-wiki <path>`: the recorded sessions as pages of the llm-wiki (`content/qa-log/<project>/`, its front matter and `[[links]]`, a regenerated Korean block and a `## Notes` that survives), after a preview and a question, files only and no git in the wiki. `"ledger": { "wiki": "off" }` in the guard file forbids it.
+
+### Security
+- Text from shared ledger sessions is cleaned (terminal escapes, invisible and direction characters), its markup made inert, order-like lines marked, and shown in a data frame by `/swb why` and `/swb ledger search`; shared events are checked field by field when read.
+
+### Added
 - Ledger sharing: `/swb ledger publish` writes a masked summary of a session (never tool input or output) to the repository's `swb-ledger` branch with git plumbing and a temporary index, after a preview and a question; `fetch`, `search` and `forget` complete it, `/swb why` reads teammates' sessions too, and each published session gets a generated note whose human-written `## Notes` survive regeneration. A guard file can forbid it with `"ledger": { "share": "off" }`.
 
 ## [0.18.0] - 2026-10-14

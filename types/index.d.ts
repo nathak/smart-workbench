@@ -90,7 +90,7 @@ export type ProjectPolicy = {
   // Prompts are held back until a locked contract with done conditions exists.
   requireContract?: boolean
   // "ledger": { "share": "off" } forbids publishing the decision ledger; no setting publishes by itself.
-  ledger?: { share: 'off' }
+  ledger?: { share?: 'off'; wiki?: 'off' }
   rules: ProjectRule[]
   errors: string[]
 }

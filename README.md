@@ -70,7 +70,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb templates` | List templates and context sets |
 | `/swb export [path]` | Write a Markdown handoff |
 | `/swb guard [high\|medium\|low\|off]` | Show or set the guard sensitivity (see *Guard sensitivity*) |
-| `/swb ledger [on\|off\|publish\|fetch\|search\|forget]` | Record conversation, actions and guard decisions beside the repository, share them through a branch, search them (see *Decision ledger*) |
+| `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | Record conversation, actions and guard decisions beside the repository, share them through a branch, search them (see *Decision ledger*) |
 | `/swb why <file[:line]\|commit>` | Show the turn, decisions and guard calls behind a change |
 | `/swb policy [init\|reload]` | Show, create or re-read the project guard file |
 | `/swb ci` | Import CI results for the current commit |
@@ -232,7 +232,9 @@ Commits show what changed, not why. `/swb ledger on` records, for this project a
 - Each published session also gets a generated note (`notes/<month>/<session>.md`: goal, per turn what was asked and decided, files, commits, guard calls). Regenerating replaces only the generated block; what people write under `## Notes` stays, and two edits to it are both kept.
 - `/swb ledger search <words> [user:name] [path:prefix] [kind:prompt|reply|edit|commit|guard]` finds turns whose text holds every word, newest first.
 - `/swb ledger forget <session>` deletes your local copy and, for a session you published, removes it from the branch; the branch's history still holds the earlier version, so erasing it for good needs the branch rewritten.
-- A guard file can forbid publishing: `"ledger": { "share": "off" }`. It can only tighten; no setting publishes by itself, and publishing is asked every time.
+- `/swb ledger export-wiki <path of the llm-wiki folder>` (or set `SWB_LEDGER_WIKI`) writes your own recorded sessions as pages of your llm-wiki, `content/qa-log/<project>/<date>-swb-<session>.md`, in the wiki's format: front matter (`id`, `title`, `date`, `tags`, `source_name: "Claude Code 세션 (<project>)"`, `summary`, `related`; no `source_url`), a generated block in Korean (per turn the request, decision, actions, files, guard calls and commit links), and a `## Notes` part that regeneration keeps. It uses the publishing summary level (no tool input or output, emails and addresses masked), shows a preview and asks first, refuses a folder that does not look like the wiki or sits inside this project, writes only files under `content/qa-log/` (never through a link), and runs no git in the wiki: lint it (`node scripts/lint-content.mjs`) and commit it yourself. A page that is not one of ours is never overwritten. The path is never read from the guard file, since a checked-in file must not choose where your disk is written.
+- Text written by other people (shared sessions) is treated as data: terminal escapes, invisible and direction-changing characters are removed, HTML, comment markers, code fences, wiki links and role prefixes are made inert, a line that reads like an order to a model is marked `[!instruction-like]` (never deleted), and `/swb why` and `/swb ledger search` show it inside a `[ledger-data <marker>]` frame that says it is data. A shared event with a field it should not have, of the wrong type or too long, is dropped when it is read.
+- A guard file can forbid publishing: `"ledger": { "share": "off" }` (and `"wiki": "off"` for the wiki export). It can only tighten; no setting publishes by itself, and publishing is asked every time.
 
 ### Built-in guard rules (Balanced)
 
@@ -357,7 +359,7 @@ Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `
 - Broken rules are skipped and reported, never guessed at.
 - `templates` are the team's shared done conditions: each has `constraints` (prefix `s:` for soft), `doneConditions` (text, or `{ "text", "link" }`), optional `goal` and `nonGoals`. `defaultTemplate` seeds `/swb new`; `/swb load <name>` or `team:<name>` loads one.
 - `audit` turns on the audit log (below).
-- `"ledger": { "share": "off" }` forbids publishing the decision ledger (`/swb ledger publish`); it only tightens.
+- `"ledger": { "share": "off" }` forbids publishing the decision ledger (`/swb ledger publish`) and `"wiki": "off"` its export to the wiki; they only tighten.
 - `"requireContract": true` holds prompts back until a locked contract with at least one done condition exists (prompts the mod sends itself are exempt).
 
 ### Audit log
@@ -523,7 +525,7 @@ claude plugin update smartworkbench
 | `/swb templates` | 템플릿·Context set 목록 |
 | `/swb export [path]` | Markdown handoff 쓰기 |
 | `/swb guard [high\|medium\|low\|off]` | Guard 민감도 보기·설정(*Guard 민감도* 참고) |
-| `/swb ledger [on\|off\|publish\|fetch\|search\|forget]` | 대화·행동·Guard 판정을 저장소 옆에 기록하고, 브랜치로 공유하고, 검색(*결정 기록* 참고) |
+| `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | 대화·행동·Guard 판정을 저장소 옆에 기록하고, 브랜치로 공유하고, 검색(*결정 기록* 참고) |
 | `/swb why <파일[:줄]\|커밋>` | 변경 뒤의 턴, 판단, Guard 호출 보기 |
 | `/swb policy [init\|reload]` | 프로젝트 Guard 파일 보기·생성·다시 읽기 |
 | `/swb ci` | 현재 커밋의 CI 결과 가져오기 |
@@ -684,7 +686,9 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - 발행한 세션마다 생성 노트(`notes/<월>/<세션>.md`: 목표, 턴별 요청과 결정, 파일, 커밋, 가드 호출)도 만듭니다. 다시 만들면 생성 블록만 바뀌고 `## Notes` 아래에 사람이 쓴 것은 남으며, 두 사람이 고친 경우 둘 다 보존합니다.
 - `/swb ledger search <단어> [user:이름] [path:접두] [kind:prompt|reply|edit|commit|guard]`은 모든 단어가 들어 있는 턴을 최신순으로 찾습니다.
 - `/swb ledger forget <세션>`은 로컬 사본을 지우고, 내가 발행한 세션이면 브랜치에서도 제거합니다. 브랜치 이력에는 이전 버전이 남으므로 완전히 지우려면 브랜치를 다시 써야 합니다.
-- 가드 파일로 발행을 막을 수 있습니다: `"ledger": { "share": "off" }`. 조이기만 하고, 스스로 발행을 켜는 값은 없으며 발행은 매번 묻습니다.
+- `/swb ledger export-wiki <llm-wiki 폴더 경로>`(또는 `SWB_LEDGER_WIKI` 설정)는 내가 기록한 세션을 llm-wiki의 페이지 `content/qa-log/<프로젝트>/<날짜>-swb-<세션>.md`로 위키 형식에 맞춰 씁니다. 머리말(`id`, `title`, `date`, `tags`, `source_name: "Claude Code 세션 (<프로젝트>)"`, `summary`, `related`, `source_url` 없음), 한국어로 생성되는 블록(턴마다 요청, 결정, 작업, 파일, 가드 호출, 커밋 링크), 다시 만들어도 보존되는 `## Notes` 부분으로 이루어집니다. 발행과 같은 요약 수준(도구 입력·출력 없음, 이메일·주소 마스킹)을 쓰고, 미리보기를 보여 주며 먼저 묻고, 위키처럼 보이지 않거나 이 프로젝트 안에 있는 폴더는 거부하며, `content/qa-log/` 아래에만(링크를 따라가지 않고) 파일을 쓰고, 위키에서는 git을 실행하지 않습니다. `node scripts/lint-content.mjs`로 검사하고 커밋은 직접 하세요. 우리 것이 아닌 페이지는 덮어쓰지 않습니다. 경로는 가드 파일에서 읽지 않습니다. 저장소에 커밋되는 파일이 내 디스크의 쓰기 위치를 정해서는 안 되기 때문입니다.
+- 다른 사람이 쓴 텍스트(공유된 세션)는 데이터로 다룹니다. 터미널 이스케이프와 보이지 않는 문자·방향 전환 문자를 지우고, HTML·주석 표지·코드 펜스·위키 링크·역할 접두를 무력화하며, 모델에게 내리는 명령처럼 읽히는 줄에는 `[!instruction-like]`를 붙이고(지우지는 않습니다), `/swb why`와 `/swb ledger search`는 데이터임을 알리는 `[ledger-data <표지>]` 틀 안에 보여 줍니다. 있어서는 안 될 필드가 있거나 타입이 틀리거나 너무 긴 공유 이벤트는 읽을 때 버립니다.
+- 가드 파일로 발행을 막을 수 있습니다: `"ledger": { "share": "off" }`(위키 내보내기는 `"wiki": "off"`). 조이기만 하고, 스스로 발행을 켜는 값은 없으며 발행은 매번 묻습니다.
 
 ### 기본 Guard 규칙 (Balanced)
 
@@ -809,7 +813,7 @@ location / {
 - 잘못된 규칙은 건너뛰고 오류를 표시합니다(추측해서 적용하지 않음).
 - `templates`는 팀 공통 완료 조건입니다. 템플릿마다 `constraints`(`s:` 접두어는 Soft), `doneConditions`(문자열 또는 `{ "text", "link" }`), 선택적인 `goal`, `nonGoals`를 둡니다. `defaultTemplate`은 `/swb new`의 시작점이 되고, `/swb load <이름>` 또는 `team:<이름>`으로 불러옵니다.
 - `audit`은 감사 로그를 켭니다(아래).
-- `"ledger": { "share": "off" }`는 결정 기록 발행(`/swb ledger publish`)을 막습니다. 조이기만 합니다.
+- `"ledger": { "share": "off" }`는 결정 기록 발행(`/swb ledger publish`)을, `"wiki": "off"`는 위키 내보내기를 막습니다. 조이기만 합니다.
 - `"requireContract": true`이면 완료 조건이 하나 이상 있는 잠긴 계약이 생길 때까지 프롬프트를 보류합니다(Mod가 직접 보내는 프롬프트는 제외).
 
 ### 감사 로그
