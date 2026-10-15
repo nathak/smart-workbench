@@ -1192,6 +1192,62 @@ test('a push that others beat is fetched again and retried on top of the new tip
   expect(calls.some(one => one.includes('--force') || one.includes(' -f '))).toBe(false)
 })
 
+test('a local branch that is ahead of the remote is pushed even when nothing new is committed', async ($, on) => {
+  const push = `${G} push --porcelain --no-verify origin refs/heads/swb-ledger:refs/heads/swb-ledger`
+  const writes = shareWorld(on, {
+    [`${G} remote`]: { exitCode: 0, stdout: 'origin\n' },
+    [`${G} fetch --no-tags --quiet origin +refs/heads/swb-ledger:refs/remotes/origin/swb-ledger`]: { exitCode: 0, stdout: '' },
+    [`${G} rev-parse -q --verify refs/heads/swb-ledger^{commit}`]: { exitCode: 0, stdout: 'local7\n' },
+    [`${G} rev-parse -q --verify refs/remotes/origin/swb-ledger^{commit}`]: { exitCode: 0, stdout: 'remote6\n' },
+    [`${G} merge-base --is-ancestor local7 remote6`]: { exitCode: 1, stdout: '' },
+    [`${G} merge-base --is-ancestor remote6 local7`]: { exitCode: 0, stdout: '' },
+    [`${G} read-tree local7`]: { exitCode: 0, stdout: '' },
+    [`${G} rev-parse local7^{tree}`]: { exitCode: 0, stdout: 'tree1\n' },
+    [push]: { exitCode: 0, stdout: 'Done' },
+  })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'ledger publish', ...COMMAND })).text
+  expect(text).toContain('Published to origin/swb-ledger')
+  expect(writes.some(one => one.argv.join(' ') === push)).toBe(true)
+  expect(writes.some(one => one.argv.includes('commit-tree'))).toBe(false)
+})
+
+test('diverged tips are joined with both as parents and the other side\'s deletion is kept', async ($, on) => {
+  const writes = shareWorld(on, {
+    [`${G} remote`]: { exitCode: 0, stdout: 'origin\n' },
+    [`${G} fetch --no-tags --quiet origin +refs/heads/swb-ledger:refs/remotes/origin/swb-ledger`]: { exitCode: 0, stdout: '' },
+    [`${G} rev-parse -q --verify refs/heads/swb-ledger^{commit}`]: { exitCode: 0, stdout: 'local7\n' },
+    [`${G} rev-parse -q --verify refs/remotes/origin/swb-ledger^{commit}`]: { exitCode: 0, stdout: 'remote6\n' },
+    [`${G} merge-base --is-ancestor local7 remote6`]: { exitCode: 1, stdout: '' },
+    [`${G} merge-base --is-ancestor remote6 local7`]: { exitCode: 1, stdout: '' },
+    [`${G} merge-base local7 remote6`]: { exitCode: 0, stdout: 'old5\n' },
+    [`${G} read-tree remote6`]: { exitCode: 0, stdout: '' },
+    [`${G} diff-tree -r --name-only --diff-filter=ACMRT old5 local7`]: { exitCode: 0, stdout: 'sessions/2026-10/mine.jsonl\n' },
+    [`${G} diff-tree -r --name-only --diff-filter=D old5 local7`]: { exitCode: 0, stdout: 'sessions/2026-09/gone.jsonl\n' },
+    [`${G} ls-tree local7 -- sessions/2026-10/mine.jsonl`]: { exitCode: 0, stdout: '100644 blob mine1\tsessions/2026-10/mine.jsonl\n' },
+    [`${G} update-index --index-info`]: { exitCode: 0, stdout: '' },
+    [`${G} update-index --force-remove sessions/2026-09/gone.jsonl`]: { exitCode: 0, stdout: '' },
+    [`${G} rev-parse remote6^{tree}`]: { exitCode: 0, stdout: 'other\n' },
+    [`${G} commit-tree tree1 -p remote6 -p local7 -m ledger: s1-abc by Kim`]: { exitCode: 0, stdout: 'merge1\n' },
+    [`${G} update-ref -m swb ledger publish refs/heads/swb-ledger merge1 local7`]: { exitCode: 0, stdout: '' },
+    [`${G} push --porcelain --no-verify origin refs/heads/swb-ledger:refs/heads/swb-ledger`]: { exitCode: 0, stdout: 'Done' },
+  })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'ledger publish', ...COMMAND })).text
+  expect(text).toContain('Published to origin/swb-ledger')
+  const info = writes.find(one => one.argv.includes('--index-info'))
+  expect(info?.stdin).toContain('100644 mine1\tsessions/2026-10/mine.jsonl')
+})
+
+test('"Publish, mask emails and addresses" sends the session with them masked', async ($, on) => {
+  const writes = shareWorld(on, {}, [], 'Publish, mask emails and addresses')
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'ledger publish', ...COMMAND })
+  const sent = writes.filter(one => one.argv.includes('hash-object')).map(one => one.stdin ?? '').join('\n')
+  expect(sent).toContain('<email>')
+  expect(sent).not.toContain('kim@example.com')
+})
+
 test('/swb ledger search and /swb why read what teammates published, marked as shared', async ($, on) => {
   const theirs = SHARED_LINES.replace(/s1-abc/g, 's9-lee').replace('Kim', 'Lee')
   shareWorld(on, {
