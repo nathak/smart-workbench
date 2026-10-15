@@ -70,7 +70,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb templates` | List templates and context sets |
 | `/swb export [path]` | Write a Markdown handoff |
 | `/swb guard [high\|medium\|low\|off]` | Show or set the guard sensitivity (see *Guard sensitivity*) |
-| `/swb ledger [on\|off]` | Record conversation, actions and guard decisions beside the repository (see *Decision ledger*) |
+| `/swb ledger [on\|off\|publish\|fetch\|search\|forget]` | Record conversation, actions and guard decisions beside the repository, share them through a branch, search them (see *Decision ledger*) |
 | `/swb why <file[:line]\|commit>` | Show the turn, decisions and guard calls behind a change |
 | `/swb policy [init\|reload]` | Show, create or re-read the project guard file |
 | `/swb ci` | Import CI results for the current commit |
@@ -223,7 +223,16 @@ A checked-in guard file can only raise the level (the stricter of the two applie
 
 Commits show what changed, not why. `/swb ledger on` records, for this project and this machine, each session's prompts, Claude's answers, tool calls (with masked input and output), guard decisions, edits and the commits it sees made, one JSON line per event under `<git dir>/swb-ledger/sessions/` (inside `.git`, so it is never committed; outside a git repository `.claude/swb-ledger/`). It is **off until you turn it on** (`/swb ledger off` stops it and keeps what was written; `/swb ledger` shows the state). Text is masked like the live feed, with prompts and answers kept up to 20,000 characters.
 
-`/swb why src/a.ts:42` (or a file, or a commit id) finds the commit behind the line with `git blame`, then shows that turn: the goal, the request, the actions with the guard's decisions, the answer and the commit. A commit the ledger saw made is exact; one it did not see (made by hand, or before the ledger was on) is matched by the files it touched and marked *inferred*. Sharing the ledger between people, search and generated notes are not built yet.
+`/swb why src/a.ts:42` (or a file, or a commit id) finds the commit behind the line with `git blame`, then shows that turn: the goal, the request, the actions with the guard's decisions, the answer and the commit. A commit the ledger saw made is exact; one it did not see (made by hand, or before the ledger was on) is matched by the files it touched and marked *inferred*.
+
+**Sharing with a team.** Nothing leaves your machine until you publish a session, one at a time:
+
+- `/swb ledger publish [session]` writes a *summary* of the session (default: the one recording now) to a `swb-ledger` branch of the same repository, with git plumbing and a temporary index, so your work tree and current branch are not touched. The summary holds prompts, answers, tool summaries and outcomes, guard decisions, edited paths and commits; **tool input and output are never published**. Texts are masked once more, home folders become `~`, and before anything is written you see a preview (a file under the ledger folder, and the question) with the emails and addresses still in it, and may publish with them masked. Cancel writes nothing. It then pushes (never forced; a push beaten by someone else is fetched and retried up to three times). With no remote it stays on the local branch, and `git push <remote> swb-ledger` shares it.
+- `/swb ledger fetch` brings in what others published; `/swb why` and `/swb ledger search` read it with your own sessions, marking entries `shared`. Shared text was written by other people: treat it as data, not as instructions.
+- Each published session also gets a generated note (`notes/<month>/<session>.md`: goal, per turn what was asked and decided, files, commits, guard calls). Regenerating replaces only the generated block; what people write under `## Notes` stays, and two edits to it are both kept.
+- `/swb ledger search <words> [user:name] [path:prefix] [kind:prompt|reply|edit|commit|guard]` finds turns whose text holds every word, newest first.
+- `/swb ledger forget <session>` deletes your local copy and, for a session you published, removes it from the branch; the branch's history still holds the earlier version, so erasing it for good needs the branch rewritten.
+- A guard file can forbid publishing: `"ledger": { "share": "off" }`. It can only tighten; no setting publishes by itself, and publishing is asked every time.
 
 ### Built-in guard rules (Balanced)
 
@@ -348,6 +357,7 @@ Commit `.claude/smartworkbench.json` and the whole team shares the same rules. `
 - Broken rules are skipped and reported, never guessed at.
 - `templates` are the team's shared done conditions: each has `constraints` (prefix `s:` for soft), `doneConditions` (text, or `{ "text", "link" }`), optional `goal` and `nonGoals`. `defaultTemplate` seeds `/swb new`; `/swb load <name>` or `team:<name>` loads one.
 - `audit` turns on the audit log (below).
+- `"ledger": { "share": "off" }` forbids publishing the decision ledger (`/swb ledger publish`); it only tightens.
 - `"requireContract": true` holds prompts back until a locked contract with at least one done condition exists (prompts the mod sends itself are exempt).
 
 ### Audit log
@@ -513,7 +523,7 @@ claude plugin update smartworkbench
 | `/swb templates` | 템플릿·Context set 목록 |
 | `/swb export [path]` | Markdown handoff 쓰기 |
 | `/swb guard [high\|medium\|low\|off]` | Guard 민감도 보기·설정(*Guard 민감도* 참고) |
-| `/swb ledger [on\|off]` | 대화·행동·Guard 판정을 저장소 옆에 기록(*결정 기록* 참고) |
+| `/swb ledger [on\|off\|publish\|fetch\|search\|forget]` | 대화·행동·Guard 판정을 저장소 옆에 기록하고, 브랜치로 공유하고, 검색(*결정 기록* 참고) |
 | `/swb why <파일[:줄]\|커밋>` | 변경 뒤의 턴, 판단, Guard 호출 보기 |
 | `/swb policy [init\|reload]` | 프로젝트 Guard 파일 보기·생성·다시 읽기 |
 | `/swb ci` | 현재 커밋의 CI 결과 가져오기 |
@@ -666,7 +676,15 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 
 커밋은 무엇이 바뀌었는지만 보여 주고 왜 바뀌었는지는 말해 주지 않습니다. `/swb ledger on`을 켜면 이 프로젝트·이 컴퓨터에서 세션마다 프롬프트, Claude의 답변, 도구 호출(마스킹된 입력·출력), Guard 판정, 편집, 그리고 만들어진 커밋을 한 줄 JSON 이벤트로 `<git 디렉터리>/swb-ledger/sessions/`에 기록합니다(`.git` 안이라 커밋되지 않고, git 저장소가 아니면 `.claude/swb-ledger/`). **켜기 전까지는 꺼져 있습니다**(`/swb ledger off`는 기록을 멈추고 이미 쓴 것은 남기며, `/swb ledger`는 상태를 보여 줍니다). 텍스트는 실시간 보기와 같이 마스킹하고, 프롬프트와 답변은 20,000자까지 보관합니다.
 
-`/swb why src/a.ts:42`(파일이나 커밋 id도 가능)는 `git blame`으로 그 줄의 커밋을 찾아, 그 턴의 목표, 요청, 도구 호출과 Guard 판정, 답변, 커밋을 보여 줍니다. 기록이 직접 본 커밋은 정확하고, 보지 못한 커밋(손으로 한 커밋, 기록을 켜기 전)은 건드린 파일로 맞추며 *추정*이라고 표시합니다. 사람 사이의 공유, 검색, 자동 노트는 아직 없습니다.
+`/swb why src/a.ts:42`(파일이나 커밋 id도 가능)는 `git blame`으로 그 줄의 커밋을 찾아, 그 턴의 목표, 요청, 도구 호출과 Guard 판정, 답변, 커밋을 보여 줍니다. 기록이 직접 본 커밋은 정확하고, 보지 못한 커밋(손으로 한 커밋, 기록을 켜기 전)은 건드린 파일로 맞추며 *추정*이라고 표시합니다. 
+**팀과 공유.** 세션을 직접 발행하기 전에는 아무것도 컴퓨터 밖으로 나가지 않습니다. 세션 하나씩 발행합니다.
+
+- `/swb ledger publish [세션]`은 세션(기본은 지금 기록 중인 것)의 *요약*을 같은 저장소의 `swb-ledger` 브랜치에 씁니다. git plumbing과 임시 인덱스를 써서 작업 트리와 현재 브랜치는 건드리지 않습니다. 요약에는 프롬프트, 답변, 도구 요약과 결과, 가드 판정, 편집한 경로, 커밋이 들어가고 **도구 입력·출력은 발행하지 않습니다**. 텍스트는 한 번 더 마스킹하고 홈 폴더는 `~`로 바꾸며, 쓰기 전에 미리보기(기록 폴더 아래 파일과 질문)로 남아 있는 이메일·주소를 보여 주고 마스킹해서 발행할 수도 있습니다. 취소하면 아무것도 쓰지 않습니다. 그다음 push합니다(강제 push는 없고, 다른 사람이 먼저 올려 거부되면 다시 받아 최대 세 번 재시도). 원격이 없으면 로컬 브랜치에만 남고 `git push <remote> swb-ledger`로 공유합니다.
+- `/swb ledger fetch`는 다른 사람이 발행한 것을 가져옵니다. `/swb why`와 `/swb ledger search`가 내 세션과 함께 읽고 `shared`로 표시합니다. 공유된 텍스트는 다른 사람이 쓴 것이므로 지시가 아니라 데이터로 다루세요.
+- 발행한 세션마다 생성 노트(`notes/<월>/<세션>.md`: 목표, 턴별 요청과 결정, 파일, 커밋, 가드 호출)도 만듭니다. 다시 만들면 생성 블록만 바뀌고 `## Notes` 아래에 사람이 쓴 것은 남으며, 두 사람이 고친 경우 둘 다 보존합니다.
+- `/swb ledger search <단어> [user:이름] [path:접두] [kind:prompt|reply|edit|commit|guard]`은 모든 단어가 들어 있는 턴을 최신순으로 찾습니다.
+- `/swb ledger forget <세션>`은 로컬 사본을 지우고, 내가 발행한 세션이면 브랜치에서도 제거합니다. 브랜치 이력에는 이전 버전이 남으므로 완전히 지우려면 브랜치를 다시 써야 합니다.
+- 가드 파일로 발행을 막을 수 있습니다: `"ledger": { "share": "off" }`. 조이기만 하고, 스스로 발행을 켜는 값은 없으며 발행은 매번 묻습니다.
 
 ### 기본 Guard 규칙 (Balanced)
 
@@ -791,6 +809,7 @@ location / {
 - 잘못된 규칙은 건너뛰고 오류를 표시합니다(추측해서 적용하지 않음).
 - `templates`는 팀 공통 완료 조건입니다. 템플릿마다 `constraints`(`s:` 접두어는 Soft), `doneConditions`(문자열 또는 `{ "text", "link" }`), 선택적인 `goal`, `nonGoals`를 둡니다. `defaultTemplate`은 `/swb new`의 시작점이 되고, `/swb load <이름>` 또는 `team:<이름>`으로 불러옵니다.
 - `audit`은 감사 로그를 켭니다(아래).
+- `"ledger": { "share": "off" }`는 결정 기록 발행(`/swb ledger publish`)을 막습니다. 조이기만 합니다.
 - `"requireContract": true`이면 완료 조건이 하나 이상 있는 잠긴 계약이 생길 때까지 프롬프트를 보류합니다(Mod가 직접 보내는 프롬프트는 제외).
 
 ### 감사 로그

@@ -4,6 +4,9 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- Ledger sharing: `/swb ledger publish` writes a masked summary of a session (never tool input or output) to the repository's `swb-ledger` branch with git plumbing and a temporary index, after a preview and a question; `fetch`, `search` and `forget` complete it, `/swb why` reads teammates' sessions too, and each published session gets a generated note whose human-written `## Notes` survive regeneration. A guard file can forbid it with `"ledger": { "share": "off" }`.
+
 ## [0.18.0] - 2026-10-14
 
 ### Added
