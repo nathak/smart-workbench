@@ -1253,7 +1253,7 @@ const wikiRuns = (extra: Record<string, { exitCode: number; stdout: string; stde
   'printenv SWB_LEDGER_WIKI': { exitCode: 1, stdout: '' },
   [`${G} config --get remote.origin.url`]: { exitCode: 0, stdout: 'git@github.com:o/r.git\n' },
   '~lint-content.mjs': { exitCode: 0, stdout: WIKI_OK },
-  '~swb-tmp': { exitCode: 0, stdout: JSON.stringify({ done: ['content/qa-log/work/page.md'], failed: [] }) },
+  '~process.pid': { exitCode: 0, stdout: JSON.stringify({ done: ['content/qa-log/work/page.md'], failed: [] }) },
   ...extra,
 })
 
@@ -1266,7 +1266,7 @@ test('/swb ledger export-wiki writes only pages under content/qa-log after a que
   expect(text).toContain('Wrote 1 pages')
   expect(text).toContain('Not committed')
   const calls = writes.map(one => one.argv.join(' '))
-  const sent = writes.find(one => one.argv.join(' ').includes('swb-tmp'))
+  const sent = writes.find(one => one.argv.join(' ').includes('process.pid'))
   const files = JSON.parse(sent?.stdin ?? '{}') as { wiki: string; files: Array<{ rel: string; text: string }> }
   expect(files.wiki).toBe('/wiki')
   expect(files.files.every(one => /^content\/qa-log\/work\/\d{4}-\d{2}-\d{2}-swb-s1-abc\.md$/.test(one.rel))).toBe(true)
@@ -1282,14 +1282,14 @@ test('export-wiki writes nothing on Cancel, for a folder that is not the wiki, w
   await $.session.start(start)
   expect((await $.command.run({ command: 'swb', args: 'ledger export-wiki /nowhere', ...COMMAND })).text).toContain('Not exported: it does not look like the llm-wiki')
   expect((await $.command.run({ command: 'swb', args: 'ledger export-wiki', ...COMMAND })).text).toContain('Usage')
-  expect(writes.some(one => one.argv.join(' ').includes('swb-tmp'))).toBe(false)
+  expect(writes.some(one => one.argv.join(' ').includes('process.pid'))).toBe(false)
 })
 
 test('export-wiki: Cancel writes nothing', async ($, on) => {
   const writes = shareWorld(on, wikiRuns(), [], 'Cancel')
   await $.session.start(start)
   expect((await $.command.run({ command: 'swb', args: 'ledger export-wiki /wiki', ...COMMAND })).text).toBe('Not exported.')
-  expect(writes.some(one => one.argv.join(' ').includes('swb-tmp'))).toBe(false)
+  expect(writes.some(one => one.argv.join(' ').includes('process.pid'))).toBe(false)
 })
 
 test('export-wiki is refused when the guard file switches the wiki off', async ($, on) => {
@@ -1317,7 +1317,7 @@ test('shared text in /swb why and search comes inside a data frame, cleaned, wit
   })
   await $.session.start(start)
   const found = (await $.command.run({ command: 'swb', args: 'ledger search login', ...COMMAND })).text
-  expect(found).toMatch(/^\[ledger-data [0-9a-f]{8}\] Quoted records shared by: Lee\./)
+  expect(found).toMatch(/^\[ledger-data [0-9a-f]{8}\] The lines below are quoted records[^\n]*\nShared by: Lee\n/)
   expect(found).toContain('[!instruction-like]')
   expect(found).not.toContain('<script>')
   expect(found).not.toContain('\u001b')

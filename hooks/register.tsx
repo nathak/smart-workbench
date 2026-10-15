@@ -683,9 +683,9 @@ async function searchCommand($: $, arg: string): Promise<{ text: string }> {
 
 // ---- export to the user's llm-wiki: the sessions as pages of content/qa-log/<project>/, written as files and nothing more (the wiki's git is the person's to run)
 const WIKI_CHECK_SCRIPT =
-  "const fs=require('fs'),p=require('path'),os=require('os');const out=r=>process.stdout.write(JSON.stringify(r));(function(){const inp=JSON.parse(fs.readFileSync(0,'utf8'));let w=inp.wiki;if(w==='~'||w.startsWith('~/'))w=p.join(os.homedir(),w.slice(1));try{w=fs.realpathSync(w)}catch{return out({ok:false,why:'the path does not exist'})}if(!fs.statSync(w).isDirectory())return out({ok:false,why:'the path is not a directory'});if(!fs.existsSync(p.join(w,'content'))||!fs.existsSync(p.join(w,'scripts','lint-content.mjs')))return out({ok:false,why:'it does not look like the llm-wiki (content/ and scripts/lint-content.mjs are missing)'});let repo=inp.repo;try{repo=fs.realpathSync(repo)}catch{}const sep=p.sep;if(w===repo||repo.startsWith(w+sep)||w.startsWith(repo+sep)||w===os.homedir()||w===p.parse(w).root)return out({ok:false,why:'the wiki must be a folder of its own, apart from this project'});const files={};for(const rel of inp.targets){const full=p.join(w,rel);try{const l=fs.lstatSync(full);files[rel]=l.isSymbolicLink()?{symlink:true}:{text:fs.readFileSync(full,'utf8')}}catch{files[rel]=null}}const exists=inp.exists.filter(rel=>fs.existsSync(p.join(w,rel)));out({ok:true,wiki:w,files,exists})})()"
+  "const fs=require('fs'),p=require('path'),os=require('os');const out=r=>process.stdout.write(JSON.stringify(r));(function(){const inp=JSON.parse(fs.readFileSync(0,'utf8'));let w=inp.wiki;if(w==='~'||w.startsWith('~/'))w=p.join(os.homedir(),w.slice(1));try{w=fs.realpathSync(w)}catch{return out({ok:false,why:'the path does not exist'})}if(!fs.statSync(w).isDirectory())return out({ok:false,why:'the path is not a directory'});if(!fs.existsSync(p.join(w,'content'))||!fs.existsSync(p.join(w,'scripts','lint-content.mjs')))return out({ok:false,why:'it does not look like the llm-wiki (content/ and scripts/lint-content.mjs are missing)'});let repo=inp.repo;try{repo=fs.realpathSync(repo)}catch{}const sep=p.sep;if(w===repo||repo.startsWith(w+sep)||w.startsWith(repo+sep)||w===os.homedir()||w===fs.realpathSync(os.homedir())||w===p.parse(w).root)return out({ok:false,why:'the wiki must be a folder of its own, apart from this project'});const files={};for(const rel of inp.targets){const full=p.join(w,rel);try{const l=fs.lstatSync(full);files[rel]=l.isSymbolicLink()?{symlink:true}:{text:fs.readFileSync(full,'utf8')}}catch{files[rel]=null}}const exists=inp.exists.filter(rel=>fs.existsSync(p.join(w,rel)));out({ok:true,wiki:w,files,exists})})()"
 const WIKI_WRITE_SCRIPT =
-  "const fs=require('fs'),p=require('path');const inp=JSON.parse(fs.readFileSync(0,'utf8'));const base=p.join(inp.wiki,'content','qa-log');const done=[],failed=[];for(const f of inp.files){try{if(!/^content\\/qa-log\\/[a-z0-9-]+\\/[\\w.-]+\\.md$/.test(f.rel))throw new Error('path not allowed');const dir=p.join(inp.wiki,p.dirname(f.rel));fs.mkdirSync(dir,{recursive:true});const real=fs.realpathSync(dir);if(!(real+p.sep).startsWith(base+p.sep))throw new Error('outside content/qa-log');const full=p.join(real,p.basename(f.rel));try{if(fs.lstatSync(full).isSymbolicLink())throw new Error('is a link')}catch(e){if(e.code!=='ENOENT')throw e}const tmp=full+'.swb-tmp';fs.writeFileSync(tmp,f.text);fs.renameSync(tmp,full);done.push(f.rel)}catch(e){failed.push(f.rel+': '+e.message)}}process.stdout.write(JSON.stringify({done,failed}))"
+  "const fs=require('fs'),p=require('path');const inp=JSON.parse(fs.readFileSync(0,'utf8'));const base=p.join(inp.wiki,'content','qa-log');const done=[],failed=[];for(const f of inp.files){let tmp='';try{if(!/^content\\/qa-log\\/[a-z0-9-]+\\/[\\w.-]+\\.md$/.test(f.rel))throw new Error('path not allowed');const dir=p.join(inp.wiki,p.dirname(f.rel));for(const part of ['content','content/qa-log',p.dirname(f.rel)]){try{if(fs.lstatSync(p.join(inp.wiki,part)).isSymbolicLink())throw new Error(part+' is a link')}catch(e){if(e.code!=='ENOENT')throw e}}fs.mkdirSync(dir,{recursive:true});const real=fs.realpathSync(dir);if(!(real+p.sep).startsWith(base+p.sep))throw new Error('outside content/qa-log');const full=p.join(real,p.basename(f.rel));try{if(fs.lstatSync(full).isSymbolicLink())throw new Error('is a link')}catch(e){if(e.code!=='ENOENT')throw e}tmp=full+'.swb-'+process.pid+'-'+Date.now()+'.tmp';fs.writeFileSync(tmp,f.text,{flag:'wx'});fs.renameSync(tmp,full);tmp='';done.push(f.rel)}catch(e){if(tmp){try{fs.unlinkSync(tmp)}catch{}}failed.push(f.rel+': '+e.message)}}process.stdout.write(JSON.stringify({done,failed}))"
 
 async function exportWikiCommand($: $, arg: string): Promise<{ text: string }> {
   const live = await read($, liveAtom)
@@ -699,7 +699,8 @@ async function exportWikiCommand($: $, arg: string): Promise<{ text: string }> {
   const dir = await ledgerDirOf($)
   const local = await readLedger($, dir)
   const now = await $.clock.now()
-  const offsetMinutes = -new Date(now).getTimezoneOffset()
+  // The day a session belongs to is the day it started in the person's own zone as it was then (a later change of summer time must not move it).
+  const offsetOf = (events: LedgerEvent[]): number => -new Date((events.find(one => one.kind === 'session.start') ?? events[0])?.at ?? now).getTimezoneOffset()
   const sessions = [...new Set(local.map(one => one.session))]
     .map(one => publishEvents(local, one).events)
     .filter(events => events.some(one => one.turn > 0))
@@ -709,8 +710,8 @@ async function exportWikiCommand($: $, arg: string): Promise<{ text: string }> {
   if (sessions.length === 0) return { text: 'There is no recorded session with a turn to export. Turn the ledger on with /swb ledger on.' }
   const remote = (await gitRun($, ['config', '--get', 'remote.origin.url'])).out
   const base = commitBase(remote)
-  const options = { project, offsetMinutes, ...(base ? { commitBase: base } : {}) }
-  const targets = sessions.map(events => wikiTarget(events, options))
+  const options = { project, ...(base ? { commitBase: base } : {}) }
+  const targets = sessions.map(events => wikiTarget(events, { ...options, offsetMinutes: offsetOf(events) }))
   const checked = await $.process.run(['node', '-e', WIKI_CHECK_SCRIPT], { stdin: JSON.stringify({ wiki, repo: root, targets: targets.map(one => one.file), exists: [...new Set(targets.map(one => `content/project-work/${project}/${one.date}.md`))] }) }).catch(() => undefined)
   let check: { ok: boolean; why?: string; wiki?: string; files?: Record<string, { text?: string; symlink?: boolean } | null>; exists?: string[] }
   try {
@@ -725,7 +726,7 @@ async function exportWikiCommand($: $, arg: string): Promise<{ text: string }> {
     const target = targets[at] as { id: string; file: string; date: string }
     const sameDay = check.exists?.includes(`content/project-work/${project}/${target.date}.md`) ? `project-work/${project}/${target.date}` : undefined
     const prev = at > 0 ? (targets[at - 1] as { id: string }).id : undefined
-    const page = wikiPage(events, { ...options, ...(prev ? { prev } : {}), ...(sameDay ? { sameDay } : {}) })
+    const page = wikiPage(events, { ...options, offsetMinutes: offsetOf(events), ...(prev ? { prev } : {}), ...(sameDay ? { sameDay } : {}) })
     const held = check.files?.[target.file]
     if (held?.symlink) return void skipped.push(`${target.file} (a link)`)
     const merged = wikiMerge(held?.text, page, events[0]?.session ?? '')
