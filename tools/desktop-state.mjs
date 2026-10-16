@@ -3,6 +3,7 @@
 // The app rewrites ~/.claude/smartworkbench-desktop/desktop.json every few seconds; a file older than FRESH_MS is a dead app's.
 import { lstatSync, readFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
+import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 
 export const FRESH_MS = 30000
@@ -34,7 +35,7 @@ export function readDesktop(home = desktopHome(), now = Date.now()) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const state = readDesktop()
   if (state) process.stdout.write(JSON.stringify(state))
 }

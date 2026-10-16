@@ -6,6 +6,7 @@ import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
+import { snapshotText } from './desktop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -198,6 +199,7 @@ async function mutate($: $, change: (wb: Workbench) => Workbench): Promise<Workb
     return { ...changed, rev: Math.max(base.rev ?? 0, savedRev) + 1, ...(sessionId ? { savedBy: sessionId } : {}), ...(stamp !== undefined ? { savedAt: stamp } : {}) }
   })
   await $.store.set(key, next)
+  scheduleSnapshot($)
 
   if (before.task.status !== 'complete' && next.task.status === 'complete') {
     await audit($, 'task.complete', { goal: next.task.goal, conditions: next.task.doneConditions.length })
@@ -215,6 +217,7 @@ async function pull($: $): Promise<void> {
   if (model.isNewerElsewhere(saved, await read($, wbAtom), sessionId)) {
     await update($, wbAtom, () => model.fill(saved))
     $.ui.toast('SmartWorkbench: picked up changes made in another session')
+    scheduleSnapshot($)
   }
 }
 
@@ -1569,6 +1572,64 @@ async function desktopState($: $): Promise<{ port: number; autoJoin: boolean; li
   }
 }
 
+// The desktop app's read-only picture of this session, written at most every few seconds and only while the app runs.
+let snapshotPending = false
+// A change that arrived while a snapshot was being written: one more is written when that one is done.
+let snapshotDirty = false
+let snapshotGen = 0
+let snapshotLast = ''
+let deskCache: { at: number; state: Awaited<ReturnType<typeof desktopState>> } | undefined
+const SNAPSHOT_DELAY_MS = 2000
+const DESK_CACHE_MS = 10000
+// While no app runs the check is repeated rarely: it costs a process.
+const DESK_ABSENT_CACHE_MS = 30000
+
+async function deskFresh($: $): ReturnType<typeof desktopState> {
+  const at = await $.clock.now()
+  if (deskCache && at - deskCache.at < (deskCache.state ? DESK_CACHE_MS : DESK_ABSENT_CACHE_MS)) return deskCache.state
+  const state = await desktopState($)
+  deskCache = { at, state }
+
+  return state
+}
+
+function scheduleSnapshot($: $): void {
+  if (snapshotPending) {
+    snapshotDirty = true
+    return
+  }
+  snapshotPending = true
+  const gen = snapshotGen
+  void (async () => {
+    try {
+      await $.clock.sleep(SNAPSHOT_DELAY_MS)
+      const desk = await deskFresh($)
+      // Only a session the app can list (it is on the app's hub) is worth a file.
+      if (!isAskable || !desk || !liveServer?.url.startsWith(`http://127.0.0.1:${desk.port}`)) return
+      const live = await read($, liveAtom)
+      if (!live.sessionId) return
+      const at = await $.clock.now()
+      const text = snapshotText(await read($, wbAtom), live, at)
+      // Nothing changed since the last one: no process is started for it.
+      const same = text?.replace(/"at":\d+/, '')
+      if (text && same !== snapshotLast) {
+        snapshotLast = same ?? ''
+        await $.process.run(['node', `${$.plugin.root}/tools/desktop-snapshot.mjs`, live.sessionId], { stdin: text, timeoutMs: 5000 })
+      }
+    } catch {
+      // The snapshot is a courtesy to the app; the workbench does not depend on it.
+    } finally {
+      if (gen === snapshotGen) {
+        snapshotPending = false
+        if (snapshotDirty) {
+          snapshotDirty = false
+          scheduleSnapshot($)
+        }
+      }
+    }
+  })()
+}
+
 // A notification for a guard question: only where someone can answer, at most one every few seconds (parallel agents ask in bursts),
 // read from the store each time so a choice made in another session counts. Never throws and never waits for the channel.
 async function notifyAsk($: $, reason: string, tool: string): Promise<void> {
@@ -2759,6 +2820,11 @@ async function pane($: $, els: Els, width: number, rows: number): Promise<Render
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     agentAnswers.clear()
+    snapshotGen++
+    snapshotPending = false
+    snapshotDirty = false
+    snapshotLast = ''
+    deskCache = undefined
     appender = 'tee'
     feedMissed = 0
     isFeedNoted = false
@@ -2805,6 +2871,7 @@ export const register: Register = on => {
       if (desk?.autoJoin && !liveServer) {
         // A slow or missing hub must not hold the session start for the whole join wait.
         await Promise.race([liveCommand($, `${desk.port}${desk.livePrompts ? '' : ' --no-prompts'}`).catch(() => undefined), $.clock.sleep(4000).catch(() => undefined)])
+        scheduleSnapshot($)
         if (liveServer) $.ui.log(`SmartWorkbench: joined the desktop app's live view at ${liveServer.url}${desk.livePrompts ? ' (full prompts are shown there; /swb live --no-prompts to shorten them)' : ''}.`)
       }
     }
@@ -3167,6 +3234,8 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const ran = await next(e)
+    // A session the app started after it may not have changed anything yet; the end of a turn is a good time to show where it stands.
+    scheduleSnapshot($)
 
     if (e.agentId !== undefined) {
       const advisor = backgroundAdvisors.get(e.agentId)

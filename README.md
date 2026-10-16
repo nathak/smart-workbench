@@ -229,7 +229,7 @@ A checked-in guard file can only raise the level (the stricter of the two applie
 cd desktop && npm install && npm start      # on Linux without a setuid sandbox: npm run start:nosandbox
 ```
 
-While the app runs it rewrites `~/.claude/smartworkbench-desktop/desktop.json` every 10 seconds (owner-only). A session reads it only while it is fresh: with auto-join on it joins the app's hub at start, and while the app shows ask notices the session does not send its own. Closing the app removes the file. The hub is the tools of the installed plugin when they support `--keep`, else the copy in this repository. Editing the contract and team mode from the app is planned, not built.
+While the app runs it rewrites `~/.claude/smartworkbench-desktop/desktop.json` every 10 seconds (owner-only). A session reads it only while it is fresh: with auto-join on it joins the app's hub at start, and while the app shows ask notices the session does not send its own. Closing the app removes the file. The hub is the tools of the installed plugin when they support `--keep`, else the copy in this repository. The tray menu's session state window shows each session's contract, team mode, guard and evidence read-only: while the app runs, a session writes a snapshot (contract words, team and guard settings, evidence results; secrets masked, never a command or a prompt) to `~/.claude/smartworkbench-desktop/state/<session>.json` a couple of seconds after a change. Editing the contract and team mode from the app is planned, not built.
 
 ### Decision ledger
 
@@ -705,7 +705,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 cd desktop && npm install && npm start      # setuid 샌드박스가 없는 Linux에서는 npm run start:nosandbox
 ```
 
-앱이 실행되는 동안 `~/.claude/smartworkbench-desktop/desktop.json`(소유자만 접근)을 10초마다 다시 씁니다. 세션은 이 파일이 최근 것일 때만 읽습니다. 자동 연결이 켜져 있으면 시작할 때 앱의 허브에 연결하고, 앱이 확인 대기 알림을 보여 주는 동안에는 세션이 따로 보내지 않습니다. 앱을 끄면 파일이 지워집니다. 허브는 설치된 플러그인의 `tools/`가 `--keep`을 지원하면 그것을, 아니면 이 저장소의 사본을 씁니다. 앱에서 계약과 팀 모드를 편집하는 기능은 계획만 있고 아직 없습니다.
+앱이 실행되는 동안 `~/.claude/smartworkbench-desktop/desktop.json`(소유자만 접근)을 10초마다 다시 씁니다. 세션은 이 파일이 최근 것일 때만 읽습니다. 자동 연결이 켜져 있으면 시작할 때 앱의 허브에 연결하고, 앱이 확인 대기 알림을 보여 주는 동안에는 세션이 따로 보내지 않습니다. 앱을 끄면 파일이 지워집니다. 허브는 설치된 플러그인의 `tools/`가 `--keep`을 지원하면 그것을, 아니면 이 저장소의 사본을 씁니다. 트레이 메뉴의 세션 상태 창은 각 세션의 계약, 팀 모드, Guard, 증거를 읽기 전용으로 보여 줍니다. 앱이 켜진 동안 세션이 변경 몇 초 뒤 스냅샷(계약 문구, 팀·Guard 설정, 증거 결과; 시크릿은 마스킹하고 명령과 프롬프트는 담지 않음)을 `~/.claude/smartworkbench-desktop/state/<세션>.json`에 씁니다. 앱에서 계약과 팀 모드를 편집하는 기능은 계획만 있고 아직 없습니다.
 
 ### 결정 기록(Ledger)
 

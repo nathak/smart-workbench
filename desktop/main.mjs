@@ -1,6 +1,7 @@
 // SmartWorkbench desktop: a tray app that keeps the live-monitor hub running, shows it in its own window and
 // raises desktop notifications when a session waits for an answer, goes quiet or ends.
-import { Menu, Notification, Tray, BrowserWindow, app, nativeImage, session } from 'electron'
+import { Menu, Notification, Tray, BrowserWindow, app, ipcMain, nativeImage, session } from 'electron'
+import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
 import { beat, clear, desktopHome, ensureHome } from './channel.mjs'
@@ -9,11 +10,13 @@ import { DEFAULT_PORT, superviseHub } from './hub.mjs'
 import { pickLang, strings } from './i18n.mjs'
 import { makeNotices } from './notices.mjs'
 import { loadPrefs, savePrefs } from './prefs.mjs'
+import { readSnapshots } from './snapshots.mjs'
 
 // A second instance quits at once and touches nothing: it must not start a hub or remove the first one's heartbeat.
 if (!app.requestSingleInstanceLock()) app.exit(0)
 
 const PORT = Number(process.env.SWB_DESKTOP_PORT) || DEFAULT_PORT
+let LANG = 'en'
 let T = strings('en')
 const live = new Set()
 let followed = false
@@ -78,6 +81,37 @@ function show() {
   })
 }
 
+let statusWin
+const here = fileURLToPath(new URL('.', import.meta.url))
+
+// The sessions and the read-only state each one's plugin wrote; the window only draws it.
+function showStatus() {
+  if (statusWin && !statusWin.isDestroyed()) {
+    statusWin.show()
+    statusWin.focus()
+    return
+  }
+  statusWin = new BrowserWindow({ width: 760, height: 780, title: T.status, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(here, 'preload.cjs') } })
+  statusWin.removeMenu()
+  statusWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  const stay = event => event.preventDefault()
+  for (const name of ['will-navigate', 'will-redirect', 'will-frame-navigate']) statusWin.webContents.on(name, stay)
+  void statusWin.loadFile(join(here, 'ui', 'status.html'))
+}
+
+ipcMain.handle('swb:overview', event => {
+  // Only the status window asks, and it asks for nothing but this.
+  if (!statusWin || statusWin.isDestroyed() || event.sender !== statusWin.webContents || event.senderFrame !== statusWin.webContents.mainFrame) return null
+  const snaps = home ? readSnapshots(home, Date.now(), new Set(rows.map(row => String(row.id)))) : {}
+  return {
+    lang: LANG,
+    text: T.ui,
+    hubUp,
+    rows: rows.map(row => ({ id: String(row.id), name: String(row.name ?? ''), alive: row.alive === true, quiet: row.quiet === true })),
+    snaps: Object.fromEntries(rows.filter(row => Object.hasOwn(snaps, row.id)).map(row => [row.id, snaps[row.id]])),
+  }
+})
+
 function refreshMenu() {
   if (!tray) return
   const live = rows.filter(row => row.alive || row.quiet).length
@@ -86,6 +120,7 @@ function refreshMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: T.open, click: show },
+      { label: T.status, click: showStatus },
       { label: hubUp ? T.sessions(live) : T.hubDown, enabled: false },
       { type: 'separator' },
       check(T.autoJoin, 'autoJoin'),
@@ -139,7 +174,8 @@ app.on('before-quit', () => {
 })
 
 app.whenReady().then(() => {
-  T = strings(pickLang(app.getLocale()))
+  LANG = pickLang(app.getLocale())
+  T = strings(LANG)
   // Nothing the monitor page asks for beyond showing itself is granted.
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, done) => done(false))
   session.defaultSession.setPermissionCheckHandler(() => false)

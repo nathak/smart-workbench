@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -10,8 +13,10 @@ import { pickTools, superviseHub, toolCandidates } from '../hub.mjs'
 import { pickLang, strings } from '../i18n.mjs'
 import { makeNotices } from '../notices.mjs'
 import { loadPrefs, savePrefs } from '../prefs.mjs'
+import { readSnapshots } from '../snapshots.mjs'
 import { readDesktop } from '../../tools/desktop-state.mjs'
 
+const here = dirname(fileURLToPath(import.meta.url))
 const tmp = () => mkdtempSync(join(tmpdir(), 'swb-desk-'))
 const clock = () => {
   let t = 1_000_000
@@ -204,4 +209,74 @@ test('a heartbeat of an app that no longer runs is ignored even while fresh', ()
   assert.equal(readDesktop(home), undefined)
   writeFileSync(join(home, 'desktop.json'), JSON.stringify({ v: 1, pid: process.pid, port: 4317 }))
   assert.equal(readDesktop(home)?.port, 4317)
+})
+
+test('snapshots are read only when they are plain, small, recent and shaped right, and keyed by their file name', () => {
+  const home = tmp()
+  const dir = join(home, 'state')
+  mkdirSync(dir, { mode: 0o700 })
+  const ok = { v: 1, session: 'a', task: { goal: 'g' } }
+  writeFileSync(join(dir, 'a.json'), JSON.stringify(ok))
+  writeFileSync(join(dir, 'b.json'), JSON.stringify({ ...ok, session: 'other' }))
+  writeFileSync(join(dir, 'c.json'), JSON.stringify({ v: 2, session: 'c', task: {} }))
+  writeFileSync(join(dir, 'd.json'), JSON.stringify({ ...ok, session: 'd', pad: 'x'.repeat(70000) }))
+  writeFileSync(join(dir, 'e.json'), '{')
+  writeFileSync(join(dir, 'bad name.json'), JSON.stringify({ ...ok, session: 'bad name' }))
+  symlinkSync(join(dir, 'a.json'), join(dir, 'l.json'))
+  assert.deepEqual(Object.keys(readSnapshots(home)), ['a'])
+  assert.deepEqual(Object.keys(readSnapshots(home, Date.now() + 25 * 3600 * 1000)), [])
+  assert.equal(Object.keys(readSnapshots(join(home, 'none'))).length, 0)
+})
+
+test('the snapshot writer needs a fresh heartbeat, a matching session and a small body, and writes a private file', () => {
+  const home = tmp()
+  const run = (id, body) => spawnSync(process.execPath, [join(here, '..', '..', 'tools', 'desktop-snapshot.mjs'), id], { input: body, env: { ...process.env, SWB_DESKTOP_HOME: home } }).status
+  const snap = JSON.stringify({ v: 1, session: 's1', task: { goal: 'g' } })
+  assert.equal(run('s1', snap), 0)
+  assert.equal(existsSync(join(home, 'state', 's1.json')), false)
+  beat(home, { port: 4317 })
+  assert.equal(run('../x', snap), 2)
+  assert.equal(run('s2', snap), 4)
+  assert.equal(run('s1', JSON.stringify({ v: 1, session: 's1', pad: 'x'.repeat(70000) })), 3)
+  assert.equal(run('s1', snap), 0)
+  const file = join(home, 'state', 's1.json')
+  assert.equal(statSync(file).mode & 0o077, 0)
+  assert.equal(statSync(join(home, 'state')).mode & 0o077, 0)
+  assert.equal(readSnapshots(home).s1.task.goal, 'g')
+})
+
+test('a snapshot of an odd shape is given the arrays the window reads, only listed sessions are read, and a day-old file is removed', () => {
+  const home = tmp()
+  const dir = join(home, 'state')
+  mkdirSync(dir, { mode: 0o700 })
+  writeFileSync(join(dir, 'odd.json'), JSON.stringify({ v: 1, session: 'odd', task: { constraints: 'x' }, team: 5, evidence: {} }))
+  writeFileSync(join(dir, 'other.json'), JSON.stringify({ v: 1, session: 'other', task: {} }))
+  writeFileSync(join(dir, '__proto__.json'), JSON.stringify({ v: 1, session: '__proto__', task: {} }))
+  const got = readSnapshots(home, Date.now(), new Set(['odd']))
+  assert.deepEqual(Object.keys(got), ['odd'])
+  assert.deepEqual(got.odd.task.constraints, [])
+  assert.deepEqual(got.odd.team.roles, {})
+  assert.deepEqual(got.odd.evidence, [])
+  assert.equal(Object.hasOwn(readSnapshots(home), '__proto__'), true)
+  assert.equal(Object.getPrototypeOf(readSnapshots(home)), null)
+  readSnapshots(home, Date.now() + 25 * 3600 * 1000)
+  assert.equal(existsSync(join(dir, 'odd.json')), false)
+})
+
+test('the snapshot writer refuses a state directory that is a link and leaves no temporary file behind', () => {
+  const home = tmp()
+  beat(home, { port: 4317 })
+  const elsewhere = tmp()
+  symlinkSync(elsewhere, join(home, 'state'))
+  const run = body => spawnSync(process.execPath, [join(here, '..', '..', 'tools', 'desktop-snapshot.mjs'), 's1'], { input: body, env: { ...process.env, SWB_DESKTOP_HOME: home } }).status
+  assert.equal(run(JSON.stringify({ v: 1, session: 's1', task: {} })), 5)
+  assert.deepEqual(readdirSync(elsewhere), [])
+})
+
+test('the status window page restricts what it loads, and the preload exposes the overview and nothing else', () => {
+  const page = readFileSync(join(here, '..', 'ui', 'status.html'), 'utf8')
+  assert.ok(page.includes("default-src 'none'") && page.includes("base-uri 'none'") && page.includes("form-action 'none'"))
+  const preload = readFileSync(join(here, '..', 'preload.cjs'), 'utf8')
+  assert.equal([...preload.matchAll(/ipcRenderer\.\w+\('([^']+)'/g)].map(one => one[1]).join(), 'swb:overview')
+  assert.equal([...preload.matchAll(/exposeInMainWorld\('(\w+)'/g)].length, 1)
 })

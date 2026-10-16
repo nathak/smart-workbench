@@ -1,0 +1,15 @@
+:root { color-scheme: light dark; --bg: #fff; --fg: #1d2330; --muted: #6b7280; --line: #d9dde5; --ok: #15803d; --bad: #b91c1c; --warn: #b45309; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14171f; --fg: #e5e7eb; --muted: #9aa3b2; --line: #2a303c; --ok: #4ade80; --bad: #f87171; --warn: #fbbf24; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+header { display: flex; gap: 12px; align-items: baseline; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+h1 { font-size: 16px; margin: 0; }
+#hub { color: var(--muted); font-size: 12px; }
+main { padding: 12px 16px; display: grid; gap: 12px; }
+section { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-wrap: anywhere; }
+h2 { font-size: 14px; margin: 0 0 6px; }
+.meta { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.goal { font-weight: 600; margin: 6px 0; }
+h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 10px 0 2px; }
+ul { margin: 0; padding-left: 18px; }
+.verified { color: var(--ok); } .failed { color: var(--bad); } .observed, .waived { color: var(--warn); } .pending { color: var(--muted); }
+.empty { color: var(--muted); }

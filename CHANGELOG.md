@@ -6,6 +6,7 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ### Added
 - `desktop/`: an Electron tray app (Korean and English) that keeps the live-view hub running with no session (`live.mjs --hub --keep`), shows it in its own window and sends desktop notifications for a waiting guard question, a quiet session and an ended one; a session joins its hub on its own when the app asks (heartbeat file `~/.claude/smartworkbench-desktop/desktop.json`, read through `tools/desktop-state.mjs` only while fresh) and sends no ask notice of its own while the app shows them.
+- The desktop app's session state window (read-only): while the app runs, each session writes a masked snapshot of its contract, team mode, guard and evidence results (`hooks/desktop.ts`, `tools/desktop-snapshot.mjs`), a couple of seconds after a change, only for a session on the app's own hub; files older than a day are removed by the app. Free text goes through the same heuristic secret masking as the live feed, which is not a guarantee.
 - `/swb notify on|off`: when the guard asks for your answer, a notification goes through your terminal's notification channel (tool and reason only, never the command); on by default.
 - The live view tells a session that stopped beating but whose process still runs (asleep, stopped or busy) from one that ended: its tab says so and has no close button.
 

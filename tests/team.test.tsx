@@ -2160,3 +2160,70 @@ test('without the desktop app, or with autoJoin off, or in a session nobody can 
   await $.session.start(start)
   expect(spawned).toHaveLength(0)
 })
+
+const SNAP = (one: { argv: string[] }): boolean => String(one.argv[1]).endsWith('desktop-snapshot.mjs')
+const hubUp = (on: Parameters<typeof world>[0]): void =>
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4317  (project /work)\n' }
+    await new Promise(() => undefined)
+  })
+const waitFor = async (test: () => boolean): Promise<void> => {
+  for (let wait = 0; wait < 100 && !test(); wait++) await new Promise(done => setTimeout(done, 10))
+}
+const DESK_FILES = { '.claude/smartworkbench.json': JSON.stringify({ defaultTemplate: 'change', templates: { change: { constraints: ['Keep it hidden, token=abcdef123456'], doneConditions: ['Related tests pass'] } } }) }
+
+test('on the desktop app\'s hub, a change is written as one snapshot after a short delay, with no command and no secret in it', async ($, on) => {
+  const seen: Array<{ argv: string[]; stdin?: string }> = []
+  const { clock } = world(on, { desktop: { v: 1, port: 4317, autoJoin: true }, processed: seen, files: DESK_FILES })
+  hubUp(on)
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+  await $.tool.call({ tool: 'Bash', command: 'npm test --secret-flag-value' })
+  expect(seen.filter(SNAP)).toHaveLength(0)
+  await clock.set(Date.UTC(2026, 9, 8, 1, 0, 5))
+  await waitFor(() => seen.some(SNAP))
+  const wrote = seen.filter(SNAP)
+  expect(wrote).toHaveLength(1)
+  expect(wrote[0]?.argv[2]).toBe('session-a')
+  const snap = JSON.parse(wrote[0]?.stdin ?? '{}')
+  expect(snap.v).toBe(1)
+  expect(snap.session).toBe('session-a')
+  expect(snap.task.constraints[0].text).toContain('hidden')
+  expect(wrote[0]?.stdin).not.toContain('abcdef123456')
+  expect(wrote[0]?.stdin).not.toContain('secret-flag-value')
+})
+
+test('a change made while a snapshot is being written is written too, and an unchanged state starts no process', async ($, on) => {
+  const seen: Array<{ argv: string[]; stdin?: string }> = []
+  const { clock } = world(on, { desktop: { v: 1, port: 4317, autoJoin: true }, processed: seen, files: DESK_FILES })
+  hubUp(on)
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+  await clock.set(Date.UTC(2026, 9, 8, 1, 0, 5))
+  await waitFor(() => seen.filter(SNAP).length === 1)
+  await $.command.run({ command: 'swb', args: 'guard strict', ...COMMAND })
+  await clock.set(Date.UTC(2026, 9, 8, 1, 0, 10))
+  await waitFor(() => seen.filter(SNAP).length === 2)
+  expect(JSON.parse(seen.filter(SNAP)[1]?.stdin ?? '{}').guard.profile).toBe('strict')
+  // Same content again: only the time differs, so nothing is written.
+  await $.command.run({ command: 'swb', args: 'status', ...COMMAND })
+  await clock.set(Date.UTC(2026, 9, 8, 1, 0, 20))
+  await new Promise(done => setTimeout(done, 100))
+  expect(seen.filter(SNAP)).toHaveLength(2)
+})
+
+const quietCase = (name: string, desktop: Record<string, unknown> | undefined, isInteractive: boolean) =>
+  test(name, async ($, on) => {
+    const seen: Array<{ argv: string[]; stdin?: string }> = []
+    const { clock } = world(on, { desktop, processed: seen, files: DESK_FILES })
+    hubUp(on)
+    await $.session.start({ ...start, isInteractive })
+    await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+    await clock.set(Date.UTC(2026, 9, 8, 1, 0, 5))
+    await new Promise(done => setTimeout(done, 60))
+    expect(seen.some(SNAP)).toBe(false)
+  })
+
+quietCase('no snapshot is written while no desktop app runs', undefined, true)
+quietCase('no snapshot is written by a session that is not on the app\'s hub', { v: 1, port: 4317, autoJoin: false }, true)
+quietCase('no snapshot is written by a session nobody can answer', { v: 1, port: 4317, autoJoin: true }, false)
