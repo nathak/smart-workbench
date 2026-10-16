@@ -353,3 +353,33 @@ describe('redact', () => {
   })
 })
 
+
+describe('the desktop app channel', () => {
+  const blocked = (tool: string, input: Record<string, unknown>) => decide(classify(tool, input), 'balanced', false)
+
+  test('no tool call reads, writes or lists the key and the inbox, whatever the profile', () => {
+    for (const command of ['cat ~/.claude/smartworkbench-desktop/key', 'echo {} > ~/.claude/smartworkbench-desktop/inbox/s/x.json', 'ls ~/.claude/smartworkbench-desktop/']) {
+      expect(blocked('Bash', { command })).toBe('block')
+      expect(decide(classify('Bash', { command }), 'off', false)).toBe('block')
+      expect(decide(classify('Bash', { command }), 'permissive', false)).toBe('block')
+    }
+    expect(blocked('Write', { file_path: '/home/u/.claude/smartworkbench-desktop/inbox/s/x.json' })).toBe('block')
+    expect(blocked('Edit', { file_path: '/home/u/.claude/smartworkbench-desktop/key' })).toBe('block')
+    expect(blocked('Read', { file_path: '/home/u/.claude/smartworkbench-desktop/key' })).toBe('block')
+    expect(blocked('Grep', { path: '/home/u/.claude/smartworkbench-desktop', pattern: 'x' })).toBe('block')
+    expect(blocked('Bash', { command: 'ls src' })).toBe('allow')
+  })
+
+  test('other tools that can name a path, and the channel script itself, are covered; a repository that only carries the name is not', () => {
+    expect(blocked('LS', { path: '/home/u/.claude/smartworkbench-desktop' })).toBe('block')
+    expect(blocked('MultiEdit', { file_path: '/home/u/.claude/smartworkbench-desktop/inbox/s/x.json' })).toBe('block')
+    expect(blocked('NotebookEdit', { notebook_path: '/home/u/.claude/smartworkbench-desktop/key' })).toBe('block')
+    expect(blocked('mcp__files__read_file', { path: '/home/u/.claude/smartworkbench-desktop/key' })).toBe('block')
+    expect(blocked('Bash', { command: 'node /p/tools/desktop-channel.mjs take s1' })).toBe('block')
+    expect(blocked('Bash', { command: 'SWB_DESKTOP_HOME=/x node y' })).toBe('block')
+    expect(blocked('Bash', { command: 'cat ~/.claude/smartworkbench-de*/key' })).toBe('block')
+    expect(blocked('Read', { file_path: '/home/u/src/smartworkbench-desktop/README.md' })).toBe('allow')
+    expect(blocked('Edit', { file_path: '/home/u/src/smartworkbench-desktop/main.mjs' })).toBe('allow')
+    expect(blocked('Bash', { command: 'git commit -m "fix smartworkbench-desktop heartbeat"' })).toBe('allow')
+  })
+})

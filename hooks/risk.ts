@@ -115,6 +115,15 @@ const BASH_RULES: readonly Rule[] = [
     reason: 'changes the project guard policy',
   },
   {
+    // The desktop app's key and command inbox: whoever can write there can change the contract, so no tool call touches it.
+    category: 'desktop-channel',
+    risk: 'high',
+    policy: 'block',
+    raw: true,
+    pattern: /\.claude\/smartworkbench-de|smartworkbench-desktop\/(?:key|inbox|ack|state)\b|desktop-channel\.mjs|SWB_DESKTOP_HOME/,
+    reason: "touches the desktop app's key and command inbox",
+  },
+  {
     category: 'secret-output',
     risk: 'medium',
     policy: 'ask',
@@ -254,6 +263,8 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 // .env.example and its kin hold no secrets by convention. Keys and credential files of the usual tools are listed by name.
 const SECRET_PATH = /(^|\/)(\.env(?:\.(?!(?:example|sample|template|dist)$)[^/]*)?|\.envrc|\.npmrc|\.netrc|\.pgpass|\.pypirc|\.git-credentials|credentials(\.json)?|id_(?:rsa|dsa|ecdsa|ed25519)[^/]*|[^/]*\.(?:pem|pfx|p12)|\.kube\/config|\.ssh\/(?!known_hosts$|config$)[^/]+)$/i
 const GUARD_FILE = /(^|\/)\.claude\/smartworkbench\.json$/i
+// The app's folder under ~/.claude (or its parts, for a home set elsewhere). A repository that merely carries the name is not touched.
+const DESKTOP_CHANNEL = /(?:\.claude\/smartworkbench-de|smartworkbench-desktop\/(?:key|inbox|ack|state)(?:\/|$))/i
 // A glob that reaches for secrets files (**/.env*, **/id_*, *.pem).
 const SECRET_GLOB = /(^|[/*])\.env(?!\.(?:example|sample|template|dist)\b)|\.envrc|\.npmrc|\.netrc|\.pgpass|\.pypirc|\.git-credentials|credentials|id_(?:rsa|dsa|ecdsa|ed25519|\*)|\*\.(?:pem|pfx|p12)\b|\.ssh\/\*/i
 const SEND_TOOL = /(^|_)(send|post|publish|deploy|create_pr|create_pull_request|share|comment|reply|message)/i
@@ -317,6 +328,10 @@ export function classify(tool: string, input: unknown): Verdict {
   if (EDIT_TOOLS.has(tool)) {
     const path = normalisePath(String(args.file_path ?? args.notebook_path ?? ''))
 
+    if (DESKTOP_CHANNEL.test(path)) {
+      return { category: 'desktop-channel', risk: 'high', policy: 'block', reason: "edits the desktop app's key or command inbox" }
+    }
+
     if (GUARD_FILE.test(path)) {
       return { category: 'guard-policy', risk: 'medium', policy: 'ask', reason: 'changes the project guard policy' }
     }
@@ -328,7 +343,10 @@ export function classify(tool: string, input: unknown): Verdict {
 
   if (READ_TOOLS.has(tool)) {
     // Read names one file; Grep and Glob can point at a secrets file too, by path or by glob.
-    const named = [args.file_path, tool === 'Grep' || tool === 'Glob' ? args.path : undefined, tool === 'Grep' ? args.glob : tool === 'Glob' ? args.pattern : undefined]
+    const named = [args.file_path, tool === 'Grep' || tool === 'Glob' || tool === 'LS' ? args.path : undefined, tool === 'Grep' ? args.glob : tool === 'Glob' ? args.pattern : undefined]
+    if (named.some(one => typeof one === 'string' && DESKTOP_CHANNEL.test(normalisePath(one)))) {
+      return { category: 'desktop-channel', risk: 'high', policy: 'block', reason: "reads the desktop app's key or command inbox" }
+    }
     const touchesSecret = named.some(one => typeof one === 'string' && (SECRET_PATH.test(normalisePath(one)) || (tool !== 'Read' && SECRET_GLOB.test(one))))
 
     return (tool === 'Read' || tool === 'Grep' || tool === 'Glob') && touchesSecret
@@ -337,6 +355,9 @@ export function classify(tool: string, input: unknown): Verdict {
   }
 
   if (tool.startsWith('mcp__')) {
+    // An MCP tool can read any file: its arguments are looked at for the app's folder too.
+    if (DESKTOP_CHANNEL.test(JSON.stringify(args))) return { category: 'desktop-channel', risk: 'high', policy: 'block', reason: "names the desktop app's key or command inbox" }
+
     return classifyMcp(tool)
   }
 
@@ -344,7 +365,7 @@ export function classify(tool: string, input: unknown): Verdict {
 }
 
 // Asked even under the permissive profile.
-export const ALWAYS_ASK = new Set(['project-rule', 'secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec', 'codex-send', 'codex-write', 'codex-transfer'])
+export const ALWAYS_ASK = new Set(['desktop-channel', 'project-rule', 'secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec', 'codex-send', 'codex-write', 'codex-transfer'])
 
 const PROFILE_RANK: Record<GuardProfile, number> = { off: -1, permissive: 0, balanced: 1, strict: 2 }
 
@@ -358,6 +379,7 @@ export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolea
   // Off: nothing the built-in rules find is stopped. What a project rule asked for still holds, so does the pause switch,
   // and a change to the guard file is still asked (or the rules could be deleted without anyone seeing it).
   if (profile === 'off') {
+    if (verdict.category === 'desktop-channel') return 'block'
     // First, so a rule inside the guard file cannot allow edits of the guard file.
     if (verdict.category === 'guard-policy') return verdict.rule === 'block' ? 'block' : 'ask'
     const asked = verdict.rule ?? 'allow'
@@ -466,7 +488,7 @@ export type SessionScope = { key: string; label: string }
 export function sessionScope(tool: string, input: unknown, verdict: Verdict): SessionScope | undefined {
   // remote-exec is asked every time, so allowing one script for the session never covers the next.
   // The same goes for Codex: the key stops at the script, so one allowed review would cover a write or a transcript transfer.
-  if (verdict.category === 'guard-policy' || verdict.category === 'remote-exec' || verdict.category.startsWith('codex-') || verdict.policy === 'block') {
+  if (verdict.category === 'desktop-channel' || verdict.category === 'guard-policy' || verdict.category === 'remote-exec' || verdict.category.startsWith('codex-') || verdict.policy === 'block') {
     return undefined
   }
   const args = (input ?? {}) as Record<string, unknown>

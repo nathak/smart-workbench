@@ -6,7 +6,7 @@ import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
-import { snapshotText } from './desktop'
+import { applyOps, snapshotText, type DeskOp } from './desktop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -285,7 +285,7 @@ function promptOf(live: Live, text: string, key: 'prompt' | 'output' | 'toolIn' 
 
 // The input and the result of an ordinary tool call, as text for the call's input and output tabs. Agent, Workflow and Codex calls carry their own fields.
 // A call that touches a secrets file shows neither, and every text goes through the same masking and length limits as a prompt.
-const NO_IO = new Set(['secret-output', 'secret-file', 'guard-policy'])
+const NO_IO = new Set(['secret-output', 'secret-file', 'guard-policy', 'desktop-channel'])
 
 function inputText(input: unknown): string {
   const args = (input ?? {}) as Record<string, unknown>
@@ -1558,15 +1558,15 @@ async function goalDraftFor($: $): Promise<string | undefined> {
 // ---- commands
 
 // The desktop app's heartbeat (tools/desktop-state.mjs), or undefined when it does not run. Never throws.
-async function desktopState($: $): Promise<{ port: number; autoJoin: boolean; livePrompts: boolean; askNotify: 'desktop' | 'plugin' } | undefined> {
+async function desktopState($: $): Promise<{ home: string; port: number; autoJoin: boolean; livePrompts: boolean; askNotify: 'desktop' | 'plugin' } | undefined> {
   try {
     const out = await $.process.run(['node', `${$.plugin.root}/tools/desktop-state.mjs`], { timeoutMs: 3000 })
     if (out.exitCode !== 0 || !out.stdout.trim()) return undefined
-    const raw = JSON.parse(out.stdout) as { port?: unknown; autoJoin?: unknown; livePrompts?: unknown; askNotify?: unknown }
+    const raw = JSON.parse(out.stdout) as { home?: unknown; port?: unknown; autoJoin?: unknown; livePrompts?: unknown; askNotify?: unknown }
     const port = Number(raw.port)
     if (!Number.isInteger(port) || port < 1024 || port > 65535) return undefined
 
-    return { port, autoJoin: raw.autoJoin === true, livePrompts: raw.livePrompts !== false, askNotify: raw.askNotify === 'desktop' ? 'desktop' : 'plugin' }
+    return { home: typeof raw.home === 'string' ? raw.home : '', port, autoJoin: raw.autoJoin === true, livePrompts: raw.livePrompts !== false, askNotify: raw.askNotify === 'desktop' ? 'desktop' : 'plugin' }
   } catch {
     return undefined
   }
@@ -1626,6 +1626,72 @@ function scheduleSnapshot($: $): void {
           scheduleSnapshot($)
         }
       }
+    }
+  })()
+}
+
+// ---- commands from the desktop app (tools/desktop-channel.mjs checks who sent them; the contract is changed here, as the panel would)
+let inboxGen = 0
+const INBOX_POLL_MS = 2000
+
+async function ackDesktop($: $, id: string, result: { status: 'applied' | 'rejected' | 'declined'; rev?: number; reason?: string }): Promise<void> {
+  await $.process.run(['node', `${$.plugin.root}/tools/desktop-channel.mjs`, 'ack', id], { stdin: JSON.stringify(result), timeoutMs: 5000 }).catch(() => undefined)
+}
+
+let inboxBusy = false
+
+async function pollInbox($: $): Promise<void> {
+  if (inboxBusy) return
+  inboxBusy = true
+  try {
+    const desk = await deskFresh($)
+    const { sessionId } = await read($, liveAtom)
+    if (!desk?.home || !sessionId) return
+    const entries = await $.fs.list(`${desk.home}/inbox/${sessionId}`).catch(() => [])
+    if (!entries.some(one => one.name.endsWith('.json'))) return
+    const taken = await $.process.run(['node', `${$.plugin.root}/tools/desktop-channel.mjs`, 'take', sessionId], { timeoutMs: 5000 })
+    if (taken.exitCode !== 0) return
+    const found = JSON.parse(taken.stdout) as { commands?: Array<{ id: string; ops: DeskOp[] }>; rejected?: Array<{ id: string; reason: string }> }
+    for (const one of found.rejected ?? []) await ackDesktop($, one.id, { status: 'rejected', reason: one.reason })
+    for (const command of found.commands ?? []) {
+      // The command was taken (its file is gone): whatever happens now, the app gets an answer.
+      try {
+        let failed: string | undefined
+        const next = await mutate($, current => {
+          const result = applyOps(current, command.ops)
+          failed = result.reason
+
+          return result.reason === undefined ? result.wb : current
+        })
+        if (failed !== undefined) {
+          await ackDesktop($, command.id, { status: 'rejected', reason: failed })
+          $.ui.toast(`SmartWorkbench: the desktop app's change was not applied (${failed})`)
+          continue
+        }
+        await ackDesktop($, command.id, { status: 'applied', rev: next.rev })
+        $.ui.toast(`SmartWorkbench: the desktop app changed the contract (${command.ops.length} change${command.ops.length === 1 ? '' : 's'})`)
+        await audit($, 'desktop.apply', { id: command.id, ops: command.ops.map(one => one.op).join(',') })
+      } catch {
+        await ackDesktop($, command.id, { status: 'rejected', reason: 'error' })
+      }
+    }
+  } finally {
+    inboxBusy = false
+  }
+}
+
+// Looks for commands every few seconds while the session lives; a session that ends ends its sleep.
+function startInbox($: $): void {
+  const gen = ++inboxGen
+  void (async () => {
+    for (;;) {
+      try {
+        await $.clock.sleep(INBOX_POLL_MS)
+      } catch {
+        return
+      }
+      if (gen !== inboxGen) return
+      if (isAskable) await pollInbox($).catch(() => undefined)
     }
   })()
 }
@@ -2821,6 +2887,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     agentAnswers.clear()
     snapshotGen++
+    inboxBusy = false
     snapshotPending = false
     snapshotDirty = false
     snapshotLast = ''
@@ -2866,6 +2933,7 @@ export const register: Register = on => {
     await setLive($, live => ({ ...live, codexPath }))
     await ledgerStart($).catch(() => undefined)
     // With the desktop app running and asked to, this session joins its always-on hub (the same join /swb live makes).
+    startInbox($)
     if (isAskable) {
       const desk = await desktopState($)
       if (desk?.autoJoin && !liveServer) {

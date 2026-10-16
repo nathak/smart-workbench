@@ -40,6 +40,8 @@ type WorldOptions = {
   processed?: Array<{ argv: string[]; stdin?: string; env?: Record<string, string> }>
   // What tools/desktop-state.mjs prints (the desktop app's heartbeat); none = the app does not run.
   desktop?: Record<string, unknown>
+  // What tools/desktop-channel.mjs take prints, once: commands waiting in the app's inbox for this session.
+  taken?: { commands?: Array<{ id: string; ops: unknown[] }>; rejected?: Array<{ id: string; reason: string }> }
   // Makes these commands fail as a non-zero exit would.
   fail?: (command: string) => boolean
   // Collects the toasts shown.
@@ -81,6 +83,7 @@ function world(on: On, options: WorldOptions = {}) {
     return { value: files[name] ?? '' }
   })
   on('fs.exists', ($, e) => ({ value: fileAt(e.path) !== undefined }))
+  on('fs.list', ($, e) => ({ value: String(e.path).includes('/inbox/') && options.taken ? [{ name: 'c1.json', kind: 'file' as const, size: 10, mtimeMs: 0, isLink: false }] : [] }))
   on('fs.stat', ($, e) => {
     const name = fileAt(e.path)
     if (name === undefined) throw new Error(`ENOENT: ${e.path}`)
@@ -92,6 +95,12 @@ function world(on: On, options: WorldOptions = {}) {
   })
   on('process.run', ($, e) => {
     options.processed?.push({ argv: e.argv, stdin: e.init?.stdin, env: e.init?.env })
+    if (String(e.argv[1] ?? '').endsWith('tools/desktop-channel.mjs') && e.argv[2] === 'take') {
+      const out = JSON.stringify({ commands: [], rejected: [], ...options.taken })
+      options.taken = undefined
+      return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (String(e.argv[1] ?? '').endsWith('tools/desktop-channel.mjs')) return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (String(e.argv[1] ?? '').endsWith('tools/desktop-state.mjs')) return { value: { exitCode: 0, stdout: options.desktop ? JSON.stringify(options.desktop) : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const answer = commands[e.argv.join(' ')]
     // A list answers one call after another, the last one for every call after that.
@@ -2227,3 +2236,74 @@ const quietCase = (name: string, desktop: Record<string, unknown> | undefined, i
 quietCase('no snapshot is written while no desktop app runs', undefined, true)
 quietCase('no snapshot is written by a session that is not on the app\'s hub', { v: 1, port: 4317, autoJoin: false }, true)
 quietCase('no snapshot is written by a session nobody can answer', { v: 1, port: 4317, autoJoin: true }, false)
+
+const ackOf = (seen: Array<{ argv: string[]; stdin?: string }>) => seen.filter(one => String(one.argv[1]).endsWith('desktop-channel.mjs') && one.argv[2] === 'ack').map(one => ({ id: one.argv[3], ...JSON.parse(one.stdin ?? '{}') }))
+const DESK = { v: 1, home: '/desk', port: 4317 }
+
+type Taken = { commands?: Array<{ id: string; ops: unknown[] }>; rejected?: Array<{ id: string; reason: string }> }
+
+async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0]) {
+  const seen: Array<{ argv: string[]; stdin?: string }> = []
+  const toasts: string[] = []
+  const options: { taken?: Taken; desktop: Record<string, unknown>; processed: typeof seen; files: Record<string, string>; toasts: string[] } = { desktop: DESK, processed: seen, files: DESK_FILES, toasts }
+  const made = world(on, options)
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+  // One poll: the command arrives, the clock moves past the poll delay, and the loop is given time to run.
+  const deliver = async (taken: Taken, at: number) => {
+    options.taken = taken
+    await made.clock.set(Date.UTC(2026, 9, 8, 1, 0, at))
+    await waitFor(() => options.taken === undefined)
+    await waitFor(() => ackOf(seen).length > 0)
+  }
+
+  return { seen, toasts, deliver, ...made }
+}
+
+test('a command from the desktop app changes the contract through the same rules as the panel, and its result goes back', async ($, on) => {
+  const { seen, toasts, deliver, workbench } = await deskWorld($, on)
+  await deliver({ commands: [{ id: 'c1', ops: [{ op: 'set_goal', text: 'From the app' }, { op: 'add_constraint', text: 's: be quick' }, { op: 'add_done_condition', text: 'Docs updated' }, { op: 'add_non_goal', text: 'No refactor' }] }] }, 3)
+  expect(workbench().task.goal).toBe('From the app')
+  expect(workbench().task.constraints.map(one => [one.text, one.priority])).toContainEqual(['be quick', 'soft'])
+  expect(workbench().task.doneConditions.map(one => one.text)).toContain('Docs updated')
+  expect(workbench().task.nonGoals).toEqual(['No refactor'])
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'c1', status: 'applied' })])
+  expect(toasts.some(text => text.includes('desktop app changed the contract'))).toBe(true)
+})
+
+test('a locked contract takes no edit from the app unless the same batch unlocks it first, and a refused batch changes nothing', async ($, on) => {
+  const { seen, deliver, workbench } = await deskWorld($, on)
+  // Lock through the app so the test does not depend on a goal being set.
+  await deliver({ commands: [{ id: 'l1', ops: [{ op: 'lock' }] }] }, 3)
+  expect(workbench().task.locked).toBe(true)
+  seen.length = 0
+  await deliver({ commands: [{ id: 'e1', ops: [{ op: 'add_non_goal', text: 'x' }, { op: 'set_goal', text: 'Nope' }] }] }, 6)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'e1', status: 'rejected', reason: 'locked' })])
+  expect(workbench().task.nonGoals).toEqual([])
+  seen.length = 0
+  await deliver({ commands: [{ id: 'e2', ops: [{ op: 'unlock' }, { op: 'set_goal', text: 'Unlocked edit' }, { op: 'lock' }] }] }, 9)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'e2', status: 'applied' })])
+  expect(workbench().task.goal).toBe('Unlocked edit')
+  expect(workbench().task.locked).toBe(true)
+})
+
+test('an unknown id is refused, and a command the channel refused is answered with its reason', async ($, on) => {
+  const { seen, deliver, workbench } = await deskWorld($, on)
+  await deliver({ commands: [{ id: 'u1', ops: [{ op: 'remove_constraint', id: 'nope', text: 'x' }] }], rejected: [{ id: 'x1', reason: 'expired' }] }, 3)
+  expect(ackOf(seen)).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'x1', status: 'rejected', reason: 'expired' }), expect.objectContaining({ id: 'u1', status: 'rejected', reason: 'unknown constraint' })]))
+  expect(workbench().task.constraints.length).toBe(1)
+})
+
+test('a removal or a switch made from an old view is refused or idempotent, and a failure inside the change is answered, not applied', async ($, on) => {
+  const { seen, deliver, workbench } = await deskWorld($, on)
+  const first = workbench().task.constraints[0]!
+  await deliver({ commands: [{ id: 's1', ops: [{ op: 'remove_constraint', id: first.id, text: 'a different text' }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 's1', status: 'rejected', reason: 'stale' })])
+  expect(workbench().task.constraints).toHaveLength(1)
+  seen.length = 0
+  await deliver({ commands: [{ id: 's2', ops: [{ op: 'set_active', id: first.id, isActive: false }, { op: 'set_active', id: first.id, isActive: false }, { op: 'set_priority', id: first.id, priority: 'soft' }] }] }, 6)
+  expect(workbench().task.constraints[0]).toMatchObject({ isActive: false, priority: 'soft' })
+  seen.length = 0
+  await deliver({ commands: [{ id: 's3', ops: [{ op: 'remove_non_goal', index: 0, text: 'gone' }] }] }, 9)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 's3', status: 'rejected', reason: 'unknown non-goal' })])
+})

@@ -29,7 +29,7 @@ export function readDesktop(home = desktopHome(), now = Date.now()) {
     }
     const port = Number(raw.port)
     if (raw.v !== 1 || !Number.isInteger(port) || port < 1024 || port > 65535) return undefined
-    return { port, autoJoin: raw.autoJoin === true, livePrompts: raw.livePrompts !== false, askNotify: raw.askNotify === 'desktop' ? 'desktop' : 'plugin' }
+    return { home, port, autoJoin: raw.autoJoin === true, livePrompts: raw.livePrompts !== false, askNotify: raw.askNotify === 'desktop' ? 'desktop' : 'plugin' }
   } catch {
     return undefined
   }

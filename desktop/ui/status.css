@@ -13,3 +13,8 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: v
 ul { margin: 0; padding-left: 18px; }
 .verified { color: var(--ok); } .failed { color: var(--bad); } .observed, .waived { color: var(--warn); } .pending { color: var(--muted); }
 .empty { color: var(--muted); }
+button { font: inherit; font-size: 12px; margin-left: 6px; padding: 1px 8px; cursor: pointer; }
+button:disabled { cursor: default; opacity: .5; }
+.adder { display: flex; gap: 6px; margin: 4px 0; }
+.adder input { flex: 1; font: inherit; padding: 2px 6px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
+.note { color: var(--bad); font-size: 12px; min-height: 1em; }

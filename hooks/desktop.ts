@@ -2,6 +2,7 @@
 // Nothing here is a command or a prompt: the contract's own words, the team and guard settings, and the evidence results.
 import type { EvidenceRecord, Live, Workbench } from '../types'
 import { statusOf } from './evidence'
+import * as model from './model'
 import { redact } from './risk'
 
 export const SNAPSHOT_VERSION = 1
@@ -52,4 +53,71 @@ export function snapshotText(wb: Workbench, live: Live, at: number): string | un
   if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], team: { ...snap.team }, task: { ...snap.task, goal: snap.task.goal.slice(0, 200), constraints: [], doneConditions: snap.task.doneConditions.slice(0, 5).map(one => ({ ...one, text: one.text.slice(0, 100) })), nonGoals: [] } })
 
   return bytes(text) > SNAPSHOT_MAX_BYTES ? undefined : text
+}
+
+// ---- commands from the desktop app
+
+export type DeskOp =
+  | { op: 'set_goal' | 'add_constraint' | 'add_done_condition' | 'add_non_goal'; text: string }
+  | { op: 'remove_constraint' | 'remove_done_condition'; id: string; text: string }
+  | { op: 'set_active'; id: string; isActive: boolean }
+  | { op: 'set_priority'; id: string; priority: 'hard' | 'soft' }
+  | { op: 'remove_non_goal'; index: number; text: string }
+  | { op: 'lock' | 'unlock' }
+
+/**
+ * The contract after the ops, or the reason none of them is applied (all or nothing).
+ * A locked contract takes no edit unless an unlock came before it in the same batch, as in the panel.
+ */
+export function applyOps(wb: Workbench, ops: readonly DeskOp[]): { wb: Workbench; reason?: undefined } | { reason: string } {
+  let cur = wb
+  for (const one of ops) {
+    if (one.op === 'lock' || one.op === 'unlock') {
+      if (cur.task.locked !== (one.op === 'lock')) cur = model.toggleLock(cur)
+      continue
+    }
+    if (cur.task.locked) return { reason: 'locked' }
+    switch (one.op) {
+      case 'set_goal':
+        cur = model.setGoal(cur, one.text)
+        break
+      case 'add_constraint':
+        cur = model.addConstraint(cur, one.text)
+        break
+      case 'add_done_condition':
+        cur = model.addCondition(cur, one.text)
+        break
+      case 'add_non_goal':
+        cur = model.addNonGoal(cur, one.text)
+        break
+      // Each of these names what it expects to find, so a command made from an old view is refused instead of changing another item.
+      case 'remove_constraint':
+      case 'set_active':
+      case 'set_priority': {
+        const item = cur.task.constraints.find(entry => entry.id === one.id)
+        if (!item) return { reason: 'unknown constraint' }
+        if (one.op === 'remove_constraint') {
+          if (item.text !== one.text) return { reason: 'stale' }
+          cur = model.removeConstraint(cur, item.id)
+        } else if (one.op === 'set_active') {
+          if (item.isActive !== one.isActive) cur = model.toggleConstraint(cur, item.id)
+        } else if (item.priority !== one.priority) cur = model.flipPriority(cur, item.id)
+        break
+      }
+      case 'remove_done_condition': {
+        const item = cur.task.doneConditions.find(entry => entry.id === one.id)
+        if (!item) return { reason: 'unknown condition' }
+        if (item.text !== one.text) return { reason: 'stale' }
+        cur = model.removeCondition(cur, item.id)
+        break
+      }
+      case 'remove_non_goal':
+        if (one.index >= cur.task.nonGoals.length) return { reason: 'unknown non-goal' }
+        if (cur.task.nonGoals[one.index] !== one.text) return { reason: 'stale' }
+        cur = model.removeNonGoal(cur, one.index)
+        break
+    }
+  }
+
+  return { wb: cur }
 }

@@ -4,7 +4,7 @@ import { Menu, Notification, Tray, BrowserWindow, app, ipcMain, nativeImage, ses
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
-import { beat, clear, desktopHome, ensureHome } from './channel.mjs'
+import { beat, clear, desktopHome, ensureHome, ensureKey, readAck, sendCommand, tidy } from './channel.mjs'
 import { followHub } from './events.mjs'
 import { DEFAULT_PORT, superviseHub } from './hub.mjs'
 import { pickLang, strings } from './i18n.mjs'
@@ -99,15 +99,37 @@ function showStatus() {
   void statusWin.loadFile(join(here, 'ui', 'status.html'))
 }
 
+// What was sent from the window and how the plugin answered: the window shows the last few per session.
+const sent = new Map()
+let key
+
+const fromStatus = event => statusWin && !statusWin.isDestroyed() && event.sender === statusWin.webContents && event.senderFrame === statusWin.webContents.mainFrame
+
+ipcMain.handle('swb:send', (event, sessionId, ops) => {
+  if (!fromStatus(event) || !home) return { ok: false, reason: 'unavailable' }
+  // Only a session the hub lists as running can be sent to.
+  if (typeof sessionId !== 'string' || !rows.some(row => row.id === sessionId && row.alive)) return { ok: false, reason: 'unknown session' }
+  try {
+    key ??= ensureKey(home)
+    const result = sendCommand(home, key, sessionId, ops)
+    if (sent.size > 60) sent.delete(sent.keys().next().value)
+    if (result.ok) sent.set(result.id, { session: sessionId, at: Date.now(), label: Array.isArray(ops) ? ops.map(one => String(one?.op).slice(0, 30)).join(', ') : '' })
+    return result
+  } catch {
+    return { ok: false, reason: 'cannot write' }
+  }
+})
+
 ipcMain.handle('swb:overview', event => {
   // Only the status window asks, and it asks for nothing but this.
-  if (!statusWin || statusWin.isDestroyed() || event.sender !== statusWin.webContents || event.senderFrame !== statusWin.webContents.mainFrame) return null
+  if (!fromStatus(event)) return null
   const snaps = home ? readSnapshots(home, Date.now(), new Set(rows.map(row => String(row.id)))) : {}
   return {
     lang: LANG,
     text: T.ui,
     hubUp,
     rows: rows.map(row => ({ id: String(row.id), name: String(row.name ?? ''), alive: row.alive === true, quiet: row.quiet === true })),
+    acks: [...sent.entries()].slice(-30).map(([id, one]) => ({ id, session: one.session, label: one.label, at: one.at, ack: home ? readAck(home, id) : undefined })),
     snaps: Object.fromEntries(rows.filter(row => Object.hasOwn(snaps, row.id)).map(row => [row.id, snaps[row.id]])),
   }
 })
@@ -213,6 +235,7 @@ app.whenReady().then(() => {
       for (const one of notices.tick()) notify(one)
     }, 1000),
     setInterval(beatNow, 10000),
+    setInterval(() => home && tidy(home), 10 * 60 * 1000),
   ]
   beatNow()
   app.on('quit', () => {

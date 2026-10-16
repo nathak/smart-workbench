@@ -137,7 +137,7 @@ test('the heartbeat is private and atomic, and the plugin reads it only while fr
   assert.equal(statSync(home).mode & 0o077, 0)
   beat(home, { port: 4317, autoJoin: true, livePrompts: false, askNotify: 'desktop' })
   assert.equal(statSync(join(home, 'desktop.json')).mode & 0o077, 0)
-  assert.deepEqual(readDesktop(home), { port: 4317, autoJoin: true, livePrompts: false, askNotify: 'desktop' })
+  assert.deepEqual(readDesktop(home), { home, port: 4317, autoJoin: true, livePrompts: false, askNotify: 'desktop' })
   assert.equal(readDesktop(home, Date.now() + 60000), undefined)
   clear(home)
   assert.equal(readDesktop(home), undefined)
@@ -273,10 +273,10 @@ test('the snapshot writer refuses a state directory that is a link and leaves no
   assert.deepEqual(readdirSync(elsewhere), [])
 })
 
-test('the status window page restricts what it loads, and the preload exposes the overview and nothing else', () => {
+test('the status window page restricts what it loads, and the preload exposes the overview and sending a contract change, and nothing else', () => {
   const page = readFileSync(join(here, '..', 'ui', 'status.html'), 'utf8')
   assert.ok(page.includes("default-src 'none'") && page.includes("base-uri 'none'") && page.includes("form-action 'none'"))
   const preload = readFileSync(join(here, '..', 'preload.cjs'), 'utf8')
-  assert.equal([...preload.matchAll(/ipcRenderer\.\w+\('([^']+)'/g)].map(one => one[1]).join(), 'swb:overview')
+  assert.equal([...preload.matchAll(/ipcRenderer\.\w+\('([^']+)'/g)].map(one => one[1]).join(), 'swb:overview,swb:send')
   assert.equal([...preload.matchAll(/exposeInMainWorld\('(\w+)'/g)].length, 1)
 })
