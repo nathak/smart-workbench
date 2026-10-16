@@ -70,7 +70,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb templates` | List templates and context sets |
 | `/swb export [path]` | Write a Markdown handoff |
 | `/swb scope [session\|project]` | Keep the workbench and the live view per session (default), or shared by every session of the project (see *Per-session scope*) |
-| `/swb notify [on\|off]` | Send a notification through your terminal's channel when the guard waits for your answer (on by default; it names the tool and the reason, never the command) |
+| `/swb notify [on\|off\|test]` | Send a notification through your terminal's channel when the guard waits for your answer (on by default; it names the tool and the reason, never the command) |
 | `/swb guard [high\|medium\|low\|off]` | Show or set the guard sensitivity (see *Guard sensitivity*) |
 | `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | Record conversation, actions and guard decisions beside the repository, share them through a branch, search them (see *Decision ledger*) |
 | `/swb why <file[:line]\|commit>` | Show the turn, decisions and guard calls behind a change |
@@ -536,7 +536,7 @@ claude plugin update smartworkbench
 | `/swb templates` | 템플릿·Context set 목록 |
 | `/swb export [path]` | Markdown handoff 쓰기 |
 | `/swb scope [session\|project]` | 워크벤치와 라이브 화면을 세션별로 따로 두거나(`session`, 기본), 프로젝트의 모든 세션이 공유(`project`)(*세션별 분리* 참고) |
-| `/swb notify [on\|off]` | Guard가 답을 기다릴 때 터미널의 알림 채널로 알림을 보냅니다(기본 켜짐. 도구와 이유만 알리고 명령어는 담지 않음) |
+| `/swb notify [on\|off\|test]` | Guard가 답을 기다릴 때 터미널의 알림 채널로 알림을 보냅니다(기본 켜짐. 도구와 이유만 알리고 명령어는 담지 않음) |
 | `/swb guard [high\|medium\|low\|off]` | Guard 민감도 보기·설정(*Guard 민감도* 참고) |
 | `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | 대화·행동·Guard 판정을 저장소 옆에 기록하고, 브랜치로 공유하고, 검색(*결정 기록* 참고) |
 | `/swb why <파일[:줄]\|커밋>` | 변경 뒤의 턴, 판단, Guard 호출 보기 |

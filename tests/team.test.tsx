@@ -2085,3 +2085,28 @@ test('a guard question also goes to the notification channel, naming the tool an
   expect(sent).toHaveLength(1)
   expect((await $.command.run({ command: 'swb', args: 'notify nope', ...COMMAND })).text).toContain('Usage')
 })
+
+test('ask notifications: /swb notify test reports the channel, a burst sends one, and a session nobody can answer sends none', async ($, on) => {
+  const sent: string[] = []
+  const { clock } = world(on)
+  on('ui.notify', (_$, e) => {
+    sent.push(String((e as { text?: unknown }).text))
+    return { value: { isSent: true, channel: 'osc' } }
+  })
+  await $.session.start(start)
+
+  expect((await $.command.run({ command: 'swb', args: 'notify test', ...COMMAND })).text).toContain('test sent through osc')
+  sent.length = 0
+  await $.tool.call({ tool: 'Bash', command: 'git push origin a' })
+  await $.tool.call({ tool: 'Bash', command: 'git push origin b' })
+  expect(sent).toHaveLength(1)
+  await clock.set(Date.UTC(2026, 9, 8, 1, 1, 0))
+  await $.tool.call({ tool: 'Bash', command: 'git push origin c' })
+  expect(sent).toHaveLength(2)
+
+  // `claude -p`: the question cannot be answered, so nobody is told to answer it.
+  await $.session.start({ ...start, isInteractive: false })
+  await clock.set(Date.UTC(2026, 9, 8, 1, 5, 0))
+  await $.tool.call({ tool: 'Bash', command: 'git push origin d' })
+  expect(sent).toHaveLength(2)
+})

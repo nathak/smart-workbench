@@ -83,13 +83,14 @@ export function runHub({ port }) {
       sessions.set(one.id, own)
     }
     for (const own of sessions.values()) {
-      if (!seen.has(own.id) || !own.alive) {
+      if (!seen.has(own.id) || (!own.alive && !own.quiet)) {
         own.alive = false
+        own.quiet = false
         own.goneAt ||= Date.now()
       } else own.goneAt = 0
     }
     // A finished session's tab stays for a while so its last lines can still be read.
-    for (const [id, own] of sessions) if (!own.alive && Date.now() - own.goneAt > 10 * 60 * 1000) sessions.delete(id)
+    for (const [id, own] of sessions) if (!own.alive && !own.quiet && Date.now() - own.goneAt > 10 * 60 * 1000) sessions.delete(id)
     const signature = JSON.stringify([...sessions.values()].map(own => [own.id, own.alive, own.quiet === true, own.reg.startedAt]))
     if (signature !== listSignature) {
       listSignature = signature
@@ -109,7 +110,7 @@ export function runHub({ port }) {
     } catch {
       adopt([])
     }
-    if ([...sessions.values()].some(own => own.alive)) idleSince = now
+    if ([...sessions.values()].some(own => own.alive || own.quiet)) idleSince = now
     else if (now - idleSince > IDLE_MS) stop()
   }
 

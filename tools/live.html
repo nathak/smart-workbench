@@ -2394,7 +2394,7 @@ function onSessions(m){
       var c = ctxOf(row.id);
       c.name = String(row.name || row.id); c.project = String(row.project || ''); c.startedAt = Number(row.startedAt) || 0; c.alive = !!row.alive; c.quiet = !!row.quiet;
     });
-    Object.keys(CTX).forEach(function(id){ if (!seen[id] && id !== curId) delete CTX[id]; else if (!seen[id]) CTX[id].alive = false; });
+    Object.keys(CTX).forEach(function(id){ if (!seen[id] && id !== curId) delete CTX[id]; else if (!seen[id]) { CTX[id].alive = false; CTX[id].quiet = false; } });
     ORDER = Object.keys(CTX).sort(function(a, b){ return CTX[a].startedAt - CTX[b].startedAt; });
     if (!curId || !CTX[curId]) {
       var want = parseHash(location.hash).s || stored('swb-session');
