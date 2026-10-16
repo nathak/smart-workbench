@@ -10,7 +10,8 @@ import { ID_PATTERN, ensureRegistry, feedOf, registryDir, scan, trustedHosts } f
 import { makeTail } from './live-tail.mjs'
 
 const page = join(dirname(fileURLToPath(import.meta.url)), 'live.html')
-export const HUB_VERSION = 1
+// 2: a registration may carry a feed id, the session's own feed. A version 1 hub still serves sessions that share the project's feed.
+export const HUB_VERSION = 2
 
 // The page is one file with inline script and style and talks only to this server; anything else it is tricked into loading is refused.
 const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -48,7 +49,7 @@ export function runHub({ port }) {
     if (res.writableLength > 8 * 1024 * 1024) res.destroy()
     else res.write(text)
   }
-  const sessionRow = one => ({ id: one.id, name: basename(one.reg.project) || one.reg.project, project: one.reg.project, startedAt: one.reg.startedAt, alive: one.alive, linesRead: one.tail.linesRead, badLines: one.tail.badLines, kept: one.tail.recent.length, lastAt: one.tail.lastAt })
+  const sessionRow = one => ({ id: one.id, name: (basename(one.reg.project) || one.reg.project) + (one.reg.feedId ? ` · ${one.reg.feedId.slice(0, 8)}` : ''), project: one.reg.project, startedAt: one.reg.startedAt, alive: one.alive, linesRead: one.tail.linesRead, badLines: one.tail.badLines, kept: one.tail.recent.length, lastAt: one.tail.lastAt })
   const listText = () => `event: sessions\ndata: ${JSON.stringify({ sessions: [...sessions.values()].map(sessionRow), over })}\n\n`
   const frame = (id, line) => `event: line\ndata: {"s":"${id}","e":${line}}\n\n`
 
@@ -68,7 +69,7 @@ export function runHub({ port }) {
       }
       if (known) sessions.delete(one.id)
       const own = { id: one.id, reg: one.reg, alive: one.alive, clients: new Set(), goneAt: 0, tail: undefined }
-      own.tail = makeTail(feedOf(one.reg.project), {
+      own.tail = makeTail(feedOf(one.reg.project, one.reg.feedId), {
         readMax: 1024 * 1024,
         onLine: line => {
           for (const res of own.clients) send(res, `data: ${line}\n\n`)
@@ -188,7 +189,7 @@ export function runHub({ port }) {
           res.end(JSON.stringify({ missing: true }))
           return
         }
-        res.end(JSON.stringify({ project: own.reg.project, feed: feedOf(own.reg.project), pid: process.pid, startedAt, linesRead: own.tail.linesRead, badLines: own.tail.badLines, kept: own.tail.recent.length, clients: own.clients.size }))
+        res.end(JSON.stringify({ project: own.reg.project, feed: feedOf(own.reg.project, own.reg.feedId), pid: process.pid, startedAt, linesRead: own.tail.linesRead, badLines: own.tail.badLines, kept: own.tail.recent.length, clients: own.clients.size }))
         return
       }
       res.end(JSON.stringify({ hub: 'smartworkbench', v: HUB_VERSION, pid: process.pid, port, startedAt, registry: registryDir(port), host: hostname(), hosts: TRUSTED, sessions: sessions.size, clients: everyone.size }))

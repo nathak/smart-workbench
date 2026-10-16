@@ -7,13 +7,13 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { HUB_VERSION } from './live-hub.mjs'
-import { beat, claimFeed, ensureRegistry, projectOk, register, registryDir, registryRoot, releaseFeed, trustedHosts, unregister } from './live-registry.mjs'
+import { beat, claimFeed, ensureRegistry, projectOk, register, registryDir, registryRoot, releaseFeed, sweepFeeds, trustedHosts, unregister } from './live-registry.mjs'
 
 const sleep = ms => new Promise(done => setTimeout(done, ms))
 const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)
 
 // What answers on a port: our hub of this registry, something else, or nothing.
-function probe(port) {
+function probe(port, feedId) {
   return new Promise(done => {
     const req = get({ host: '127.0.0.1', port, path: '/info', headers: { host: `127.0.0.1:${port}` }, timeout: 1500 }, res => {
       let text = ''
@@ -23,7 +23,7 @@ function probe(port) {
       res.on('end', () => {
         try {
           const info = JSON.parse(text)
-          if (info?.hub === 'smartworkbench' && info.v === HUB_VERSION && typeof info.registry === 'string' && same(info.registry, registryDir(port))) {
+          if (info?.hub === 'smartworkbench' && (info.v === HUB_VERSION || (!feedId && info.v === 1)) && typeof info.registry === 'string' && same(info.registry, registryDir(port))) {
             // One hub answers to one list of names; a session with another list would have its prompts served under names it never agreed to.
             if (JSON.stringify(info.hosts ?? []) === JSON.stringify(trustedHosts())) done({ kind: 'hub' })
             else done({ kind: 'other', why: 'SWB_LIVE_HOSTS differs from the one the running view was started with; end the other sessions on this port (the view ends about 30 s after the last one) or use another port' })
@@ -47,7 +47,9 @@ function startHub(port) {
   spawn(process.execPath, [here, '--hub', '--port', String(port)], { detached: true, stdio: 'ignore', windowsHide: true, cwd: registryRoot() }).unref()
 }
 
-export async function runJoin({ project, port, auto, session, watchParent }) {
+export async function runJoin({ project, port, auto, session, watchParent, perSession = false }) {
+  // A session that keeps its own feed is named by its id; the id also names the files.
+  const feedId = perSession ? session : undefined
   const lastTry = auto ? Math.min(port + 20, 65535) : port
   const beatMs = Number(process.env.SWB_LIVE_BEAT_MS) || 5000
   let claimed = false
@@ -64,7 +66,7 @@ export async function runJoin({ project, port, auto, session, watchParent }) {
     } catch {
       // Nothing to clean up if the registry is gone.
     }
-    if (claimed) releaseFeed(project)
+    if (claimed) releaseFeed(project, feedId)
     claimed = false
   }
   const quit = () => {
@@ -77,21 +79,22 @@ export async function runJoin({ project, port, auto, session, watchParent }) {
   process.on('SIGHUP', quit)
 
   try {
-    claimFeed(project, process.pid)
+    claimFeed(project, process.pid, feedId)
     claimed = true
+    if (feedId) sweepFeeds(project, feedId)
   } catch (err) {
     console.error(err.code === 'RUNNING' ? err.message : `Cannot create the live feed in ${project}: ${err.code ?? err.message}`)
     process.exit(1)
   }
 
-  entry = { id: session, project, host: hostname(), pid: process.pid, parent: process.ppid, startedAt: Date.now() }
+  entry = { id: session, project, host: hostname(), pid: process.pid, parent: process.ppid, startedAt: Date.now(), ...(feedId ? { feedId } : {}) }
   // The registration is checked the way the hub will check it: a project it would ignore must not be reported as started.
   if (!projectOk(entry)) {
     console.error(`The live view cannot show ${project}: its .claude folder or feed is a link, or the process note is missing.`)
     process.exit(1)
   }
   for (let at = port; at <= lastTry && !chosen; at++) {
-    const found = await probe(at)
+    const found = await probe(at, feedId)
     if (found.kind === 'other') {
       reason = found.why ?? reason
       if (!auto) {
@@ -110,11 +113,11 @@ export async function runJoin({ project, port, auto, session, watchParent }) {
     // A hub that is about to end for lack of sessions may still answer: it must answer twice, a moment apart, with this session registered.
     let steady = false
     for (let i = 0; i < 40 && !steady; i++) {
-      const now = await probe(at)
+      const now = await probe(at, feedId)
       if (now.kind === 'none') startHub(at)
       else if (now.kind === 'hub') {
         await sleep(400)
-        steady = (await probe(at)).kind === 'hub'
+        steady = (await probe(at, feedId)).kind === 'hub'
         continue
       }
       await sleep(200)
@@ -137,7 +140,7 @@ export async function runJoin({ project, port, auto, session, watchParent }) {
     }, beatMs),
     // A hub that vanished (killed, or taken down with a closed session on Windows) is started again; the bind decides which of several starters wins.
     setInterval(() => {
-      void probe(chosen).then(found => {
+      void probe(chosen, feedId).then(found => {
         if (found.kind === 'none') startHub(chosen)
       })
     }, beatMs * 2),

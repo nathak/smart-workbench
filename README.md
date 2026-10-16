@@ -44,7 +44,7 @@ then restart Claude Code or run `/reload-plugins`.
 4. **Pin context** (optional): in the Context tab, pin files (`src/auth.ts` or `src/auth.ts:10-40`) and notes. `Preview` shows exactly what Claude will receive.
 5. **Work as usual**: ask Claude in the normal prompt. The Run tab lists each tool call; risky ones are asked or blocked by the guard.
 6. **Check the result**: when the turn ends a completion summary is posted. Open the Evidence tab (`/swb verify`) to see which conditions passed, which files have a check behind them, and use `Verify`, `Waive`, `Ask Claude to finish` or `Export handoff`.
-7. **Pick it up later**: state is restored when you reopen the project, and sessions open on the same project share it. On another machine, `/swb share` here and `/swb pickup` there. Save a setup you reuse with `/swb save <name>`.
+7. **Pick it up later**: state is restored when you reopen the project, and sessions open on the same project share it (unless you chose `/swb scope session`). On another machine, `/swb share` here and `/swb pickup` there. Save a setup you reuse with `/swb save <name>`.
 
 To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Hotkeys: `1`–`5` tabs, `l` Lock/Unlock, `p` Preview, `r` Pause risky calls, `f` Ask Claude to finish, `c` Check CI, `x` Export handoff.
 
@@ -69,6 +69,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb load <name>` | Start a task from a template |
 | `/swb templates` | List templates and context sets |
 | `/swb export [path]` | Write a Markdown handoff |
+| `/swb scope [session\|project]` | Keep the workbench and the live view per session, or shared by every session of the project (default; see *Per-session scope*) |
 | `/swb guard [high\|medium\|low\|off]` | Show or set the guard sensitivity (see *Guard sensitivity*) |
 | `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | Record conversation, actions and guard decisions beside the repository, share them through a branch, search them (see *Decision ledger*) |
 | `/swb why <file[:line]\|commit>` | Show the turn, decisions and guard calls behind a change |
@@ -235,6 +236,15 @@ Commits show what changed, not why. `/swb ledger on` records, for this project a
 - `/swb ledger export-wiki <path of the llm-wiki folder>` (or set `SWB_LEDGER_WIKI`) writes your own recorded sessions as pages of your llm-wiki, `content/qa-log/<project>/<date>-swb-<session>.md`, in the wiki's format: front matter (`id`, `title`, `date`, `tags`, `source_name: "Claude Code 세션 (<project>)"`, `summary`, `related`; no `source_url`), a generated block in Korean (per turn the request, decision, actions, files, guard calls and commit links), and a `## Notes` part that regeneration keeps. It uses the publishing summary level (no tool input or output, emails and addresses masked), shows a preview and asks first, refuses a folder that does not look like the wiki or sits inside this project, writes only files under `content/qa-log/` (never through a link), and runs no git in the wiki: lint it (`node scripts/lint-content.mjs`) and commit it yourself. A page that is not one of ours is never overwritten. The path is never read from the guard file, since a checked-in file must not choose where your disk is written.
 - Text written by other people (shared sessions) is treated as data: terminal escapes, invisible and direction-changing characters are removed, HTML, comment markers, code fences, wiki links and role prefixes are made inert, a line that reads like an order to a model is marked `[!instruction-like]` (never deleted), and `/swb why` and `/swb ledger search` show it inside a `[ledger-data <marker>]` frame that says it is data. A shared event with a field it should not have, of the wrong type or too long, is dropped when it is read.
 - A guard file can forbid publishing: `"ledger": { "share": "off" }` (and `"wiki": "off"` for the wiki export). It can only tighten; no setting publishes by itself, and publishing is asked every time.
+
+### Per-session scope
+
+By default every session of a project shares one workbench, and one live feed per project. `/swb scope session` gives each session its own instead:
+
+- **Workbench**: contract, pins, guard profile, pause switch, team settings, evidence, changed files and call history are saved per session (`wss:<session>:<project>` in the store); another session's saves are never picked up. The choice is stored for the project, so every session started afterwards begins with its own copy of the project's workbench as it was at that moment (contract, pins, guard profile and team settings; evidence and changed files are left behind because they belong to the tree that session worked on). The session you run the command in moves its current state across whole. Sessions already running keep the scope they started with.
+- **Live view**: each session writes its own feed and process note in `.claude/smartworkbench-live/<session>.jsonl` and `.pid` (a folder that ignores itself) and is its own tab named `<project> · <session>`; a second session may start `/swb live` too. Files of sessions that ended without cleaning up are removed when the next one starts.
+- **Still shared**: the guard file, saved templates and context sets, the decision ledger and the audit log.
+- `/swb scope project` goes back (it asks whether to take the project's workbench or write this session's over it). Both ways need `/swb live stop` first, because the files change place. A copy nobody saved to for 30 days is deleted when a session of the project starts. A session without a usable id stays on the shared workbench. The default is `project`, and then nothing changes.
 
 ### Built-in guard rules (Balanced)
 
@@ -499,7 +509,7 @@ claude plugin update smartworkbench
 4. **자료 고정**(선택): Context 탭에서 파일(`src/auth.ts` 또는 `src/auth.ts:10-40`)과 메모를 Pin합니다. `Preview`로 Claude에게 실제로 전달될 내용을 확인합니다.
 5. **평소처럼 작업**: 기본 입력창에서 Claude에게 요청합니다. Run 탭에 툴 호출이 쌓이고, 위험한 호출은 Guard가 묻거나 막습니다.
 6. **결과 확인**: 턴이 끝나면 완료 요약이 대화에 남습니다. Evidence 탭(`/swb verify`)에서 어떤 조건이 통과했는지, 어떤 파일 변경 뒤에 검증이 있었는지 보고 `Verify`, `Waive`, `Ask Claude to finish`, `Export handoff`를 씁니다.
-7. **다음에 이어 하기**: 프로젝트를 다시 열면 상태가 복원되고, 같은 프로젝트를 연 다른 세션과도 상태가 공유됩니다. 다른 컴퓨터에서는 여기서 `/swb share`, 거기서 `/swb pickup`. 자주 쓰는 설정은 `/swb save <이름>`으로 저장해 둡니다.
+7. **다음에 이어 하기**: 프로젝트를 다시 열면 상태가 복원되고, 같은 프로젝트를 연 다른 세션과도 상태가 공유됩니다(`/swb scope session`으로 세션별 분리 가능). 다른 컴퓨터에서는 여기서 `/swb share`, 거기서 `/swb pickup`. 자주 쓰는 설정은 `/swb save <이름>`으로 저장해 둡니다.
 
 키보드로 패널을 쓰려면 `ctrl+x tab`(또는 클릭)으로 패널에 포커스를 옮깁니다. 단축키: `1`–`5` 탭 전환, `l` 잠금/해제, `p` Preview, `r` 위험 호출 일시정지, `f` Ask Claude to finish, `c` Check CI, `x` Export handoff.
 
@@ -524,6 +534,7 @@ claude plugin update smartworkbench
 | `/swb load <name>` | 템플릿으로 작업 시작 |
 | `/swb templates` | 템플릿·Context set 목록 |
 | `/swb export [path]` | Markdown handoff 쓰기 |
+| `/swb scope [session\|project]` | 워크벤치와 라이브 화면을 세션별로 따로 두거나(`session`), 프로젝트의 모든 세션이 공유(`project`, 기본)(*세션별 분리* 참고) |
 | `/swb guard [high\|medium\|low\|off]` | Guard 민감도 보기·설정(*Guard 민감도* 참고) |
 | `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | 대화·행동·Guard 판정을 저장소 옆에 기록하고, 브랜치로 공유하고, 검색(*결정 기록* 참고) |
 | `/swb why <파일[:줄]\|커밋>` | 변경 뒤의 턴, 판단, Guard 호출 보기 |
@@ -689,6 +700,15 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - `/swb ledger export-wiki <llm-wiki 폴더 경로>`(또는 `SWB_LEDGER_WIKI` 설정)는 내가 기록한 세션을 llm-wiki의 페이지 `content/qa-log/<프로젝트>/<날짜>-swb-<세션>.md`로 위키 형식에 맞춰 씁니다. 머리말(`id`, `title`, `date`, `tags`, `source_name: "Claude Code 세션 (<프로젝트>)"`, `summary`, `related`, `source_url` 없음), 한국어로 생성되는 블록(턴마다 요청, 결정, 작업, 파일, 가드 호출, 커밋 링크), 다시 만들어도 보존되는 `## Notes` 부분으로 이루어집니다. 발행과 같은 요약 수준(도구 입력·출력 없음, 이메일·주소 마스킹)을 쓰고, 미리보기를 보여 주며 먼저 묻고, 위키처럼 보이지 않거나 이 프로젝트 안에 있는 폴더는 거부하며, `content/qa-log/` 아래에만(링크를 따라가지 않고) 파일을 쓰고, 위키에서는 git을 실행하지 않습니다. `node scripts/lint-content.mjs`로 검사하고 커밋은 직접 하세요. 우리 것이 아닌 페이지는 덮어쓰지 않습니다. 경로는 가드 파일에서 읽지 않습니다. 저장소에 커밋되는 파일이 내 디스크의 쓰기 위치를 정해서는 안 되기 때문입니다.
 - 다른 사람이 쓴 텍스트(공유된 세션)는 데이터로 다룹니다. 터미널 이스케이프와 보이지 않는 문자·방향 전환 문자를 지우고, HTML·주석 표지·코드 펜스·위키 링크·역할 접두를 무력화하며, 모델에게 내리는 명령처럼 읽히는 줄에는 `[!instruction-like]`를 붙이고(지우지는 않습니다), `/swb why`와 `/swb ledger search`는 데이터임을 알리는 `[ledger-data <표지>]` 틀 안에 보여 줍니다. 있어서는 안 될 필드가 있거나 타입이 틀리거나 너무 긴 공유 이벤트는 읽을 때 버립니다.
 - 가드 파일로 발행을 막을 수 있습니다: `"ledger": { "share": "off" }`(위키 내보내기는 `"wiki": "off"`). 조이기만 하고, 스스로 발행을 켜는 값은 없으며 발행은 매번 묻습니다.
+
+### 세션별 분리
+
+기본은 한 프로젝트의 모든 세션이 워크벤치 하나와 프로젝트당 라이브 피드 하나를 공유하는 것입니다. `/swb scope session`을 하면 세션마다 따로 갖습니다.
+
+- **워크벤치**: 계약, Pin, Guard 프로필, 일시정지, 팀 설정, 증거, 변경 파일, 호출 기록이 세션별로 저장되고(`wss:<세션>:<프로젝트>`), 다른 세션이 저장한 내용은 가져오지 않습니다. 이 선택은 프로젝트에 저장되므로 이후 시작하는 세션은 그 시점 프로젝트 워크벤치를 한 번 복사해 자기 것으로 시작합니다(계약, Pin, Guard 프로필, 팀 설정은 넘어오고, 증거와 변경 파일은 다른 세션이 작업한 트리의 것이라 넘어오지 않습니다). 명령을 실행한 세션은 지금 상태를 전부 가져갑니다. 이미 실행 중인 다른 세션은 시작할 때의 범위를 그대로 유지합니다.
+- **라이브 화면**: 세션마다 자기 피드와 프로세스 표시를 `.claude/smartworkbench-live/<세션>.jsonl`·`.pid`에 쓰고(스스로 무시하는 폴더), 탭 이름이 `<프로젝트> · <세션>`으로 따로 나옵니다. 같은 프로젝트의 두 번째 세션도 `/swb live`를 시작할 수 있습니다. 정리하지 못하고 끝난 세션의 파일은 다음 세션이 시작할 때 지웁니다.
+- **계속 공유되는 것**: 가드 파일, 저장한 템플릿과 컨텍스트 세트, 결정 기록(Ledger), 감사 로그.
+- `/swb scope project`로 되돌립니다(프로젝트 워크벤치를 가져올지, 이 세션 것을 덮어쓸지 묻습니다). 어느 쪽이든 파일 위치가 바뀌므로 먼저 `/swb live stop`이 필요합니다. 30일 동안 저장이 없던 세션 사본은 그 프로젝트의 세션이 시작할 때 지웁니다. 쓸 수 있는 세션 id가 없으면 공유 워크벤치를 그대로 씁니다. 기본은 `project`이며 그대로면 달라지는 것이 없습니다.
 
 ### 기본 Guard 규칙 (Balanced)
 

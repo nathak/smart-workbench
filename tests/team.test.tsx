@@ -1851,3 +1851,174 @@ test('a loop stopped while the Stop hook was working stays stopped, and Esc befo
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't9', reason: 'aborted' })
   expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('No loop is running')
 })
+
+// ---- per-session scope (/swb scope session) ----
+
+const lockedWb = (goal: string, savedAt?: number): Workbench => ({
+  schemaVersion: 1,
+  rev: 7,
+  savedBy: 'session-z',
+  ...(savedAt !== undefined ? { savedAt } : {}),
+  task: { id: 't', status: 'active', locked: true, goal, constraints: [], nonGoals: [], doneConditions: [] },
+  context: { pins: [{ id: 'p', kind: 'note', text: 'keep' } as never], observed: [{ path: 'a.ts' } as never], excluded: [] },
+  execution: { profile: 'strict' as never, isPaused: false, recentCalls: [{ id: 'c' } as never] },
+  evidence: [{ id: 'e', kind: 'test', command: 'x', ok: true, at: 1 } as never],
+  changed: { files: ['a.ts'], added: 3, removed: 1, edits: {}, hunks: {} } as never,
+})
+
+test('scope session: the project copy is left alone and this session keeps its own', async ($, on) => {
+  const { store, workbench } = world(on)
+  await $.session.start(start)
+  const before = JSON.stringify(workbench())
+
+  expect((await $.command.run({ command: 'swb', args: 'scope', ...COMMAND })).text).toContain('Scope: project')
+  expect((await $.command.run({ command: 'swb', args: 'scope session', ...COMMAND })).text).toContain('Scope: session')
+  expect(store[`wsscope:${CWD}`]).toBe('session')
+  await $.command.run({ command: 'swb', args: 'guard high', ...COMMAND })
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/src/a.ts` })
+
+  expect((store[`wss:session-a:${CWD}`] as Workbench).execution.profile).toBe('strict')
+  expect((store[`wss:session-a:${CWD}`] as Workbench).savedBy).toBe('session-a')
+  expect(JSON.stringify(workbench())).toBe(before)
+})
+
+test('a session of a scoped project starts from a one-time copy without evidence, and a resumed one keeps its own', async ($, on) => {
+  const { store } = world(on, { store: { [`wsscope:${CWD}`]: 'session', [`ws:${CWD}`]: lockedWb('Project goal') } })
+  await $.session.start(start)
+
+  const own = store[`wss:session-a:${CWD}`] as Workbench
+  expect(own.task.goal).toBe('Project goal')
+  expect(own.task.locked).toBe(true)
+  expect(own.execution.profile).toBe('strict')
+  expect(own.context.pins).toHaveLength(1)
+  expect(own.evidence).toEqual([])
+  expect(own.changed.files).toEqual([])
+  expect(own.execution.recentCalls).toEqual([])
+  expect(own.savedBy).toBe('session-a')
+
+  // The project moves on; a restart of the same session does not copy again.
+  store[`ws:${CWD}`] = lockedWb('Project moved on')
+  await $.session.start(start)
+  expect((store[`wss:session-a:${CWD}`] as Workbench).task.goal).toBe('Project goal')
+})
+
+test('scope session: another session\'s newer save is not taken and no toast is shown', async ($, on) => {
+  const toasts: string[] = []
+  const { store } = world(on, { toasts, store: { [`wsscope:${CWD}`]: 'session', [`ws:${CWD}`]: lockedWb('Mine') } })
+  let context = ''
+  on('prompt.submit', ($, e) => {
+    context = (e.context ?? []).join('\n')
+    return { text: e.text, context: e.context }
+  })
+  await $.session.start(start)
+  store[`ws:${CWD}`] = { ...lockedWb('Theirs'), rev: 99, savedBy: 'session-b' }
+  await $.prompt.submit({ text: 'go', ...COMPOSER })
+
+  expect(context).toContain('<goal>Mine</goal>')
+  expect(toasts.some(one => one.includes('picked up'))).toBe(false)
+})
+
+test('a copy nobody saved to for a month is swept; recent ones, other projects and its own stay', async ($, on) => {
+  const old = Date.UTC(2026, 9, 8) - 31 * 86_400_000
+  const fresh = Date.UTC(2026, 9, 8) - 86_400_000
+  const { store } = world(on, {
+    store: {
+      [`wsscope:${CWD}`]: 'session',
+      [`wss:old:${CWD}`]: lockedWb('old', old),
+      [`wss:fresh:${CWD}`]: lockedWb('fresh', fresh),
+      [`wss:other:/elsewhere`]: lockedWb('x', old),
+      [`wss:nested:${CWD}:x`]: lockedWb('y', old),
+    },
+  })
+  await $.session.start(start)
+
+  expect(store[`wss:old:${CWD}`]).toBeUndefined()
+  expect(store[`wss:fresh:${CWD}`]).toBeDefined()
+  expect(store['wss:other:/elsewhere']).toBeDefined()
+  expect(store[`wss:nested:${CWD}:x`]).toBeDefined()
+  expect(store[`wss:session-a:${CWD}`]).toBeDefined()
+})
+
+test('scope project again: the choice decides which copy wins, and Cancel changes nothing', async ($, on) => {
+  let answer = 'Cancel'
+  const { store } = world(on, { ask: () => answer, store: { [`ws:${CWD}`]: lockedWb('Project goal') } })
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'scope session', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+
+  expect((await $.command.run({ command: 'swb', args: 'scope project', ...COMMAND })).text).toContain('unchanged')
+  expect(store[`wsscope:${CWD}`]).toBe('session')
+
+  answer = "Take the project's workbench"
+  expect((await $.command.run({ command: 'swb', args: 'scope project', ...COMMAND })).text).toContain('Scope: project')
+  expect(store[`wsscope:${CWD}`]).toBeUndefined()
+  expect(store[`wss:session-a:${CWD}`]).toBeUndefined()
+  expect((store[`ws:${CWD}`] as Workbench).task.goal).toBe('Project goal')
+})
+
+test('scope project, writing this session\'s workbench over the project: others see a higher revision', async ($, on) => {
+  const { store } = world(on, { ask: labels => labels[1] ?? 'Cancel', store: { [`ws:${CWD}`]: lockedWb('Project goal') } })
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'scope session', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'guard low', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'scope project', ...COMMAND })
+
+  const project = store[`ws:${CWD}`] as Workbench
+  expect(project.execution.profile).toBe('permissive')
+  expect(project.rev).toBeGreaterThan(7)
+  expect(project.savedBy).toBe('session-a')
+})
+
+test('scope session is refused while a live view runs, and project scope keeps the shared files', async ($, on) => {
+  world(on)
+  on('process.spawn', async function* (_$, e) {
+    expect(e.argv).not.toContain('--per-session')
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400  (project /work)\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'live 4400', ...COMMAND })
+
+  expect((await $.command.run({ command: 'swb', args: 'scope session', ...COMMAND })).text).toContain('live stop first')
+  await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })
+})
+
+test('scope session: the live view is this session\'s own, named by flag, and the feed is its own file', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const FEED = `${CWD}/.claude/smartworkbench-live/session-a.jsonl`
+  world(on, {
+    store: { [`wsscope:${CWD}`]: 'session' },
+    files: { '.claude/smartworkbench-live/session-a.jsonl': '', '.claude/smartworkbench-live/session-a.pid': 'h 1', '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 2' },
+    commands: { [`tee -a ${FEED}`]: { exitCode: 0, stdout: '' } },
+    processed: writes,
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  const spawned: string[][] = []
+  on('process.spawn', async function* (_$, e) {
+    spawned.push(e.argv)
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4401  (project /work)\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix it', ...COMPOSER })
+
+  expect(writes.filter(one => one.argv[0] === 'tee').map(one => one.argv[2])).toEqual([FEED])
+  // The project's own feed exists too (another session's), and this session does not own a view yet.
+  await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })
+  expect(spawned).toEqual([])
+})
+
+test('scope session: /swb live starts a per-session view', async ($, on) => {
+  world(on, { store: { [`wsscope:${CWD}`]: 'session' } })
+  const spawned: string[][] = []
+  on('process.spawn', async function* (_$, e) {
+    spawned.push(e.argv)
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4401  (project /work)\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'live 4401', ...COMMAND })
+
+  expect(spawned[0]?.slice(2)).toEqual([CWD, '--join', '--session', 'session-a', '--per-session', '--port', '4401', '--watch-parent'])
+  await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })
+})

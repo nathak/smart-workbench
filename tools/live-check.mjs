@@ -320,6 +320,75 @@ try {
   }
 }
 
+// ---- sessions that keep their own live view: one project, a feed and a tab each ----
+{
+  const home = mkdtempSync(join(tmpdir(), 'swb-per-'))
+  const base = join(home, 'reg')
+  mkdirSync(base, { mode: 0o700 })
+  const env = { ...process.env, SWB_LIVE_HOME: base, SWB_LIVE_IDLE_MS: '1500', SWB_LIVE_STALE_MS: '1500', SWB_LIVE_BEAT_MS: '300' }
+  const at = port + 40
+  const project = mkdtempSync(join(tmpdir(), 'swb-per-p-'))
+  const start = (id, extra = []) => {
+    const child = spawn('node', [server, project, '--join', '--session', id, '--per-session', '--port', String(at), ...extra], { stdio: ['ignore', 'pipe', 'pipe'], env })
+    const out = { stdout: '', stderr: '', code: undefined }
+    child.stdout.on('data', chunk => (out.stdout += chunk))
+    child.stderr.on('data', chunk => (out.stderr += chunk))
+    child.on('exit', code => (out.code = code ?? -1))
+    return { child, out }
+  }
+  const getText = path =>
+    new Promise(done => {
+      let text = ''
+      const req = get({ host: '127.0.0.1', port: at, path, headers: { host: `127.0.0.1:${at}` } }, res => res.on('data', chunk => (text += chunk)))
+      req.on('error', () => done(''))
+      setTimeout(() => {
+        req.destroy()
+        done(text)
+      }, 500)
+    })
+  const feed = id => join(project, '.claude', 'smartworkbench-live', `${id}.jsonl`)
+  const until = async (test, tries = 60) => {
+    for (let i = 0; i < tries; i++) {
+      if (await test()) return true
+      await sleep(100)
+    }
+    return false
+  }
+  const one = start('s1')
+  const two = start('s2')
+  try {
+    check(await until(() => one.out.stdout.includes('#s=s1') && two.out.stdout.includes('#s=s2'), 100), 'two sessions of one project each get their own address')
+    check(existsSync(feed('s1')) && existsSync(feed('s2')) && !existsSync(join(project, '.claude', 'smartworkbench-live.jsonl')), 'each has its own feed and the project feed is not made')
+    check(readFileSync(join(project, '.claude', 'smartworkbench-live', '.gitignore'), 'utf8') === '*\n', 'the folder ignores itself')
+    appendFileSync(feed('s1'), '{"kind":"prompt","text":"only one"}\n')
+    appendFileSync(feed('s2'), '{"kind":"prompt","text":"only two"}\n')
+    await sleep(600)
+    const one1 = await getText('/events?session=s1')
+    const two1 = await getText('/events?session=s2')
+    check(one1.includes('only one') && !one1.includes('only two') && two1.includes('only two') && !two1.includes('only one'), 'a session stream carries only its own feed')
+    const list = JSON.parse(await getText('/sessions') || '{"sessions":[]}').sessions
+    check(list.length === 2 && list.every(row => row.alive && row.name.includes(' · s')), 'the tabs name the session')
+    // A session that ended without cleaning up: its files go when the next one starts.
+    writeFileSync(feed('dead'), '')
+    writeFileSync(join(project, '.claude', 'smartworkbench-live', 'dead.pid'), `${hostname()} 2147483646`)
+    two.child.kill('SIGTERM')
+    check(await until(() => !existsSync(feed('s2'))), 'leaving removes only that session\'s files')
+    const three = start('s3')
+    check(await until(() => three.out.stdout.includes('#s=s3')) && !existsSync(feed('dead')) && existsSync(feed('s1')), 'starting sweeps the files of a dead session and leaves live ones')
+    three.child.kill('SIGTERM')
+    // A bad id and a linked folder are refused.
+    const bad = spawn('node', [server, project, '--join', '--session', '../x', '--per-session', '--port', String(at)], { stdio: 'ignore', env })
+    check(await until(() => bad.exitCode === 1, 40), 'an id that is not a plain name is refused')
+    one.child.kill('SIGTERM')
+    check(await until(() => !existsSync(feed('s1'))), 'the last one leaving removes its files')
+  } finally {
+    for (const run of [one, two]) run.child.kill('SIGKILL')
+    await sleep(2500)
+    rmSync(home, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+}
+
 // Feed text must only reach the page through textContent.
 const page = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'live.html'), 'utf8')
 check(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write|\beval\(|new Function/.test(page), 'the page never builds markup or code from feed text')
