@@ -37,6 +37,12 @@ const TEXT_OPS = new Set(['set_goal', 'add_constraint', 'add_done_condition', 'a
 // A change names what it expects to find (the item's text, the target state), so a command written from an old view is refused, not misapplied.
 const REMOVE_OPS = new Set(['remove_constraint', 'remove_done_condition'])
 const BARE_OPS = new Set(['lock', 'unlock'])
+// Settings of the session, not of the contract: one per command, so its answer says what happened to it.
+export const SETTING_OPS = new Set(['team_enabled', 'team_role', 'codex', 'set_profile', 'pause'])
+const ROLE_NAMES = new Set(['lead', 'explorer', 'advisor'])
+const EFFORT_NAMES = new Set(['default', 'low', 'medium', 'high', 'xhigh', 'max'])
+const PROFILES = new Set(['off', 'permissive', 'balanced', 'strict'])
+const MODEL_RE = /^[A-Za-z0-9._:[\]-]{1,64}$/
 
 /** The ops of a command, cleaned, or a reason it is refused. Nothing outside this list is ever applied. */
 export function checkOps(ops) {
@@ -62,9 +68,26 @@ export function checkOps(ops) {
       const text = typeof one.text === 'string' ? one.text.trim() : ''
       if (!Number.isInteger(one.index) || one.index < 0 || one.index > 1000 || text === '' || text.length > TEXT_MAX) return { reason: 'bad index' }
       clean.push({ op, index: one.index, text })
+    } else if (op === 'team_enabled' || op === 'codex') {
+      if (typeof one.enabled !== 'boolean') return { reason: `bad ${op}` }
+      clean.push({ op, enabled: one.enabled })
+    } else if (op === 'team_role') {
+      const model = one.model === undefined ? undefined : one.model
+      const effort = one.effort === undefined ? undefined : one.effort
+      if (!ROLE_NAMES.has(one.role) || (model === undefined && effort === undefined)) return { reason: 'bad team_role' }
+      if (model !== undefined && (typeof model !== 'string' || !MODEL_RE.test(model))) return { reason: 'bad team_role' }
+      if (effort !== undefined && !EFFORT_NAMES.has(effort)) return { reason: 'bad team_role' }
+      clean.push({ op, role: one.role, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) })
+    } else if (op === 'set_profile') {
+      if (!PROFILES.has(one.profile)) return { reason: 'bad set_profile' }
+      clean.push({ op, profile: one.profile })
+    } else if (op === 'pause') {
+      if (typeof one.on !== 'boolean') return { reason: 'bad pause' }
+      clean.push({ op, on: one.on })
     } else if (BARE_OPS.has(op)) clean.push({ op })
     else return { reason: 'unknown op' }
   }
+  if (clean.some(one => SETTING_OPS.has(one.op)) && clean.length !== 1) return { reason: 'a setting goes alone' }
   return { ops: clean }
 }
 
@@ -156,7 +179,7 @@ export function take(home, sessionId, now = Date.now()) {
       out.rejected.push({ id, reason })
       continue
     }
-    out.commands.push({ id, createdAt: Number(command.createdAt) || 0, ops: checked.ops })
+    out.commands.push({ id, createdAt: Number(command.createdAt) || 0, expiresAt: command.expiresAt, ops: checked.ops })
   }
   out.commands.sort((a, b) => a.createdAt - b.createdAt)
   return out

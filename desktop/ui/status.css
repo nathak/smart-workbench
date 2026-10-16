@@ -18,3 +18,7 @@ button:disabled { cursor: default; opacity: .5; }
 .adder { display: flex; gap: 6px; margin: 4px 0; }
 .adder input { flex: 1; font: inherit; padding: 2px 6px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
 .note { color: var(--bad); font-size: 12px; min-height: 1em; }
+.bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.bar button { margin-left: 0; }
+.rolename { min-width: 190px; font-size: 12px; color: var(--muted); align-self: center; }
+select { font: inherit; font-size: 12px; }

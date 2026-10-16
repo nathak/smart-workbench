@@ -2242,10 +2242,11 @@ const DESK = { v: 1, home: '/desk', port: 4317 }
 
 type Taken = { commands?: Array<{ id: string; ops: unknown[] }>; rejected?: Array<{ id: string; reason: string }> }
 
-async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0]) {
+async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], answer?: string) {
   const seen: Array<{ argv: string[]; stdin?: string }> = []
   const toasts: string[] = []
-  const options: { taken?: Taken; desktop: Record<string, unknown>; processed: typeof seen; files: Record<string, string>; toasts: string[] } = { desktop: DESK, processed: seen, files: DESK_FILES, toasts }
+  const asked: string[] = []
+  const options: { taken?: Taken; desktop: Record<string, unknown>; processed: typeof seen; files: Record<string, string>; toasts: string[]; ask?: (labels: string[]) => string } = { desktop: DESK, processed: seen, files: DESK_FILES, toasts, ask: labels => (asked.push(labels.join('/')), answer ?? labels[0] ?? '') }
   const made = world(on, options)
   await $.session.start(start)
   await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
@@ -2257,7 +2258,7 @@ async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Param
     await waitFor(() => ackOf(seen).length > 0)
   }
 
-  return { seen, toasts, deliver, ...made }
+  return { seen, toasts, deliver, asked, ...made }
 }
 
 test('a command from the desktop app changes the contract through the same rules as the panel, and its result goes back', async ($, on) => {
@@ -2306,4 +2307,72 @@ test('a removal or a switch made from an old view is refused or idempotent, and 
   seen.length = 0
   await deliver({ commands: [{ id: 's3', ops: [{ op: 'remove_non_goal', index: 0, text: 'gone' }] }] }, 9)
   expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 's3', status: 'rejected', reason: 'unknown non-goal' })])
+})
+
+test('settings from the app: team mode and a role go through the commands\' own code; raising the guard needs no question, lowering it waits for the session', async ($, on) => {
+  const { seen, deliver, asked, workbench } = await deskWorld($, on, 'Decline')
+  await deliver({ commands: [{ id: 't1', ops: [{ op: 'team_enabled', enabled: true }] }] }, 3)
+  expect(workbench().team?.enabled).toBe(true)
+  seen.length = 0
+  await deliver({ commands: [{ id: 't2', ops: [{ op: 'team_role', role: 'advisor', model: 'opus', effort: 'high' }] }] }, 6)
+  expect(workbench().team?.advisor).toMatchObject({ effort: 'high' })
+  expect(asked).toEqual([])
+  seen.length = 0
+  await deliver({ commands: [{ id: 't3', ops: [{ op: 'set_profile', profile: 'strict' }] }] }, 9)
+  expect(workbench().execution.profile).toBe('strict')
+  expect(asked).toEqual([])
+  seen.length = 0
+  await deliver({ commands: [{ id: 't4', ops: [{ op: 'set_profile', profile: 'permissive' }] }] }, 12)
+  expect(asked).toHaveLength(1)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 't4', status: 'declined' })])
+  expect(workbench().execution.profile).toBe('strict')
+})
+
+test('lowering the guard from the app happens only when the person allows it in the session', async ($, on) => {
+  const { seen, deliver, asked, workbench } = await deskWorld($, on, 'Allow')
+  await deliver({ commands: [{ id: 'p1', ops: [{ op: 'set_profile', profile: 'permissive' }] }] }, 3)
+  expect(asked).toHaveLength(1)
+  expect(asked[0]).toContain('Allow')
+  expect(workbench().execution.profile).toBe('permissive')
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'p1', status: 'applied' })])
+  seen.length = 0
+  await deliver({ commands: [{ id: 'p2', ops: [{ op: 'pause', on: true }] }] }, 6)
+  expect(workbench().execution.isPaused).toBe(true)
+  expect(asked).toHaveLength(1)
+  seen.length = 0
+  await deliver({ commands: [{ id: 'p3', ops: [{ op: 'pause', on: false }] }] }, 9)
+  expect(asked).toHaveLength(2)
+  expect(workbench().execution.isPaused).toBe(false)
+})
+
+test('team mode on while Codex is on waits for the person, like Codex on does; a declined or expired question changes nothing', async ($, on) => {
+  const { seen, deliver, asked, workbench } = await deskWorld($, on, 'Decline')
+  await deliver({ commands: [{ id: 'k1', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'team_enabled', enabled: true }] }] }, 3)
+  // Codex is off here, so team mode on is a plain raise and needs no answer.
+  expect(workbench().team?.enabled).toBe(true)
+  expect(asked).toEqual([])
+  seen.length = 0
+  await deliver({ commands: [{ id: 'k2', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'pause', on: true }] }] }, 6)
+  seen.length = 0
+  await deliver({ commands: [{ id: 'k3', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'pause', on: false }] }, { id: 'k4', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'set_profile', profile: 'permissive' }] }] }, 9)
+  await waitFor(() => ackOf(seen).length >= 2)
+  expect(ackOf(seen)).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'k3', status: 'declined' }), expect.objectContaining({ id: 'k4', status: 'rejected', reason: 'busy' })]))
+  expect(workbench().execution.isPaused).toBe(true)
+  expect(asked).toHaveLength(1)
+  expect(asked[0]).toBe('Allow/Decline')
+})
+
+test('Codex from the app: no plugin is a rejection, not a decline', async ($, on) => {
+  const { seen, deliver, asked } = await deskWorld($, on, 'Allow')
+  await deliver({ commands: [{ id: 'x1', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'codex', enabled: true }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'x1', status: 'rejected', reason: 'codex not found' })])
+  expect(asked).toEqual([])
+})
+
+test('the app asking for the guard to be off is asked in the session, and Cancel leaves it as it was', async ($, on) => {
+  const { seen, deliver, asked, workbench } = await deskWorld($, on, 'Cancel')
+  await deliver({ commands: [{ id: 'o1', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'set_profile', profile: 'off' }] }] }, 3)
+  expect(asked).toEqual(['Turn off/Cancel'])
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'o1', status: 'declined' })])
+  expect(workbench().execution.profile).not.toBe('off')
 })

@@ -59,6 +59,44 @@ const adder = (key, hint, label, onSend, disabled, max = 1000) => {
   return row
 }
 
+const EFFORTS = ['', 'default', 'low', 'medium', 'high', 'xhigh', 'max']
+
+// One team role: its model (free text) and effort, applied together.
+function roleRow(session, role, snap, L, op, disabled) {
+  const row = el('div', undefined, 'adder')
+  row.append(el('span', `${role}: ${snap.team.roles[role] ?? '-'} (${snap.team.efforts?.[role] ?? '-'})`, 'rolename'))
+  const model = el('input')
+  model.type = 'text'
+  model.placeholder = L.modelHint
+  model.maxLength = 64
+  model.disabled = disabled
+  const key = `${session}:role:${role}`
+  model.value = drafts.get(key) ?? ''
+  model.addEventListener('input', () => drafts.set(key, model.value))
+  const effort = el('select')
+  for (const name of EFFORTS) {
+    const option = el('option', name === '' ? L.effortHint : name)
+    option.value = name
+    effort.append(option)
+  }
+  effort.disabled = disabled
+  effort.value = drafts.get(`${key}:effort`) ?? ''
+  effort.addEventListener('change', () => drafts.set(`${key}:effort`, effort.value))
+  const go = async () => {
+    const m = model.value.trim()
+    if (!m && !effort.value) return
+    const ok = await op([{ op: 'team_role', role, ...(m ? { model: m } : {}), ...(effort.value ? { effort: effort.value } : {}) }])
+    if (ok) {
+      model.value = ''
+      effort.value = ''
+      drafts.delete(key)
+      drafts.delete(`${key}:effort`)
+    }
+  }
+  row.append(model, effort, button(L.set, go, disabled))
+  return row
+}
+
 function card(row, snap, L, acks) {
   const s = el('section')
   s.append(el('h2', row.name || row.id))
@@ -103,8 +141,21 @@ function card(row, snap, L, acks) {
   s.append(note)
   const mine = (acks ?? []).filter(a => a.session === row.id).slice(-5)
   if (mine.length) s.append(list(L.sentTitle, mine, a => el('li', `${a.label} — ${a.ack ? (L[a.ack.status] ?? a.ack.status) + (a.ack.reason ? ` (${L.reasons[a.ack.reason] ?? a.ack.reason})` : '') : Date.now() - a.at > 10 * 60 * 1000 ? L.noAnswer : L.waiting}`)))
-  s.append(el('h3', L.team), el('div', `${snap.team.enabled ? L.on : L.off}${snap.team.codex ? ' · Codex' : ''}${snap.team.enabled ? ` · ${['lead', 'explorer', 'advisor'].map(r => `${r}=${snap.team.roles[r] ?? '-'}`).join(' ')}` : ''}`))
+  s.append(el('h3', L.team), el('div', `${snap.team.enabled ? L.on : L.off}${snap.team.codex ? ` · Codex (${snap.team.codexReview ? 'review' : '-'}${snap.team.codexRescue ? ', rescue' : ''})` : ''}`))
+  if (row.alive) {
+    const bar = el('div', undefined, 'bar')
+    bar.append(button(snap.team.enabled ? L.teamOff : L.teamOn, () => op([{ op: 'team_enabled', enabled: !snap.team.enabled }]), busy))
+    bar.append(button(snap.team.codex ? L.codexOff : L.codexOn, () => op([{ op: 'codex', enabled: !snap.team.codex }]), busy || (!snap.team.codex && snap.codexFound === false)))
+    s.append(bar)
+    for (const role of ['lead', 'explorer', 'advisor']) s.append(roleRow(row.id, role, snap, L, op, busy))
+  } else s.append(el('div', ['lead', 'explorer', 'advisor'].map(r => `${r}=${snap.team.roles[r] ?? '-'}`).join(' ')))
   s.append(el('h3', L.guard), el('div', `${snap.guard.profile}${snap.guard.paused ? ` · ${L.paused}` : ''}${snap.guard.fileProfile ? ` · ${L.fileProfile} ${snap.guard.fileProfile}` : ''} · ${L.rules} ${snap.guard.rules}`))
+  if (row.alive) {
+    const bar = el('div', undefined, 'bar')
+    for (const profile of ['off', 'permissive', 'balanced', 'strict']) bar.append(button(profile, () => op([{ op: 'set_profile', profile }]), busy || snap.guard.profile === profile))
+    bar.append(button(snap.guard.paused ? L.resume : L.pause, () => op([{ op: 'pause', on: !snap.guard.paused }]), busy))
+    s.append(bar, el('div', L.guardNote, 'empty'))
+  }
   s.append(list(L.evidence, snap.evidence, e => el('li', `${e.kind}: ${e.ok === true ? L.pass : e.ok === false ? L.fail : L.running}`, e.ok === true ? 'verified' : e.ok === false ? 'failed' : 'pending')))
   s.append(list(L.proposals, snap.proposals, p => el('li', `${p.change}${p.text ? `: ${p.text}` : ''} — ${p.reason}`)))
   return s
@@ -113,7 +164,7 @@ function card(row, snap, L, acks) {
 async function refresh(force) {
   // Typing in a field must not be wiped by the next redraw.
   const active = document.activeElement
-  if (!force && active && active.tagName === 'INPUT' && active.value !== '') return
+  if (!force && active && ((active.tagName === 'INPUT' && active.value !== '') || active.tagName === 'SELECT')) return
   let data
   try {
     data = await window.swb.overview()

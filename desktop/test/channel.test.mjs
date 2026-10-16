@@ -65,7 +65,7 @@ test('a forged, edited, expired, misdirected or replayed command is not taken', 
 
 test('ops outside the list, too many, too long or with a bad id are refused whole', () => {
   assert.equal(checkOps([{ op: 'rm', path: '/' }]).reason, 'unknown op')
-  assert.equal(checkOps([{ op: 'set_profile', profile: 'off' }]).reason, 'unknown op')
+  assert.equal(checkOps([{ op: 'write_policy', text: 'x' }]).reason, 'unknown op')
   assert.equal(checkOps([]).reason, 'bad ops')
   assert.equal(checkOps(Array.from({ length: 21 }, () => ({ op: 'lock' }))).reason, 'bad ops')
   assert.match(checkOps([{ op: 'add_constraint', text: 'x'.repeat(1001) }]).reason, /bad text/)
@@ -181,4 +181,17 @@ test('an expiry far in the future is refused, a broken key file is replaced, and
   writeFileSync(join(elsewhere, 'c.json'), JSON.stringify(signed(fresh, { id: 'c', target: { kind: 'session', sessionId: 's9' } })), { mode: 0o600 })
   symlinkSync(elsewhere, join(home, 'inbox', 's9'))
   assert.deepEqual(take(home, 's9'), { commands: [], rejected: [] })
+})
+
+test('settings are checked field by field and go one to a command', () => {
+  assert.equal(checkOps([{ op: 'team_enabled', enabled: 'yes' }]).reason, 'bad team_enabled')
+  assert.equal(checkOps([{ op: 'team_role', role: 'boss', model: 'opus' }]).reason, 'bad team_role')
+  assert.equal(checkOps([{ op: 'team_role', role: 'lead' }]).reason, 'bad team_role')
+  assert.equal(checkOps([{ op: 'team_role', role: 'lead', model: 'op us' }]).reason, 'bad team_role')
+  assert.equal(checkOps([{ op: 'team_role', role: 'lead', effort: 'turbo' }]).reason, 'bad team_role')
+  assert.equal(checkOps([{ op: 'set_profile', profile: 'lax' }]).reason, 'bad set_profile')
+  assert.equal(checkOps([{ op: 'pause', on: 1 }]).reason, 'bad pause')
+  assert.equal(checkOps([{ op: 'set_profile', profile: 'strict' }, { op: 'lock' }]).reason, 'a setting goes alone')
+  assert.deepEqual(checkOps([{ op: 'team_role', role: 'advisor', model: 'claude-opus-5-5', effort: 'high', extra: 1 }]).ops, [{ op: 'team_role', role: 'advisor', model: 'claude-opus-5-5', effort: 'high' }])
+  assert.equal(checkOps([{ op: 'codex', enabled: true }]).ops.length, 1)
 })

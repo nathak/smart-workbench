@@ -2,6 +2,7 @@
 // Nothing here is a command or a prompt: the contract's own words, the team and guard settings, and the evidence results.
 import type { EvidenceRecord, Live, Workbench } from '../types'
 import { statusOf } from './evidence'
+import { codexOf } from './codex'
 import * as model from './model'
 import { redact } from './risk'
 
@@ -34,7 +35,8 @@ export function snapshotOf(wb: Workbench, live: Live, at: number) {
       nonGoals: wb.task.nonGoals.slice(0, LIST_MAX).map(clean),
       doneConditions: wb.task.doneConditions.slice(0, LIST_MAX).map(one => ({ id: one.id, text: clean(one.text), link: one.link ?? null, status: statusOf(one, evidence, lastEdit || undefined) })),
     },
-    team: { enabled: team?.enabled === true, codex: team?.codex?.enabled === true, roles: { lead: team?.lead?.model ?? null, explorer: team?.explorer?.model ?? null, advisor: team?.advisor?.model ?? null } },
+    team: { enabled: team?.enabled === true, codex: team?.codex?.enabled === true, roles: { lead: team?.lead?.model ?? null, explorer: team?.explorer?.model ?? null, advisor: team?.advisor?.model ?? null }, efforts: { lead: team?.lead?.effort ?? null, explorer: team?.explorer?.effort ?? null, advisor: team?.advisor?.effort ?? null }, codexReview: team?.codex?.review === true, codexRescue: team?.codex?.rescue === true },
+    codexFound: typeof live.codexPath === 'string',
     guard: { profile: wb.execution.profile, paused: wb.execution.isPaused, fileProfile: live.policy?.profile ?? null, rules: live.policy?.rules.length ?? 0 },
     // Which checks ran and how they ended; the command that ran is left out.
     evidence: evidence.slice(-20).map(one => ({ kind: one.kind, ok: one.ok, at: one.at })),
@@ -57,6 +59,36 @@ export function snapshotText(wb: Workbench, live: Live, at: number): string | un
 
 // ---- commands from the desktop app
 
+export type SettingOp =
+  | { op: 'team_enabled' | 'codex'; enabled: boolean }
+  | { op: 'team_role'; role: 'lead' | 'explorer' | 'advisor'; model?: string; effort?: string }
+  | { op: 'set_profile'; profile: 'off' | 'permissive' | 'balanced' | 'strict' }
+  | { op: 'pause'; on: boolean }
+
+export const isSettingOp = (one: { op: string }): one is SettingOp => one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause'
+
+const PROFILE_RANK = { off: 0, permissive: 1, balanced: 2, strict: 3 } as const
+
+/** Whether a setting makes the guard watch less than it does now: those wait for the person's answer in the session. */
+export function lowersGuard(wb: Workbench, one: SettingOp): boolean {
+  if (one.op === 'set_profile') return PROFILE_RANK[one.profile] < PROFILE_RANK[wb.execution.profile]
+  if (one.op === 'pause') return !one.on && wb.execution.isPaused
+
+  return false
+}
+
+/**
+ * Whether the person must answer in the session before a setting applies: it makes the guard watch less, directly (a lower profile,
+ * resuming) or because it lets Codex's reviews run without asking (Codex on, or team mode on while Codex is already on).
+ */
+export function needsAnswer(wb: Workbench, one: SettingOp): boolean {
+  if (lowersGuard(wb, one)) return true
+  if (one.op === 'codex') return one.enabled && !codexOf(wb.team).enabled
+  if (one.op === 'team_enabled') return one.enabled && wb.team?.enabled !== true && codexOf(wb.team).enabled
+
+  return false
+}
+
 export type DeskOp =
   | { op: 'set_goal' | 'add_constraint' | 'add_done_condition' | 'add_non_goal'; text: string }
   | { op: 'remove_constraint' | 'remove_done_condition'; id: string; text: string }
@@ -69,9 +101,10 @@ export type DeskOp =
  * The contract after the ops, or the reason none of them is applied (all or nothing).
  * A locked contract takes no edit unless an unlock came before it in the same batch, as in the panel.
  */
-export function applyOps(wb: Workbench, ops: readonly DeskOp[]): { wb: Workbench; reason?: undefined } | { reason: string } {
+export function applyOps(wb: Workbench, ops: readonly (DeskOp | SettingOp)[]): { wb: Workbench; reason?: undefined } | { reason: string } {
   let cur = wb
   for (const one of ops) {
+    if (isSettingOp(one)) return { reason: 'a setting goes alone' }
     if (one.op === 'lock' || one.op === 'unlock') {
       if (cur.task.locked !== (one.op === 'lock')) cur = model.toggleLock(cur)
       continue

@@ -6,7 +6,7 @@ import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
-import { applyOps, snapshotText, type DeskOp } from './desktop'
+import { applyOps, isSettingOp, needsAnswer, snapshotText, type DeskOp, type SettingOp } from './desktop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -1235,7 +1235,7 @@ async function detectCodex($: $): Promise<string | null> {
   }
 }
 
-async function codexCommand($: $, words: string[]): Promise<string> {
+async function codexCommand($: $, words: string[], from = ''): Promise<string> {
   const [first = '', second = ''] = words.map(one => one.toLowerCase())
   const live = await read($, liveAtom)
   const wb = await read($, wbAtom)
@@ -1257,7 +1257,7 @@ async function codexCommand($: $, words: string[]): Promise<string> {
 
   if (first === 'on') {
     if (!path) return 'The Codex plugin was not found, so it stays off. Install it first (/plugin install codex@openai-codex).'
-    const answer = await $.ui.ask(codex.CODEX_CONSENT, { header: 'Codex', options: ['Turn on', 'Cancel'] }).catch(() => 'Cancel')
+    const answer = await $.ui.ask(`${from}${codex.CODEX_CONSENT}`, { header: from ? 'Desktop app' : 'Codex', options: ['Turn on', 'Cancel'] }).catch(() => 'Cancel')
     if (answer !== 'Turn on') return 'Codex stays off.'
     await mutate($, current => ({ ...current, team: codex.setCodex(current.team, { enabled: true, review: true }) }))
     await audit($, 'team.codex', { on: true })
@@ -1640,9 +1640,51 @@ async function ackDesktop($: $, id: string, result: { status: 'applied' | 'rejec
 
 let inboxBusy = false
 
+// One setting from the app, through the same code as its command. A setting that makes the guard watch less is asked here first,
+// in the session, so a command file alone never loosens it. The question gives up when the command expires.
+async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number): Promise<{ status: 'applied' | 'rejected' | 'declined'; reason?: string }> {
+  const wb = await read($, wbAtom)
+  const FROM = 'The desktop app asks: '
+  if (needsAnswer(wb, one) && !(one.op === 'set_profile' && one.profile === 'off') && one.op !== 'codex') {
+    const what = one.op === 'set_profile' ? `lower the guard from ${wb.execution.profile} to ${one.profile}` : one.op === 'pause' ? 'resume risky calls' : 'turn team mode on (Codex is on, so its reviews will then run without asking)'
+    const waited = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - (await $.clock.now())) : 10 * 60 * 1000
+    const answer = await Promise.race([
+      $.ui.ask(`${FROM}${what}. Allow it?`, { header: 'Desktop app', options: ['Allow', 'Decline'] }).catch(() => 'Decline'),
+      $.clock.sleep(waited).then(() => 'Decline', () => 'Decline'),
+    ])
+    if (answer !== 'Allow') return { status: 'declined' }
+  }
+  // The session may have ended while the question waited; the answer belongs to the one that asked.
+  if (gen !== inboxGen) return { status: 'declined' }
+  switch (one.op) {
+    case 'team_enabled':
+      await setTeam($, one.enabled)
+      return { status: 'applied' }
+    case 'team_role':
+      await changeRole($, one.role, { ...(one.model !== undefined ? { model: one.model } : {}), ...(one.effort !== undefined ? { effort: one.effort } : {}) })
+      return { status: 'applied' }
+    case 'codex': {
+      const before = codex.codexOf(wb.team).enabled
+      if (one.enabled && !before && !(await read($, liveAtom)).codexPath) return { status: 'rejected', reason: 'codex not found' }
+      await codexCommand($, [one.enabled ? 'on' : 'off'], one.enabled && !before ? FROM : '')
+      const now = codex.codexOf((await read($, wbAtom)).team).enabled
+      return now === one.enabled ? { status: 'applied' } : { status: 'declined' }
+    }
+    case 'set_profile':
+      return (await chooseGuard($, one.profile, FROM)) ? { status: 'applied' } : { status: 'declined' }
+    case 'pause':
+      // The target state, not a flip: the person may have changed it in the panel while the question waited.
+      await mutate($, current => (current.execution.isPaused === one.on ? current : model.togglePause(current)))
+      await audit($, 'guard.pause', { on: one.on })
+      return { status: 'applied' }
+  }
+}
+
 async function pollInbox($: $): Promise<void> {
   if (inboxBusy) return
   inboxBusy = true
+  const gen = inboxGen
+  let hasAsked = false
   try {
     const desk = await deskFresh($)
     const { sessionId } = await read($, liveAtom)
@@ -1651,11 +1693,30 @@ async function pollInbox($: $): Promise<void> {
     if (!entries.some(one => one.name.endsWith('.json'))) return
     const taken = await $.process.run(['node', `${$.plugin.root}/tools/desktop-channel.mjs`, 'take', sessionId], { timeoutMs: 5000 })
     if (taken.exitCode !== 0) return
-    const found = JSON.parse(taken.stdout) as { commands?: Array<{ id: string; ops: DeskOp[] }>; rejected?: Array<{ id: string; reason: string }> }
+    const found = JSON.parse(taken.stdout) as { commands?: Array<{ id: string; expiresAt: number; ops: Array<DeskOp | SettingOp> }>; rejected?: Array<{ id: string; reason: string }> }
     for (const one of found.rejected ?? []) await ackDesktop($, one.id, { status: 'rejected', reason: one.reason })
     for (const command of found.commands ?? []) {
       // The command was taken (its file is gone): whatever happens now, the app gets an answer.
       try {
+        const first = command.ops[0]
+        if (first && isSettingOp(first)) {
+          // One question per batch: a pile of them would only teach the person to click through.
+          if (needsAnswer(await read($, wbAtom), first)) {
+            if (hasAsked) {
+              await ackDesktop($, command.id, { status: 'rejected', reason: 'busy' })
+              continue
+            }
+            hasAsked = true
+          }
+          const done = await applySetting($, first, command.expiresAt, gen)
+          await ackDesktop($, command.id, done)
+          if (done.status === 'declined') await audit($, 'desktop.declined', { id: command.id, ops: first.op })
+          if (done.status === 'applied') {
+            $.ui.toast(`SmartWorkbench: the desktop app changed a setting (${first.op})`)
+            await audit($, 'desktop.apply', { id: command.id, ops: first.op })
+          }
+          continue
+        }
         let failed: string | undefined
         const next = await mutate($, current => {
           const result = applyOps(current, command.ops)
@@ -1676,13 +1737,14 @@ async function pollInbox($: $): Promise<void> {
       }
     }
   } finally {
-    inboxBusy = false
+    if (gen === inboxGen) inboxBusy = false
   }
 }
 
 // Looks for commands every few seconds while the session lives; a session that ends ends its sleep.
 function startInbox($: $): void {
   const gen = ++inboxGen
+  inboxBusy = false
   void (async () => {
     for (;;) {
       try {
@@ -1942,10 +2004,10 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
 
 // The one way the guard level changes, from the command and from the panel. Turning it off is the person's decision, asked once,
 // so nothing that only types a command can do it silently; every change is written to the audit log.
-async function chooseGuard($: $, wanted: GuardProfile): Promise<boolean> {
+async function chooseGuard($: $, wanted: GuardProfile, from = ''): Promise<boolean> {
   const wb = await read($, wbAtom)
   if (wanted === 'off' && wb.execution.profile !== 'off') {
-    const answer = await $.ui.ask('Turn the SmartWorkbench guard off? No call is asked about or blocked by the built-in rules until you set it back (/swb guard medium).', { header: 'Guard off', options: ['Turn off', 'Cancel'] }).catch(() => 'Cancel')
+    const answer = await $.ui.ask(`${from}Turn the SmartWorkbench guard off? No call is asked about or blocked by the built-in rules until you set it back (/swb guard medium).`, { header: from ? 'Desktop app' : 'Guard off', options: ['Turn off', 'Cancel'] }).catch(() => 'Cancel')
     if (answer !== 'Turn off') return false
   }
   await mutate($, current => model.setProfile(current, wanted))
@@ -2887,7 +2949,6 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     agentAnswers.clear()
     snapshotGen++
-    inboxBusy = false
     snapshotPending = false
     snapshotDirty = false
     snapshotLast = ''
