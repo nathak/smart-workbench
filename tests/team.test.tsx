@@ -1944,7 +1944,7 @@ test('scope project again: the choice decides which copy wins, and Cancel change
   const { store } = world(on, { ask: () => answer, store: { [`ws:${CWD}`]: lockedWb('Project goal') } })
   await $.session.start(start)
   await $.command.run({ command: 'swb', args: 'scope session', ...COMMAND })
-  await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'guard low', ...COMMAND })
 
   expect((await $.command.run({ command: 'swb', args: 'scope project', ...COMMAND })).text).toContain('unchanged')
   expect(store[`wsscope:${CWD}`]).toBe('session')
@@ -1953,6 +1953,10 @@ test('scope project again: the choice decides which copy wins, and Cancel change
   expect((await $.command.run({ command: 'swb', args: 'scope project', ...COMMAND })).text).toContain('Scope: project')
   expect(store[`wsscope:${CWD}`]).toBeUndefined()
   expect(store[`wss:session-a:${CWD}`]).toBeUndefined()
+  expect((store[`ws:${CWD}`] as Workbench).execution.profile).toBe('strict')
+  // The session now works on the project's copy again, not on what it had.
+  await $.command.run({ command: 'swb', args: 'guard medium', ...COMMAND })
+  expect((store[`ws:${CWD}`] as Workbench).execution.profile).toBe('balanced')
   expect((store[`ws:${CWD}`] as Workbench).task.goal).toBe('Project goal')
 })
 
@@ -1966,6 +1970,7 @@ test('scope project, writing this session\'s workbench over the project: others 
   const project = store[`ws:${CWD}`] as Workbench
   expect(project.execution.profile).toBe('permissive')
   expect(project.rev).toBeGreaterThan(7)
+  expect(store[`wss:session-a:${CWD}`]).toBeUndefined()
   expect(project.savedBy).toBe('session-a')
 })
 
@@ -2021,4 +2026,17 @@ test('scope session: /swb live starts a per-session view', async ($, on) => {
 
   expect(spawned[0]?.slice(2)).toEqual([CWD, '--join', '--session', 'session-a', '--per-session', '--port', '4401', '--watch-parent'])
   await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })
+})
+
+test('scope session is allowed while another session\'s shared view runs; a scope switched off elsewhere does not stay on after a new session id', async ($, on) => {
+  const { store } = world(on, { files: { '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' }, store: { [`ws:${CWD}`]: lockedWb('Project goal') } })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'scope session', ...COMMAND })).text).toContain('Scope: session')
+
+  // Another session returns the project to shared; a restart (as after /clear) of this one follows it.
+  delete store[`wsscope:${CWD}`]
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'scope status', ...COMMAND })).text).toContain('Scope: project')
+  await $.command.run({ command: 'swb', args: 'guard low', ...COMMAND })
+  expect((store[`ws:${CWD}`] as Workbench).execution.profile).toBe('permissive')
 })
