@@ -1,0 +1,32 @@
+appId: dev.nathak.smartworkbench-desktop
+productName: SmartWorkbench
+directories:
+  output: dist
+files:
+  - main.mjs
+  - hub.mjs
+  - events.mjs
+  - notices.mjs
+  - channel.mjs
+  - prefs.mjs
+  - i18n.mjs
+  - snapshots.mjs
+  - preload.cjs
+  - ui/**
+  - package.json
+# The tools the app runs or imports (the hub, the channel protocol), copied from the repository at build time so they cannot drift.
+extraResources:
+  - from: ../tools
+    to: tools
+    filter:
+      - live*.mjs
+      - live.html
+      - desktop-*.mjs
+linux:
+  target: [AppImage, deb]
+  category: Development
+win:
+  target: nsis
+mac:
+  target: dmg
+publish: null

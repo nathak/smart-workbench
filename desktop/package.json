@@ -8,9 +8,12 @@
   "scripts": {
     "start": "electron .",
     "start:nosandbox": "electron . --no-sandbox",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "dist": "npx --yes electron-builder@26.0.12",
+    "dist:dir": "npx --yes electron-builder@26.0.12 --dir"
   },
   "devDependencies": {
     "electron": "44.8.0"
-  }
+  },
+  "author": "nathak"
 }
