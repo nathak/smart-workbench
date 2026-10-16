@@ -81,7 +81,11 @@ export async function runJoin({ project, port, auto, session, watchParent, perSe
   try {
     claimFeed(project, process.pid, feedId)
     claimed = true
-    if (feedId) sweepFeeds(project, feedId)
+    try {
+      if (feedId) sweepFeeds(project, feedId)
+    } catch {
+      // Clutter left by others is not a reason to refuse the view.
+    }
   } catch (err) {
     console.error(err.code === 'RUNNING' ? err.message : `Cannot create the live feed in ${project}: ${err.code ?? err.message}`)
     process.exit(1)

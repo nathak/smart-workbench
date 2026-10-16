@@ -44,6 +44,8 @@ export function claimFeed(project, ownPid, feedId) {
   const pidFile = noteOf(project, feedId)
   mkdirSync(join(project, '.claude'), { recursive: true })
   if (feedId) {
+    // A .claude that is a link would have the folder, the feed and the sweep act on wherever it points.
+    if (realpathSync(join(project, '.claude')) !== join(realpathSync(project), '.claude')) throw Object.assign(new Error('.claude is a link'), { code: 'EINVAL' })
     if (!ID_PATTERN.test(feedId)) throw Object.assign(new Error('bad feed id'), { code: 'EINVAL' })
     const folder = join(project, '.claude', FEED_DIR)
     // The folder is made by us and is never a link: a link would send the feed and the note wherever it points.
@@ -59,7 +61,7 @@ export function claimFeed(project, ownPid, feedId) {
   }
   // One view per project: a second one would empty the feed the first one is reading.
   if (existsSync(pidFile)) {
-    const [host, pid] = readFileSync(pidFile, 'utf8').trim().split(/\s+/)
+    const [host, pid] = (readPlain(pidFile, 200) ?? '').trim().split(/\s+/)
     if (host === hostname() && /^\d+$/.test(pid ?? '') && Number(pid) !== ownPid) {
       let alive = false
       try {

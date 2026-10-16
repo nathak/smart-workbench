@@ -82,6 +82,8 @@ const EDIT_TOOL_NAMES = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 
 const SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/
 const SESSION_COPY_DAYS = 30
+const SCOPE_TAKE = "Take the project's workbench"
+const SCOPE_WRITE = 'Overwrite project with this session'
 
 async function projectKey($: $): Promise<string> {
   return `ws:${await $.session.root()}`
@@ -116,7 +118,10 @@ async function startScope($: $, sessionId: string | undefined): Promise<void> {
   const usable = sessionId !== undefined && SESSION_ID.test(sessionId)
 
   if (!wanted || !usable) {
+    // The state outlives a /clear: a scope another session switched off since must not stay on here.
+    await setLive($, live => ({ ...live, scope: undefined }))
     if (wanted) $.ui.toast('SmartWorkbench: this session has no usable id, so it shares the project workbench')
+    if (sessionId !== undefined) await sweepSessions($, sessionId)
     return
   }
 
@@ -1528,7 +1533,7 @@ async function goalDraftFor($: $): Promise<string | undefined> {
 // Whether the workbench and the live view are kept per session (/swb scope). Off by default: sessions of a project share both.
 function scopeLine(live: Live): string {
   return live.scope === 'session'
-    ? 'Scope: session (this session keeps its own workbench and live view)'
+    ? 'Scope: session (this session keeps its own workbench and live view; if another session switches back to project, this one returns to the shared workbench at its next start)'
     : 'Scope: project (every session of this project shares the workbench and the live view)'
 }
 
@@ -1544,7 +1549,8 @@ async function scopeCommand($: $, args: string): Promise<{ text: string }> {
   if (wanted !== 'session' && wanted !== 'project') return { text: 'Usage: /swb scope [session|project|status]' }
   if (wanted === (live.scope ?? 'project')) return { text: scopeLine(live) }
   // The live files change place with the scope; a view that is running would be left writing to the old ones.
-  if (liveServer || (await foreignView($)).state !== 'none') return { text: 'A live view is running for this session: /swb live stop first, then change the scope.' }
+  // Only this session's own files count: another session's shared view does not stand in the way of leaving the shared feed.
+  if (liveServer || (live.scope === 'session' && (await foreignView($)).state === 'alive')) return { text: 'A live view is running for this session: /swb live stop first, then change the scope.' }
 
   if (wanted === 'session') {
     const sessionId = live.sessionId
@@ -1562,19 +1568,19 @@ async function scopeCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   const answer = await $.ui
-    .ask("Back to one workbench for the whole project? This session's own workbench is replaced by the project's, or written over it.", { header: 'Scope', options: ["Take the project's workbench", "Write this session's workbench to the project (replaces what other sessions saved)", 'Cancel'] })
+    .ask("Back to one workbench for the whole project? This session's own workbench is replaced by the project's, or written over it.", { header: 'Scope', options: [SCOPE_TAKE, SCOPE_WRITE, 'Cancel'] })
     .catch(() => 'Cancel')
-  if (answer !== "Take the project's workbench" && !answer.startsWith('Write this session')) return { text: 'Scope unchanged.' }
+  if (answer !== SCOPE_TAKE && answer !== SCOPE_WRITE) return { text: 'Scope unchanged.' }
 
   const ownKey = await activeKey($)
   const mine = await read($, wbAtom)
   const project = await $.store.get(await projectKey($))
   await $.store.delete(await scopeKey($))
   await setLive($, one => ({ ...one, scope: undefined }))
-  if (answer.startsWith('Write this session')) {
+  if (answer === SCOPE_WRITE) {
     // A revision above the project's own, so sessions that share it take this one at their next prompt.
     const rev = (model.isWorkbench(project) ? (project.rev ?? 0) : 0) + 1
-    const written = { ...mine, rev, ...(live.sessionId ? { savedBy: live.sessionId } : {}), savedAt: undefined }
+    const written = { ...mine, rev, ...(live.sessionId ? { savedBy: live.sessionId } : {}) }
     await $.store.set(await projectKey($), written)
     await update($, wbAtom, () => written)
   } else {
