@@ -4,15 +4,15 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-16
+
 ### Added
 - `/swb scope session|project`: sessions of a project can keep their own workbench (contract, pins, guard profile, team settings, evidence, changed files, call history) and their own live view (a feed, a process note and a tab per session in `.claude/smartworkbench-live/`), each new session starting from a one-time copy of the project's workbench. On by default (a project can choose `/swb scope project` to keep sharing); a new session starts from the copy most recently saved by another session of the project; the live hub is version 2 and still serves sessions that share the project feed.
 - `/swb ledger export-wiki <path>`: the recorded sessions as pages of the llm-wiki (`content/qa-log/<project>/`, its front matter and `[[links]]`, a regenerated Korean block and a `## Notes` that survives), after a preview and a question, files only and no git in the wiki. `"ledger": { "wiki": "off" }` in the guard file forbids it.
+- Ledger sharing: `/swb ledger publish` writes a masked summary of a session (never tool input or output) to the repository's `swb-ledger` branch with git plumbing and a temporary index, after a preview and a question; `fetch`, `search` and `forget` complete it, `/swb why` reads teammates' sessions too, and each published session gets a generated note whose human-written `## Notes` survive regeneration. A guard file can forbid it with `"ledger": { "share": "off" }`.
 
 ### Security
 - Text from shared ledger sessions is cleaned (terminal escapes, invisible and direction characters), its markup made inert, order-like lines marked, and shown in a data frame by `/swb why` and `/swb ledger search`; shared events are checked field by field when read.
-
-### Added
-- Ledger sharing: `/swb ledger publish` writes a masked summary of a session (never tool input or output) to the repository's `swb-ledger` branch with git plumbing and a temporary index, after a preview and a question; `fetch`, `search` and `forget` complete it, `/swb why` reads teammates' sessions too, and each published session gets a generated note whose human-written `## Notes` survive regeneration. A guard file can forbid it with `"ledger": { "share": "off" }`.
 
 ## [0.18.0] - 2026-10-14
 
