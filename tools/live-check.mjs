@@ -200,6 +200,32 @@ try {
   first?.child.kill('SIGTERM')
   rmSync(dir, { recursive: true, force: true })
 }
+// ---- a hub kept by the desktop app does not end for lack of sessions ----
+{
+  const home = mkdtempSync(join(tmpdir(), 'swb-keep-'))
+  const base = join(home, 'reg')
+  mkdirSync(base, { mode: 0o700 })
+  const env = { ...process.env, SWB_LIVE_HOME: base, SWB_LIVE_IDLE_MS: '800' }
+  const info = at => new Promise(done => {
+    const req = httpRequest({ host: '127.0.0.1', port: at, path: '/info', headers: { host: `127.0.0.1:${at}` } }, res => {
+      let text = ''
+      res.on('data', chunk => (text += chunk))
+      res.on('end', () => done(res.statusCode === 200 ? text : ''))
+    })
+    req.on('error', () => done(''))
+    req.end()
+  })
+  const kept = spawn('node', [server, '--hub', '--keep', '--port', String(port + 30)], { stdio: 'ignore', env })
+  const plain = spawn('node', [server, '--hub', '--port', String(port + 31)], { stdio: 'ignore', env })
+  let plainEnded = false
+  plain.on('exit', () => (plainEnded = true))
+  await sleep(4000)
+  check(plainEnded, 'a hub without sessions ends after its idle time')
+  check((await info(port + 30)).includes('"hub":"smartworkbench"'), 'a hub started with --keep is still up long after its idle time')
+  kept.kill('SIGTERM')
+  await sleep(300)
+  rmSync(home, { recursive: true, force: true })
+}
 // ---- the shared hub: several sessions, one port ----
 {
   const home = mkdtempSync(join(tmpdir(), 'swb-hub-'))

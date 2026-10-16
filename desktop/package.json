@@ -1,0 +1,16 @@
+{
+  "name": "smartworkbench-desktop",
+  "version": "0.1.0",
+  "description": "Tray app for SmartWorkbench: an always-on live monitor with desktop notifications",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "start:nosandbox": "electron . --no-sandbox",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.8.0"
+  }
+}

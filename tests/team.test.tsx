@@ -38,6 +38,8 @@ type WorldOptions = {
   ran?: string[]
   // Collects every process.run call with its stdin.
   processed?: Array<{ argv: string[]; stdin?: string; env?: Record<string, string> }>
+  // What tools/desktop-state.mjs prints (the desktop app's heartbeat); none = the app does not run.
+  desktop?: Record<string, unknown>
   // Makes these commands fail as a non-zero exit would.
   fail?: (command: string) => boolean
   // Collects the toasts shown.
@@ -90,6 +92,7 @@ function world(on: On, options: WorldOptions = {}) {
   })
   on('process.run', ($, e) => {
     options.processed?.push({ argv: e.argv, stdin: e.init?.stdin, env: e.init?.env })
+    if (String(e.argv[1] ?? '').endsWith('tools/desktop-state.mjs')) return { value: { exitCode: 0, stdout: options.desktop ? JSON.stringify(options.desktop) : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     const answer = commands[e.argv.join(' ')]
     // A list answers one call after another, the last one for every call after that.
     const run = (Array.isArray(answer) ? (answer.length > 1 ? answer.shift() : answer[0]) : answer) ?? { exitCode: 1, stdout: '', stderr: `unexpected: ${e.argv.join(' ')}` }
@@ -2109,4 +2112,51 @@ test('ask notifications: /swb notify test reports the channel, a burst sends one
   await clock.set(Date.UTC(2026, 9, 8, 1, 5, 0))
   await $.tool.call({ tool: 'Bash', command: 'git push origin d' })
   expect(sent).toHaveLength(2)
+})
+
+test('the session sends its own ask notice unless it is on the desktop app\'s hub, which shows it', async ($, on) => {
+  const sent: string[] = []
+  world(on, { desktop: { v: 1, port: 4317, askNotify: 'desktop' } })
+  on('ui.notify', (_$, e) => {
+    sent.push(String((e as { text?: unknown }).text))
+    return { value: { isSent: true, channel: 'bell' } }
+  })
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Bash', command: 'git push origin a' })
+  // The app takes over ask notices, but this session is not on its hub (autoJoin is off), so the app cannot see the question.
+  expect(sent).toHaveLength(1)
+})
+
+test('with the desktop app running and asking for it, a session joins its hub on the app\'s port, without prompts when the app says so', async ($, on) => {
+  world(on, { desktop: { v: 1, port: 4411, autoJoin: true, livePrompts: false, askNotify: 'desktop' } })
+  const sent: string[] = []
+  on('ui.notify', (_$, e) => {
+    sent.push(String((e as { text?: unknown }).text))
+    return { value: { isSent: true, channel: 'bell' } }
+  })
+  const spawned: string[][] = []
+  on('process.spawn', async function* (_$, e) {
+    spawned.push([...e.argv])
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4411  (project /work)\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  expect(spawned).toHaveLength(1)
+  expect(spawned[0]).toContain('--join')
+  expect(spawned[0]?.slice(spawned[0].indexOf('--port'), spawned[0].indexOf('--port') + 2)).toEqual(['--port', '4411'])
+  expect(spawned[0]).not.toContain('--auto')
+  await $.tool.call({ tool: 'Bash', command: 'git push origin a' })
+  expect(sent).toHaveLength(0)
+  await $.command.run({ command: 'swb', args: 'live stop', ...COMMAND })
+})
+
+test('without the desktop app, or with autoJoin off, or in a session nobody can answer, no live view is started', async ($, on) => {
+  world(on, { desktop: { v: 1, port: 4411, autoJoin: false } })
+  const spawned: string[][] = []
+  on('process.spawn', async function* (_$, e) {
+    spawned.push([...e.argv])
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  expect(spawned).toHaveLength(0)
 })

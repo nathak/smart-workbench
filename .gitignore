@@ -1,3 +1,5 @@
 # Written by Claude Code at each load
 .claude-plugin/types/
 .claude/smartworkbench-live.jsonl
+desktop/node_modules/
+desktop/dist/

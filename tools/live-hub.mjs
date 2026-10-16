@@ -16,7 +16,7 @@ export const HUB_VERSION = 2
 // The page is one file with inline script and style and talks only to this server; anything else it is tricked into loading is refused.
 const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
-export function runHub({ port }) {
+export function runHub({ port, keep = false, watchParent = false }) {
   const STALE_MS = Number(process.env.SWB_LIVE_STALE_MS) || 20000
   const IDLE_MS = Number(process.env.SWB_LIVE_IDLE_MS) || 30000
   const MAX_SESSIONS = Number(process.env.SWB_LIVE_MAX_SESSIONS) || 16
@@ -111,9 +111,20 @@ export function runHub({ port }) {
       adopt([])
     }
     if ([...sessions.values()].some(own => own.alive || own.quiet)) idleSince = now
-    else if (now - idleSince > IDLE_MS) stop()
+    else if (!keep && now - idleSince > IDLE_MS) stop()
   }
 
+  // Started by the desktop app: a killed app must not leave a hub that never ends (--keep) behind.
+  if (watchParent) {
+    const parent = process.ppid
+    setInterval(() => {
+      try {
+        process.kill(parent, 0)
+      } catch {
+        stop()
+      }
+    }, 2000).unref?.()
+  }
   const scanner = setInterval(look, 1000)
   const pumper = setInterval(() => {
     // Only a live session is read: a finished one's feed path may now belong to another session of the same project.

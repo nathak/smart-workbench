@@ -1,0 +1,207 @@
+import assert from 'node:assert/strict'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { test } from 'node:test'
+
+import { beat, clear, ensureHome } from '../channel.mjs'
+import { parseFrames } from '../events.mjs'
+import { pickTools, superviseHub, toolCandidates } from '../hub.mjs'
+import { pickLang, strings } from '../i18n.mjs'
+import { makeNotices } from '../notices.mjs'
+import { loadPrefs, savePrefs } from '../prefs.mjs'
+import { readDesktop } from '../../tools/desktop-state.mjs'
+
+const tmp = () => mkdtempSync(join(tmpdir(), 'swb-desk-'))
+const clock = () => {
+  let t = 1_000_000
+  return { now: () => t, advance: ms => void (t += ms) }
+}
+
+test('an ask with no tool.end after two seconds raises one notice; one answered at once raises none', () => {
+  const c = clock()
+  const n = makeNotices({ now: c.now })
+  n.onSessions([{ id: 's1', project: '/home/u/app', alive: true }])
+  n.onLine('s1', { kind: 'tool.start', id: 'a', tool: 'Bash', policy: 'ask' })
+  n.onLine('s1', { kind: 'tool.start', id: 'b', tool: 'Edit', policy: 'ask' })
+  n.onLine('s1', { kind: 'tool.end', id: 'b', outcome: 'ok' })
+  assert.deepEqual(n.tick(), [])
+  c.advance(2500)
+  assert.deepEqual(n.tick(), [{ kind: 'ask', session: 's1', project: 'app', tool: 'Bash' }])
+  assert.deepEqual(n.tick(), [])
+})
+
+test('a tool name that is not plain is replaced, and a notice never carries a command', () => {
+  const c = clock()
+  const n = makeNotices({ now: c.now })
+  n.onSessions([{ id: 's1', project: 'C:\\w\\app', alive: true }])
+  n.onLine('s1', { kind: 'tool.start', id: 'a', tool: '<b>x</b> secret', policy: 'ask', summary: 'secret-command --flag' })
+  c.advance(3000)
+  const [one] = n.tick()
+  assert.equal(one.tool, 'tool')
+  assert.equal(one.project, 'app')
+  assert.equal(JSON.stringify(one).includes('secret'), false)
+})
+
+test('asks of one session are throttled to one per 30 seconds, and all sessions to one per 5', () => {
+  const c = clock()
+  const n = makeNotices({ now: c.now })
+  n.onSessions([{ id: 's1', project: '/a', alive: true }, { id: 's2', project: '/b', alive: true }])
+  n.onLine('s1', { kind: 'tool.start', id: '1', tool: 'Bash', policy: 'ask' })
+  n.onLine('s2', { kind: 'tool.start', id: '2', tool: 'Bash', policy: 'ask' })
+  c.advance(2500)
+  assert.equal(n.tick().length, 1)
+  c.advance(5000)
+  n.onLine('s1', { kind: 'tool.start', id: '3', tool: 'Bash', policy: 'ask' })
+  c.advance(2500)
+  // s2's ask was held back by the global gap and now goes out; s1's second ask is inside its own 30 seconds.
+  assert.deepEqual(n.tick().map(one => one.session), ['s2'])
+})
+
+test('quiet is announced after a minute and not again until the session beats once more', () => {
+  const c = clock()
+  const n = makeNotices({ now: c.now })
+  n.onSessions([{ id: 's1', project: '/a', alive: true, quiet: true }])
+  c.advance(30000)
+  assert.deepEqual(n.tick(), [])
+  c.advance(31000)
+  assert.equal(n.tick()[0].kind, 'quiet')
+  c.advance(120000)
+  assert.deepEqual(n.tick(), [])
+})
+
+test('a session that ends is announced once, a quiet one is not an end, and a disabled kind is silent', () => {
+  const c = clock()
+  const n = makeNotices({ now: c.now })
+  n.onSessions([{ id: 's1', project: '/a', alive: true }])
+  assert.deepEqual(n.onSessions([{ id: 's1', project: '/a', alive: false, quiet: true }]), [])
+  assert.equal(n.onSessions([{ id: 's1', project: '/a', alive: false }]).length, 1)
+  assert.deepEqual(n.onSessions([{ id: 's1', project: '/a', alive: false }]), [])
+  const off = makeNotices({ now: c.now, enabled: () => ({ ask: false, quiet: true, end: true }) })
+  off.onSessions([{ id: 'x', project: '/a', alive: true }])
+  off.onLine('x', { kind: 'tool.start', id: '1', tool: 'Bash', policy: 'ask' })
+  c.advance(3000)
+  assert.deepEqual(off.tick(), [])
+})
+
+test('frames split across chunks are rebuilt, comments are skipped', () => {
+  const a = parseFrames(': ping\n\nevent: sessions\ndata: {"sess')
+  assert.deepEqual(a.frames, [])
+  const b = parseFrames(`${a.rest}ions":[]}\n\nevent: ready\ndata: {}\n\n`)
+  assert.deepEqual(b.frames.map(f => f.event), ['sessions', 'ready'])
+})
+
+test('the hub is started when none answers, once, with --keep, and is not started when one answers', async () => {
+  const calls = []
+  const fake = { exitCode: null, killed: false, on() {}, kill() { this.killed = true } }
+  const hub = superviseHub({ port: 4999, tools: '/t', spawnImpl: (...a) => (calls.push(a), fake), probeImpl: async () => undefined, everyMs: 60000 })
+  await new Promise(r => setTimeout(r, 30))
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0][1].includes('--keep') && calls[0][1].includes('--hub') && calls[0][1].includes('4999'))
+  assert.equal(calls[0][2].env.ELECTRON_RUN_AS_NODE, '1')
+  hub.stop()
+  assert.equal(fake.killed, true)
+  const other = []
+  const up = superviseHub({ port: 4999, tools: '/t', spawnImpl: (...a) => other.push(a), probeImpl: async () => ({ hub: 'smartworkbench' }), everyMs: 60000 })
+  await new Promise(r => setTimeout(r, 30))
+  assert.equal(other.length, 0)
+  assert.equal(up.state, 'up')
+  up.stop()
+})
+
+test('tools are taken from the first directory whose hub has --keep', () => {
+  const old = tmp()
+  const fresh = tmp()
+  for (const [dir, text] of [[old, "'connection: keep-alive'"], [fresh, 'export function runHub({ keep = false })']]) {
+    writeFileSync(join(dir, 'live.mjs'), '')
+    writeFileSync(join(dir, 'live-hub.mjs'), text)
+  }
+  assert.equal(pickTools([old, fresh]), fresh)
+  assert.equal(pickTools([old]), undefined)
+  const home = tmp()
+  mkdirSync(join(home, '.claude', 'plugins'), { recursive: true })
+  writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { 'smartworkbench@x': [{ installPath: '/p/1' }], 'other@x': [{ installPath: '/o' }] } }))
+  const list = toolCandidates({ env: {}, home, resources: undefined })
+  assert.equal(list[0], '/p/1/tools')
+  assert.equal(list.includes('/o/tools'), false)
+})
+
+test('the heartbeat is private and atomic, and the plugin reads it only while fresh', () => {
+  const home = join(tmp(), 'd')
+  ensureHome(home)
+  assert.equal(statSync(home).mode & 0o077, 0)
+  beat(home, { port: 4317, autoJoin: true, livePrompts: false, askNotify: 'desktop' })
+  assert.equal(statSync(join(home, 'desktop.json')).mode & 0o077, 0)
+  assert.deepEqual(readDesktop(home), { port: 4317, autoJoin: true, livePrompts: false, askNotify: 'desktop' })
+  assert.equal(readDesktop(home, Date.now() + 60000), undefined)
+  clear(home)
+  assert.equal(readDesktop(home), undefined)
+})
+
+test('the plugin ignores a heartbeat with a bad port or version, one that is too large, or one that is not JSON', () => {
+  const home = tmp()
+  for (const body of [{ v: 1, port: 80 }, { v: 2, port: 4317 }, { v: 1, port: 'x' }]) {
+    writeFileSync(join(home, 'desktop.json'), JSON.stringify(body))
+    assert.equal(readDesktop(home), undefined)
+  }
+  writeFileSync(join(home, 'desktop.json'), JSON.stringify({ v: 1, port: 4317, pad: 'x'.repeat(5000) }))
+  assert.equal(readDesktop(home), undefined)
+  writeFileSync(join(home, 'desktop.json'), '{')
+  assert.equal(readDesktop(home), undefined)
+})
+
+test('a directory open to others is closed again, and prefs fall back to defaults on bad input', () => {
+  const home = tmp()
+  chmodSync(home, 0o755)
+  ensureHome(home)
+  assert.equal(statSync(home).mode & 0o077, 0)
+  const file = join(home, 'p.json')
+  writeFileSync(file, JSON.stringify({ notifyAsk: 'yes', notifyEnd: true, extra: 1 }))
+  const p = loadPrefs(file)
+  assert.equal(p.notifyAsk, true)
+  assert.equal(p.notifyEnd, true)
+  assert.equal('extra' in p, false)
+  savePrefs(file, { ...p, autoJoin: false })
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).autoJoin, false)
+})
+
+test('Korean locales get Korean, others English, and both languages cover the same keys', () => {
+  assert.equal(pickLang('ko-KR', undefined), 'ko')
+  assert.equal(pickLang('en-US', undefined), 'en')
+  assert.equal(pickLang('en-US', 'ko'), 'ko')
+  assert.deepEqual(Object.keys(strings('ko')).sort(), Object.keys(strings('en')).sort())
+})
+
+test('an ask held back by a throttle goes out on a later tick, and an end already over when the app starts is not announced', () => {
+  const c = clock()
+  const n = makeNotices({ now: c.now })
+  n.onSessions([{ id: 's1', project: '/a', alive: true }, { id: 's2', project: '/b', alive: true }])
+  n.onLine('s1', { kind: 'tool.start', id: '1', tool: 'Bash', policy: 'ask' })
+  n.onLine('s2', { kind: 'tool.start', id: '2', tool: 'Edit', policy: 'ask' })
+  c.advance(2500)
+  assert.equal(n.tick().length, 1)
+  c.advance(5000)
+  assert.deepEqual(n.tick().map(one => one.tool), ['Edit'])
+  const late = makeNotices({ now: c.now })
+  assert.deepEqual(late.onSessions([{ id: 'old', project: '/a', alive: false }]), [])
+})
+
+test('an ask replayed from long ago is not news, and a project name carries no markup', () => {
+  const c = clock()
+  const n = makeNotices({ now: c.now })
+  n.onSessions([{ id: 's1', project: '/w/<b>app&', alive: true }])
+  n.onLine('s1', { kind: 'tool.start', id: '1', tool: 'Bash', policy: 'ask', at: c.now() - 120000 })
+  c.advance(3000)
+  assert.deepEqual(n.tick(), [])
+  n.onLine('s1', { kind: 'tool.start', id: '2', tool: 'Bash', policy: 'ask' })
+  c.advance(3000)
+  assert.equal(n.tick()[0].project, 'bapp')
+})
+
+test('a heartbeat of an app that no longer runs is ignored even while fresh', () => {
+  const home = tmp()
+  writeFileSync(join(home, 'desktop.json'), JSON.stringify({ v: 1, pid: 2147483646, port: 4317 }))
+  assert.equal(readDesktop(home), undefined)
+  writeFileSync(join(home, 'desktop.json'), JSON.stringify({ v: 1, pid: process.pid, port: 4317 }))
+  assert.equal(readDesktop(home)?.port, 4317)
+})

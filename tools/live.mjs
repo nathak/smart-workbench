@@ -3,6 +3,7 @@
 // Usage: node live.mjs [projectDir] [--port 4317] [--auto] [--watch-parent]
 // --auto: when the port is taken (another session's view), the next free one is used, up to 20 further.
 //        node live.mjs [projectDir] --join [--session <id>] [--port 4317] [--auto] [--watch-parent]
+// --hub --keep: a hub that stays up with no session.
 // --join: share one hub on the port with the other sessions (each is a tab); --hub is the server process that join starts.
 // The plugin writes the feed only while this file exists, so stopping the server (which removes it) stops the writes.
 import { createServer } from 'node:http'
@@ -32,7 +33,8 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(1)
 }
 if (args.includes('--hub')) {
-  runHub({ port })
+  // --keep: the hub never ends for lack of sessions (the desktop app supervises it).
+  runHub({ port, keep: args.includes('--keep'), watchParent: args.includes('--watch-parent') })
 } else if (args.includes('--join')) {
   if (args.includes('--per-session') && !/^[A-Za-z0-9_-]{1,64}$/.test(sessionAt >= 0 ? (args[sessionAt + 1] ?? '') : '')) {
     console.error('--per-session needs a valid --session id')

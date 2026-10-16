@@ -221,6 +221,16 @@ Choices are kept per project. The tab also shows the session's current model set
 
 A checked-in guard file can only raise the level (the stricter of the two applies) and can never set `off`; a template or a shared task cannot either. Every change is written to the audit log (`guard.profile`). Calls are still recorded in the live view with their risk, so you can see what went through.
 
+### Desktop app (tray)
+
+`desktop/` holds an Electron tray app (not part of the plugin; the plugin needs nothing from it). It keeps the live-view hub running with no session, shows it in a window of its own, and raises desktop notifications for a guard question that waits, a session that went quiet and a session that ended (project folder and tool name only, never a command). Closing the window hides it; quit from the tray menu. The menu switches: new sessions join automatically, full prompts in the monitor, each notice kind, start at login. The text follows the system language (Korean or English; `SWB_DESKTOP_LANG=ko|en` overrides).
+
+```
+cd desktop && npm install && npm start      # on Linux without a setuid sandbox: npm run start:nosandbox
+```
+
+While the app runs it rewrites `~/.claude/smartworkbench-desktop/desktop.json` every 10 seconds (owner-only). A session reads it only while it is fresh: with auto-join on it joins the app's hub at start, and while the app shows ask notices the session does not send its own. Closing the app removes the file. The hub is the tools of the installed plugin when they support `--keep`, else the copy in this repository. Editing the contract and team mode from the app is planned, not built.
+
 ### Decision ledger
 
 Commits show what changed, not why. `/swb ledger on` records, for this project and this machine, each session's prompts, Claude's answers, tool calls (with masked input and output), guard decisions, edits and the commits it sees made, one JSON line per event under `<git dir>/swb-ledger/sessions/` (inside `.git`, so it is never committed; outside a git repository `.claude/swb-ledger/`). It is **off until you turn it on** (`/swb ledger off` stops it and keeps what was written; `/swb ledger` shows the state). Text is masked like the live feed, with prompts and answers kept up to 20,000 characters.
@@ -686,6 +696,16 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 | off | 기본 규칙이 아무것도 막지 않습니다(질문도 차단도 없음). 프로젝트 Guard 파일에 직접 쓴 규칙(그 규칙이 요구한 대로), 그 파일의 수정, *Pause risky calls* 스위치는 계속 적용됩니다. 끌 때는 한 번 확인을 묻습니다 |
 
 저장소의 Guard 파일은 단계를 높이기만 할 수 있고(둘 중 엄격한 쪽 적용) `off`로는 못 바꿉니다. 템플릿과 공유된 작업도 마찬가지입니다. 바꿀 때마다 감사 로그에 `guard.profile`이 남고, 실시간 화면에는 통과한 호출도 위험도와 함께 기록됩니다.
+
+### 데스크톱 앱 (트레이)
+
+`desktop/`에 Electron 트레이 앱이 있습니다(플러그인의 일부가 아니며 플러그인은 이 앱 없이 동작합니다). 세션이 없어도 실시간 보기 허브를 계속 띄워 두고, 별도 창으로 보여 주며, 확인 대기·조용해진 세션·종료된 세션을 데스크톱 알림으로 알려 줍니다(프로젝트 폴더 이름과 도구 이름만, 명령은 담지 않습니다). 창을 닫으면 숨기기만 하고 종료는 트레이 메뉴에서 합니다. 메뉴에서 새 세션 자동 연결, 모니터에 프롬프트 전체 표시, 알림 종류별 켜기/끄기, 로그인 시 시작을 바꿉니다. 문구는 시스템 언어(한국어/영어)를 따르고 `SWB_DESKTOP_LANG=ko|en`으로 바꿀 수 있습니다.
+
+```
+cd desktop && npm install && npm start      # setuid 샌드박스가 없는 Linux에서는 npm run start:nosandbox
+```
+
+앱이 실행되는 동안 `~/.claude/smartworkbench-desktop/desktop.json`(소유자만 접근)을 10초마다 다시 씁니다. 세션은 이 파일이 최근 것일 때만 읽습니다. 자동 연결이 켜져 있으면 시작할 때 앱의 허브에 연결하고, 앱이 확인 대기 알림을 보여 주는 동안에는 세션이 따로 보내지 않습니다. 앱을 끄면 파일이 지워집니다. 허브는 설치된 플러그인의 `tools/`가 `--keep`을 지원하면 그것을, 아니면 이 저장소의 사본을 씁니다. 앱에서 계약과 팀 모드를 편집하는 기능은 계획만 있고 아직 없습니다.
 
 ### 결정 기록(Ledger)
 

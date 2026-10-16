@@ -1554,6 +1554,21 @@ async function goalDraftFor($: $): Promise<string | undefined> {
 
 // ---- commands
 
+// The desktop app's heartbeat (tools/desktop-state.mjs), or undefined when it does not run. Never throws.
+async function desktopState($: $): Promise<{ port: number; autoJoin: boolean; livePrompts: boolean; askNotify: 'desktop' | 'plugin' } | undefined> {
+  try {
+    const out = await $.process.run(['node', `${$.plugin.root}/tools/desktop-state.mjs`], { timeoutMs: 3000 })
+    if (out.exitCode !== 0 || !out.stdout.trim()) return undefined
+    const raw = JSON.parse(out.stdout) as { port?: unknown; autoJoin?: unknown; livePrompts?: unknown; askNotify?: unknown }
+    const port = Number(raw.port)
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) return undefined
+
+    return { port, autoJoin: raw.autoJoin === true, livePrompts: raw.livePrompts !== false, askNotify: raw.askNotify === 'desktop' ? 'desktop' : 'plugin' }
+  } catch {
+    return undefined
+  }
+}
+
 // A notification for a guard question: only where someone can answer, at most one every few seconds (parallel agents ask in bursts),
 // read from the store each time so a choice made in another session counts. Never throws and never waits for the channel.
 async function notifyAsk($: $, reason: string, tool: string): Promise<void> {
@@ -1561,6 +1576,9 @@ async function notifyAsk($: $, reason: string, tool: string): Promise<void> {
     if (!isAskable || (await $.store.get('notify').catch(() => undefined)) === 'off') return
     const at = await $.clock.now()
     if (at - lastAskNotice < ASK_NOTICE_GAP_MS) return
+    // The desktop app, while it runs, has taken over ask notices and sees this session's feed (this session is on its hub), shows them itself.
+    const desk = await desktopState($)
+    if (desk?.askNotify === 'desktop' && liveServer?.url.startsWith(`http://127.0.0.1:${desk.port}`)) return
     lastAskNotice = at
     void Promise.resolve($.ui.notify(`Waiting for your answer: ${model.cut(reason, 100)} (${tool})`, { title: 'SmartWorkbench' })).catch(() => undefined)
   } catch {
@@ -2781,6 +2799,15 @@ export const register: Register = on => {
     const codexPath = await detectCodex($)
     await setLive($, live => ({ ...live, codexPath }))
     await ledgerStart($).catch(() => undefined)
+    // With the desktop app running and asked to, this session joins its always-on hub (the same join /swb live makes).
+    if (isAskable) {
+      const desk = await desktopState($)
+      if (desk?.autoJoin && !liveServer) {
+        // A slow or missing hub must not hold the session start for the whole join wait.
+        await Promise.race([liveCommand($, `${desk.port}${desk.livePrompts ? '' : ' --no-prompts'}`).catch(() => undefined), $.clock.sleep(4000).catch(() => undefined)])
+        if (liveServer) $.ui.log(`SmartWorkbench: joined the desktop app's live view at ${liveServer.url}${desk.livePrompts ? ' (full prompts are shown there; /swb live --no-prompts to shorten them)' : ''}.`)
+      }
+    }
 
     if ((await read($, liveAtom)).policy?.audit) {
       const name = await $.process.run(['git', 'config', 'user.name'], { cwd: await $.session.root() }).catch(() => undefined)
