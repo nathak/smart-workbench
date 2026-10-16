@@ -2329,10 +2329,10 @@ function renderSessions(){
     b.appendChild(el('span', 'sn', cut(c.name, 24)));
     if (!on && c.badge.ask) b.appendChild(el('span', 'sb ask', String(c.badge.ask)));
     else if (!on && c.badge.n) b.appendChild(el('span', 'sb', c.badge.n > 99 ? '99+' : String(c.badge.n)));
-    b.title = c.project + (c.alive ? '' : '\n' + L('this session has ended', '끝난 세션')) + (c.startedAt ? '\n' + L('started ', '시작 ') + clock(c.startedAt) : '');
+    b.title = c.project + (c.alive ? '' : '\n' + (c.quiet ? L('no heartbeat, but the process still runs (asleep, stopped or busy)', '하트비트가 끊겼지만 프로세스는 살아 있음(절전·정지·바쁨)') : L('this session has ended', '끝난 세션'))) + (c.startedAt ? '\n' + L('started ', '시작 ') + clock(c.startedAt) : '');
     b.onclick = function(){ switchTo(id); };
     bar.appendChild(b);
-    if (!c.alive) {
+    if (!c.alive && !c.quiet) {
       var x = el('button', 'sx', '×'); x.setAttribute('data-sx', id);
       x.title = L('close this ended session', '끝난 세션 닫기'); x.setAttribute('aria-label', x.title);
       x.onclick = function(){ closeSession(id); };
@@ -2392,7 +2392,7 @@ function onSessions(m){
       if (closedIds[row.id]) { if (Number(row.startedAt) <= closedIds[row.id]) return; delete closedIds[row.id]; }
       seen[row.id] = true;
       var c = ctxOf(row.id);
-      c.name = String(row.name || row.id); c.project = String(row.project || ''); c.startedAt = Number(row.startedAt) || 0; c.alive = !!row.alive;
+      c.name = String(row.name || row.id); c.project = String(row.project || ''); c.startedAt = Number(row.startedAt) || 0; c.alive = !!row.alive; c.quiet = !!row.quiet;
     });
     Object.keys(CTX).forEach(function(id){ if (!seen[id] && id !== curId) delete CTX[id]; else if (!seen[id]) CTX[id].alive = false; });
     ORDER = Object.keys(CTX).sort(function(a, b){ return CTX[a].startedAt - CTX[b].startedAt; });

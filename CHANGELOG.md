@@ -4,6 +4,10 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- `/swb notify on|off`: when the guard asks for your answer, a notification goes through your terminal's notification channel (tool and reason only, never the command); on by default.
+- The live view tells a session that stopped beating but whose process still runs (asleep, stopped or busy) from one that ended: its tab says so and has no close button.
+
 ## [0.19.0] - 2026-10-16
 
 ### Added

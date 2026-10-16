@@ -70,6 +70,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb templates` | List templates and context sets |
 | `/swb export [path]` | Write a Markdown handoff |
 | `/swb scope [session\|project]` | Keep the workbench and the live view per session (default), or shared by every session of the project (see *Per-session scope*) |
+| `/swb notify [on\|off]` | Send a notification through your terminal's channel when the guard waits for your answer (on by default; it names the tool and the reason, never the command) |
 | `/swb guard [high\|medium\|low\|off]` | Show or set the guard sensitivity (see *Guard sensitivity*) |
 | `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | Record conversation, actions and guard decisions beside the repository, share them through a branch, search them (see *Decision ledger*) |
 | `/swb why <file[:line]\|commit>` | Show the turn, decisions and guard calls behind a change |
@@ -273,7 +274,7 @@ By default each session keeps its own workbench and live view (`/swb scope sessi
 
 Watch a request flow in a browser: prompts, tool calls and guard decisions, subagents, holds, loop passes and turns.
 
-- `/swb live [port]` starts the server as a child of the session and prints its address (default `http://127.0.0.1:4317`); open it in a browser. `/swb live stop` leaves it, and a session that ends leaves too. All sessions on one port share one view: the page shows a tab per session (project name, a badge for new events and for calls waiting on you, grey when the session has ended, with a close button), and `#s=<session>` in the address picks one. The hub is one `node tools/live.mjs --hub` process; sessions register in `~/.claude/smartworkbench-live/<port>/` (private to you) and the hub reads only each project's own `.claude/smartworkbench-live.jsonl`. To run a single-project server yourself: `node <plugin folder>/tools/live.mjs [project] [--port 4317] [--auto]`.
+- `/swb live [port]` starts the server as a child of the session and prints its address (default `http://127.0.0.1:4317`); open it in a browser. `/swb live stop` leaves it, and a session that ends leaves too. All sessions on one port share one view: the page shows a tab per session (project name, a badge for new events and for calls waiting on you, grey when the session has ended, with a close button; a session whose heartbeat stopped while its process still runs is also grey but marked "no heartbeat" and has no close button), and `#s=<session>` in the address picks one. The hub is one `node tools/live.mjs --hub` process; sessions register in `~/.claude/smartworkbench-live/<port>/` (private to you) and the hub reads only each project's own `.claude/smartworkbench-live.jsonl`. To run a single-project server yourself: `node <plugin folder>/tools/live.mjs [project] [--port 4317] [--auto]`.
 - The server creates `.claude/smartworkbench-live.jsonl` in the project; while it exists the plugin appends one JSON line per event and the server streams it to the page (SSE). The server empties the file in place once it has read past 8 MB. Stopping the server removes the file and the writes stop. With no server, the plugin only checks that the file exists.
 - The page shows the context use (a gauge for the lead's last turn with a short history; subagents are not measured by the engine) and the tokens per model. Click a box or a link to see the prompts that crossed it (your prompt, loop prompts, the brief given to the advisor or an explorer, the text of a Codex task) and the results that came back from a subagent, newest first, and click one to read it whole. A subagent's result is its last answer of the run, shown on the end of the Agent call that started it. The feed keeps up to 2000 characters of each prompt with secrets masked (key and token names, well-known token formats, URL credentials, private keys; a heuristic, so a bare pasted token can slip through). `/swb live --no-prompts` keeps only the first 120 characters of a prompt and no subagent result. Anyone who can open the page, including through a reverse proxy named in `SWB_LIVE_HOSTS`, sees these prompts.
 - The server listens on `127.0.0.1` only. The feed holds prompts (up to 2000 characters, secrets masked) and command summaries, so do not commit it.
@@ -535,6 +536,7 @@ claude plugin update smartworkbench
 | `/swb templates` | 템플릿·Context set 목록 |
 | `/swb export [path]` | Markdown handoff 쓰기 |
 | `/swb scope [session\|project]` | 워크벤치와 라이브 화면을 세션별로 따로 두거나(`session`, 기본), 프로젝트의 모든 세션이 공유(`project`)(*세션별 분리* 참고) |
+| `/swb notify [on\|off]` | Guard가 답을 기다릴 때 터미널의 알림 채널로 알림을 보냅니다(기본 켜짐. 도구와 이유만 알리고 명령어는 담지 않음) |
 | `/swb guard [high\|medium\|low\|off]` | Guard 민감도 보기·설정(*Guard 민감도* 참고) |
 | `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | 대화·행동·Guard 판정을 저장소 옆에 기록하고, 브랜치로 공유하고, 검색(*결정 기록* 참고) |
 | `/swb why <파일[:줄]\|커밋>` | 변경 뒤의 턴, 판단, Guard 호출 보기 |

@@ -59,6 +59,7 @@ const HELP = [
   '  /smartworkbench ledger publish|fetch|search|forget  share sessions through the swb-ledger branch, read teammates\' sessions, search, delete',
   '  /smartworkbench why <file[:line]|commit>  show the turn, decisions and guard calls behind a change',
   '  /smartworkbench scope [session|project]  keep this project\'s workbench and live view per session, or shared by all sessions ',
+  '  /smartworkbench notify [on|off]  send a notification when the guard waits for your answer (on by default; uses your terminal\'s notification channel)',
   '  /smartworkbench guard [high|medium|low|off]   how strict the guard is (medium is the default)',
   '  /smartworkbench policy [init|reload]  show, create or re-read the project guard file (.claude/smartworkbench.json)',
   '  /smartworkbench ci               import CI results for the current commit (uses the gh CLI)',
@@ -250,6 +251,8 @@ async function appendLine($: $, path: string, text: string): Promise<void> {
 // Feed writes that failed since the last good one; the person is told once per session, and the page gets a line when writes work again.
 let feedMissed = 0
 let isFeedNoted = false
+// Whether a guard question also goes to the person's notification channel; read from the store at session start.
+let askNotify = true
 
 // The text a prompt event carries for the live view's per-segment list: secrets masked, cut, with its real length.
 // Only the first PROMPT_SCAN characters are scanned for secrets, so a huge paste cannot make the masking slow; nothing past PROMPT_MAX is kept.
@@ -1549,6 +1552,20 @@ async function goalDraftFor($: $): Promise<string | undefined> {
 
 // ---- commands
 
+// Whether a guard question also reaches the person's notification channel. One choice for every project of this user.
+async function notifyCommand($: $, args: string): Promise<{ text: string }> {
+  const wanted = args.trim().toLowerCase()
+  if (wanted === 'on' || wanted === 'off') {
+    askNotify = wanted === 'on'
+    await $.store.set('notify', wanted)
+  } else if (wanted !== '' && wanted !== 'status') {
+    return { text: 'Usage: /swb notify [on|off]' }
+  }
+  const sent = askNotify && wanted === 'test' ? await $.ui.notify('Test from SmartWorkbench', { title: 'SmartWorkbench' }).catch(() => undefined) : undefined
+
+  return { text: `Ask notifications: ${askNotify ? 'on' : 'off'}${sent ? (sent.isSent ? ` (test sent through ${sent.channel})` : ` (test not sent: ${sent.reason})`) : ''}. A notification names the tool and the reason, never the command.\n/swb notify on | off` }
+}
+
 // Whether the workbench and the live view are kept per session (/swb scope). Off by default: sessions of a project share both.
 function scopeLine(live: Live): string {
   return live.scope === 'session'
@@ -2002,6 +2019,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
 
   if (word === 'ledger') return ledgerCommand($, name)
   if (word === 'scope') return scopeCommand($, name)
+  if (word === 'notify') return notifyCommand($, name)
 
   if (word === 'why') return whyCommand($, args.trim().slice(word.length))
 
@@ -2715,7 +2733,7 @@ export const register: Register = on => {
     treeRoot = undefined
     ledger = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
-    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|scope|why|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|scope|notify|why|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
@@ -2738,6 +2756,7 @@ export const register: Register = on => {
     }).catch(error => $.ui.log(`SmartWorkbench: could not register propose_contract_change: ${String(error)}`, { to: 'debug' }))
     const sessionId = await $.session.id().catch(() => undefined)
     if (sessionId) await setLive($, live => ({ ...live, sessionId }))
+    askNotify = (await $.store.get('notify').catch(() => undefined)) !== 'off'
     await startScope($, sessionId)
     await load($)
     await loadPolicy($)
@@ -2955,6 +2974,8 @@ export const register: Register = on => {
     } else if (policy === 'ask') {
       const options = scope ? ['Allow', 'Allow for session', 'Block'] : ['Allow', 'Block']
       const hint = scope ? ` ("Allow for session" stops asking for \`${model.cut(scope.label, 60)}\` until this session ends.)` : ''
+      // The question is on screen in this window; a notification reaches the person who is looking at another one. It carries the tool and the reason, never the command.
+      if (askNotify) void $.ui.notify(`Waiting for your answer: ${model.cut(verdict.reason, 100)} (${e.tool})`, { title: 'SmartWorkbench' }).catch(() => undefined)
       const answer = await $.ui
         .ask(`SmartWorkbench: ${verdict.reason}. Allow ${e.tool}: ${call.summary.slice(0, 80)}?${hint}`, { header: 'Guard', options })
         .catch(() => 'Block')

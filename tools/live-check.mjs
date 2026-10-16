@@ -368,6 +368,12 @@ try {
     check(one1.includes('only one') && !one1.includes('only two') && two1.includes('only two') && !two1.includes('only one'), 'a session stream carries only its own feed')
     const list = JSON.parse(await getText('/sessions') || '{"sessions":[]}').sessions
     check(list.length === 2 && list.every(row => row.alive && row.name.includes(' · s')), 'the tabs name the session')
+    // A process that stops beating but still runs is "quiet", not ended: its tab keeps its feed and has no close button.
+    one.child.kill('SIGSTOP')
+    const quietRow = async () => JSON.parse((await getText('/sessions')) || '{"sessions":[]}').sessions.find(row => row.id === 's1')
+    check(await until(async () => (await quietRow())?.alive === false && (await quietRow())?.quiet === true, 80), 'a session whose heartbeat stopped but whose process runs is marked quiet, not ended')
+    one.child.kill('SIGCONT')
+    check(await until(async () => (await quietRow())?.alive === true && (await quietRow())?.quiet === false, 80), 'it is live again once it beats')
     // A session that ended without cleaning up: its files go when the next one starts.
     writeFileSync(feed('dead'), '')
     writeFileSync(join(project, '.claude', 'smartworkbench-live', 'dead.pid'), `${hostname()} 2147483646`)

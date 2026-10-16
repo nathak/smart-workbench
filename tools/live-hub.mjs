@@ -49,7 +49,7 @@ export function runHub({ port }) {
     if (res.writableLength > 8 * 1024 * 1024) res.destroy()
     else res.write(text)
   }
-  const sessionRow = one => ({ id: one.id, name: (basename(one.reg.project) || one.reg.project) + (one.reg.feedId ? ` · ${one.reg.feedId.slice(0, 8)}` : ''), project: one.reg.project, startedAt: one.reg.startedAt, alive: one.alive, linesRead: one.tail.linesRead, badLines: one.tail.badLines, kept: one.tail.recent.length, lastAt: one.tail.lastAt })
+  const sessionRow = one => ({ id: one.id, name: (basename(one.reg.project) || one.reg.project) + (one.reg.feedId ? ` · ${one.reg.feedId.slice(0, 8)}` : ''), project: one.reg.project, startedAt: one.reg.startedAt, alive: one.alive, quiet: one.quiet === true, linesRead: one.tail.linesRead, badLines: one.tail.badLines, kept: one.tail.recent.length, lastAt: one.tail.lastAt })
   const listText = () => `event: sessions\ndata: ${JSON.stringify({ sessions: [...sessions.values()].map(sessionRow), over })}\n\n`
   const frame = (id, line) => `event: line\ndata: {"s":"${id}","e":${line}}\n\n`
 
@@ -60,6 +60,7 @@ export function runHub({ port }) {
       const known = sessions.get(one.id)
       if (known && known.reg.pid === one.reg.pid && known.reg.startedAt === one.reg.startedAt) {
         known.alive = one.alive
+        known.quiet = one.quiet
         continue
       }
       if (!one.alive) continue
@@ -68,7 +69,7 @@ export function runHub({ port }) {
         continue
       }
       if (known) sessions.delete(one.id)
-      const own = { id: one.id, reg: one.reg, alive: one.alive, clients: new Set(), goneAt: 0, tail: undefined }
+      const own = { id: one.id, reg: one.reg, alive: one.alive, quiet: one.quiet, clients: new Set(), goneAt: 0, tail: undefined }
       own.tail = makeTail(feedOf(one.reg.project, one.reg.feedId), {
         readMax: 1024 * 1024,
         onLine: line => {
@@ -89,7 +90,7 @@ export function runHub({ port }) {
     }
     // A finished session's tab stays for a while so its last lines can still be read.
     for (const [id, own] of sessions) if (!own.alive && Date.now() - own.goneAt > 10 * 60 * 1000) sessions.delete(id)
-    const signature = JSON.stringify([...sessions.values()].map(own => [own.id, own.alive, own.reg.startedAt]))
+    const signature = JSON.stringify([...sessions.values()].map(own => [own.id, own.alive, own.quiet === true, own.reg.startedAt]))
     if (signature !== listSignature) {
       listSignature = signature
       const text = listText()

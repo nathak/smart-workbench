@@ -246,7 +246,9 @@ export function scan(dir, { staleMs, ignoreStale = false, now = Date.now() }) {
         rmSync(file, { force: true })
         continue
       }
-      found.push({ id, reg, file, alive: alive && (ignoreStale || now - info.mtimeMs < staleMs) })
+      const fresh = ignoreStale || now - info.mtimeMs < staleMs
+      // `quiet`: the process still runs but has stopped beating (asleep, stopped or busy); that is not the same as ended.
+      found.push({ id, reg, file, alive: alive && fresh, quiet: alive && !fresh })
     } catch {
       // Unreadable, half written or not ours: skipped until it is valid.
     }

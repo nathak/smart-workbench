@@ -2064,3 +2064,24 @@ test('per session by default, a fresh project starts empty and an explicit proje
   expect((store[`wss:session-a:${CWD}`] as Workbench).task.goal).toBe('')
   expect(store[`ws:${CWD}`]).toBeUndefined()
 })
+
+test('a guard question also goes to the notification channel, naming the tool and reason and never the command; /swb notify off stops it', async ($, on) => {
+  const sent: Array<{ text: string; title?: string }> = []
+  world(on)
+  on('ui.notify', (_$, e) => {
+    sent.push({ text: String((e as { text?: unknown }).text), title: (e as { options?: { title?: string } }).options?.title })
+    return { value: { isSent: true, channel: 'bell' } }
+  })
+  await $.session.start(start)
+
+  await $.tool.call({ tool: 'Bash', command: 'git push origin secret-branch-name' })
+  expect(sent).toHaveLength(1)
+  expect(sent[0]?.text).toContain('Waiting for your answer')
+  expect(sent[0]?.text).toContain('(Bash)')
+  expect(sent[0]?.text).not.toContain('secret-branch-name')
+
+  expect((await $.command.run({ command: 'swb', args: 'notify off', ...COMMAND })).text).toContain('off')
+  await $.tool.call({ tool: 'Bash', command: 'git push origin another' })
+  expect(sent).toHaveLength(1)
+  expect((await $.command.run({ command: 'swb', args: 'notify nope', ...COMMAND })).text).toContain('Usage')
+})
