@@ -46,11 +46,14 @@ type WorldOptions = {
   agentId?: string
   // What the engine reports as the session's context use; the default is only the window.
   context?: { tokens?: number; window: number; percent?: number }
+  // Leaves the scope unset, so the default (per session) applies; the tests of the shared workbench start on `project`.
+  defaultScope?: boolean
 }
 
 function world(on: On, options: WorldOptions = {}) {
   const files = options.files ?? {}
   const store = options.store ?? {}
+  if (!options.defaultScope && store[`wsscope:${CWD}`] === undefined) store[`wsscope:${CWD}`] = 'project'
   const commands = options.commands ?? {}
   const fileAt = (path: string) => Object.keys(files).find(name => path === name || path.endsWith(`/${name}`))
 
@@ -1951,7 +1954,7 @@ test('scope project again: the choice decides which copy wins, and Cancel change
 
   answer = "Take the project's workbench"
   expect((await $.command.run({ command: 'swb', args: 'scope project', ...COMMAND })).text).toContain('Scope: project')
-  expect(store[`wsscope:${CWD}`]).toBeUndefined()
+  expect(store[`wsscope:${CWD}`]).toBe('project')
   expect(store[`wss:session-a:${CWD}`]).toBeUndefined()
   expect((store[`ws:${CWD}`] as Workbench).execution.profile).toBe('strict')
   // The session now works on the project's copy again, not on what it had.
@@ -2029,14 +2032,35 @@ test('scope session: /swb live starts a per-session view', async ($, on) => {
 })
 
 test('scope session is allowed while another session\'s shared view runs; a scope switched off elsewhere does not stay on after a new session id', async ($, on) => {
-  const { store } = world(on, { files: { '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' }, store: { [`ws:${CWD}`]: lockedWb('Project goal') } })
+  const { store } = world(on, { files: { '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' }, store: { [`wsscope:${CWD}`]: 'project', [`ws:${CWD}`]: lockedWb('Project goal') } })
   await $.session.start(start)
   expect((await $.command.run({ command: 'swb', args: 'scope session', ...COMMAND })).text).toContain('Scope: session')
 
   // Another session returns the project to shared; a restart (as after /clear) of this one follows it.
-  delete store[`wsscope:${CWD}`]
+  store[`wsscope:${CWD}`] = 'project'
   await $.session.start(start)
   expect((await $.command.run({ command: 'swb', args: 'scope status', ...COMMAND })).text).toContain('Scope: project')
   await $.command.run({ command: 'swb', args: 'guard low', ...COMMAND })
   expect((store[`ws:${CWD}`] as Workbench).execution.profile).toBe('permissive')
+})
+
+test('per session is the default: no choice stored means a session of its own, started from the newest copy', async ($, on) => {
+  const day = Date.UTC(2026, 9, 8)
+  const { store } = world(on, {
+    defaultScope: true,
+    store: { [`ws:${CWD}`]: lockedWb('Old project copy'), [`wss:a:${CWD}`]: lockedWb('Older', day - 5000), [`wss:b:${CWD}`]: lockedWb('Newest', day - 1000) },
+  })
+  await $.session.start(start)
+
+  expect((await $.command.run({ command: 'swb', args: 'scope', ...COMMAND })).text).toContain('Scope: session')
+  expect((store[`wss:session-a:${CWD}`] as Workbench).task.goal).toBe('Newest')
+  await $.command.run({ command: 'swb', args: 'guard low', ...COMMAND })
+  expect((store[`ws:${CWD}`] as Workbench).execution.profile).toBe('strict')
+})
+
+test('per session by default, a fresh project starts empty and an explicit project choice keeps the shared workbench', async ($, on) => {
+  const { store } = world(on, { defaultScope: true })
+  await $.session.start(start)
+  expect((store[`wss:session-a:${CWD}`] as Workbench).task.goal).toBe('')
+  expect(store[`ws:${CWD}`]).toBeUndefined()
 })

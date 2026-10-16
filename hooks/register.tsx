@@ -58,7 +58,7 @@ const HELP = [
   '  /smartworkbench ledger [on|off]  record conversation, actions and guard decisions beside the repository (off until turned on)',
   '  /smartworkbench ledger publish|fetch|search|forget  share sessions through the swb-ledger branch, read teammates\' sessions, search, delete',
   '  /smartworkbench why <file[:line]|commit>  show the turn, decisions and guard calls behind a change',
-  '  /smartworkbench scope [session|project]  keep this project\'s workbench and live view per session, or shared by all sessions (shared by default)',
+  '  /smartworkbench scope [session|project]  keep this project\'s workbench and live view per session, or shared by all sessions ',
   '  /smartworkbench guard [high|medium|low|off]   how strict the guard is (medium is the default)',
   '  /smartworkbench policy [init|reload]  show, create or re-read the project guard file (.claude/smartworkbench.json)',
   '  /smartworkbench ci               import CI results for the current commit (uses the gh CLI)',
@@ -111,16 +111,26 @@ async function load($: $): Promise<Workbench> {
   return restored
 }
 
-// Decides the scope for this session and, for a session scope, starts it from a one-time copy of the project's
-// workbench. Called once at session start, after the session id is known.
+// The session id inside a per-session key of this project, or undefined for any other key.
+function sessionKeyId(key: string, root: string): string | undefined {
+  if (!key.startsWith('wss:')) return undefined
+  const rest = key.slice(4)
+  const cut = rest.indexOf(':')
+
+  return cut >= 1 && rest.slice(cut + 1) === root ? rest.slice(0, cut) : undefined
+}
+
+// Decides the scope for this session and, for a session scope (the default), starts it from a one-time copy of the
+// workbench the project last had: the newest copy another session saved, else the project's own. Called once at session
+// start, after the session id is known.
 async function startScope($: $, sessionId: string | undefined): Promise<void> {
-  const wanted = (await $.store.get(await scopeKey($)).catch(() => undefined)) === 'session'
+  const choice = await $.store.get(await scopeKey($)).catch(() => undefined)
   const usable = sessionId !== undefined && SESSION_ID.test(sessionId)
 
-  if (!wanted || !usable) {
+  if (choice === 'project' || !usable) {
     // The state outlives a /clear: a scope another session switched off since must not stay on here.
     await setLive($, live => ({ ...live, scope: undefined }))
-    if (wanted) $.ui.toast('SmartWorkbench: this session has no usable id, so it shares the project workbench')
+    if (choice === 'session') $.ui.toast('SmartWorkbench: this session has no usable id, so it shares the project workbench')
     if (sessionId !== undefined) await sweepSessions($, sessionId)
     return
   }
@@ -129,8 +139,20 @@ async function startScope($: $, sessionId: string | undefined): Promise<void> {
   const own = await activeKey($)
 
   if ((await $.store.get(own)) === undefined) {
-    const project = await $.store.get(await projectKey($))
-    await $.store.set(own, model.sessionCopy(model.fill(project), sessionId, await $.clock.now()))
+    const root = await $.session.root()
+    let source: unknown = await $.store.get(await projectKey($))
+    let newest = -1
+    for (const key of await $.store.keys().catch(() => [] as string[])) {
+      const id = sessionKeyId(key, root)
+      if (id === undefined || id === sessionId) continue
+      const saved = await $.store.get(key).catch(() => undefined)
+      const at = model.isWorkbench(saved) ? (saved.savedAt ?? 0) : -1
+      if (at > newest) {
+        newest = at
+        source = saved
+      }
+    }
+    await $.store.set(own, model.sessionCopy(model.fill(source), sessionId, await $.clock.now()))
   }
 
   await sweepSessions($, sessionId)
@@ -143,11 +165,8 @@ async function sweepSessions($: $, ownId: string): Promise<void> {
   const keys = await $.store.keys().catch(() => [] as string[])
 
   for (const key of keys) {
-    if (!key.startsWith('wss:')) continue
-    const rest = key.slice(4)
-    const cut = rest.indexOf(':')
-    const id = rest.slice(0, cut)
-    if (cut < 1 || rest.slice(cut + 1) !== root || id === ownId) continue
+    const id = sessionKeyId(key, root)
+    if (id === undefined || id === ownId) continue
     const saved = await $.store.get(key).catch(() => undefined)
     const at = model.isWorkbench(saved) ? saved.savedAt : undefined
     if (typeof at === 'number' && at < limit) await $.store.delete(key).catch(() => undefined)
@@ -1534,7 +1553,7 @@ async function goalDraftFor($: $): Promise<string | undefined> {
 function scopeLine(live: Live): string {
   return live.scope === 'session'
     ? 'Scope: session (this session keeps its own workbench and live view; if another session switches back to project, this one returns to the shared workbench at its next start)'
-    : 'Scope: project (every session of this project shares the workbench and the live view)'
+    : 'Scope: project (every session of this project shares the workbench and the live view; /swb scope session for your own)'
 }
 
 async function scopeCommand($: $, args: string): Promise<{ text: string }> {
@@ -1542,9 +1561,9 @@ async function scopeCommand($: $, args: string): Promise<{ text: string }> {
   const live = await read($, liveAtom)
 
   if (wanted === '' || wanted === 'status') {
-    const set = (await $.store.get(await scopeKey($)).catch(() => undefined)) === 'session'
+    const shared = (await $.store.get(await scopeKey($)).catch(() => undefined)) === 'project'
 
-    return { text: `${scopeLine(live)}\nNew sessions of this project start ${set ? 'with their own workbench, copied from the project\'s at the start' : 'on the shared workbench'}.\n/swb scope session | project` }
+    return { text: `${scopeLine(live)}\nNew sessions of this project start ${shared ? 'on the shared workbench' : 'with their own workbench, copied from the one the project last had'}.\n/swb scope session | project` }
   }
   if (wanted !== 'session' && wanted !== 'project') return { text: 'Usage: /swb scope [session|project|status]' }
   if (wanted === (live.scope ?? 'project')) return { text: scopeLine(live) }
@@ -1575,7 +1594,7 @@ async function scopeCommand($: $, args: string): Promise<{ text: string }> {
   const ownKey = await activeKey($)
   const mine = await read($, wbAtom)
   const project = await $.store.get(await projectKey($))
-  await $.store.delete(await scopeKey($))
+  await $.store.set(await scopeKey($), 'project')
   await setLive($, one => ({ ...one, scope: undefined }))
   if (answer === SCOPE_WRITE) {
     // A revision above the project's own, so sessions that share it take this one at their next prompt.
