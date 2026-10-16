@@ -58,6 +58,7 @@ const HELP = [
   '  /smartworkbench ledger [on|off]  record conversation, actions and guard decisions beside the repository (off until turned on)',
   '  /smartworkbench ledger publish|fetch|search|forget  share sessions through the swb-ledger branch, read teammates\' sessions, search, delete',
   '  /smartworkbench why <file[:line]|commit>  show the turn, decisions and guard calls behind a change',
+  '  /smartworkbench scope [session|project]  keep this project\'s workbench and live view per session, or shared by all sessions (shared by default)',
   '  /smartworkbench guard [high|medium|low|off]   how strict the guard is (medium is the default)',
   '  /smartworkbench policy [init|reload]  show, create or re-read the project guard file (.claude/smartworkbench.json)',
   '  /smartworkbench ci               import CI results for the current commit (uses the gh CLI)',
@@ -79,15 +80,73 @@ const EDIT_TOOL_NAMES = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 
 // ---- state: $.state for drawing, $.store (per project) to survive restarts
 
-async function storeKey($: $): Promise<string> {
+const SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/
+const SESSION_COPY_DAYS = 30
+
+async function projectKey($: $): Promise<string> {
   return `ws:${await $.session.root()}`
 }
 
+async function scopeKey($: $): Promise<string> {
+  return `wsscope:${await $.session.root()}`
+}
+
+// The session's own copy while it keeps one (/swb scope session), else the project's shared copy.
+async function activeKey($: $): Promise<string> {
+  const { scope, sessionId } = await read($, liveAtom)
+
+  return scope === 'session' && sessionId !== undefined ? `wss:${sessionId}:${await $.session.root()}` : projectKey($)
+}
+
+async function isSessionScope($: $): Promise<boolean> {
+  return (await read($, liveAtom)).scope === 'session'
+}
+
 async function load($: $): Promise<Workbench> {
-  const restored = model.restore(await $.store.get(await storeKey($)))
+  const restored = model.restore(await $.store.get(await activeKey($)))
   await update($, wbAtom, () => restored)
 
   return restored
+}
+
+// Decides the scope for this session and, for a session scope, starts it from a one-time copy of the project's
+// workbench. Called once at session start, after the session id is known.
+async function startScope($: $, sessionId: string | undefined): Promise<void> {
+  const wanted = (await $.store.get(await scopeKey($)).catch(() => undefined)) === 'session'
+  const usable = sessionId !== undefined && SESSION_ID.test(sessionId)
+
+  if (!wanted || !usable) {
+    if (wanted) $.ui.toast('SmartWorkbench: this session has no usable id, so it shares the project workbench')
+    return
+  }
+
+  await setLive($, live => ({ ...live, scope: 'session' }))
+  const own = await activeKey($)
+
+  if ((await $.store.get(own)) === undefined) {
+    const project = await $.store.get(await projectKey($))
+    await $.store.set(own, model.sessionCopy(model.fill(project), sessionId, await $.clock.now()))
+  }
+
+  await sweepSessions($, sessionId)
+}
+
+// Another session's copy for this project that nobody has saved to for a month is gone for good.
+async function sweepSessions($: $, ownId: string): Promise<void> {
+  const root = await $.session.root()
+  const limit = (await $.clock.now()) - SESSION_COPY_DAYS * 86_400_000
+  const keys = await $.store.keys().catch(() => [] as string[])
+
+  for (const key of keys) {
+    if (!key.startsWith('wss:')) continue
+    const rest = key.slice(4)
+    const cut = rest.indexOf(':')
+    const id = rest.slice(0, cut)
+    if (cut < 1 || rest.slice(cut + 1) !== root || id === ownId) continue
+    const saved = await $.store.get(key).catch(() => undefined)
+    const at = model.isWorkbench(saved) ? saved.savedAt : undefined
+    if (typeof at === 'number' && at < limit) await $.store.delete(key).catch(() => undefined)
+  }
 }
 
 // A project path as the engine reads it: relative paths and commands follow the shell's directory, which a `cd` moves,
@@ -99,16 +158,19 @@ async function rooted($: $, path: string): Promise<string> {
 // Every save builds on the newest copy: when another session of this project saved
 // since this one last did, its state is taken first, so neither overwrites the other.
 async function mutate($: $, change: (wb: Workbench) => Workbench): Promise<Workbench> {
-  const key = await storeKey($)
-  const saved = await $.store.get(key)
-  const { sessionId } = await read($, liveAtom)
+  const key = await activeKey($)
+  const { sessionId, scope } = await read($, liveAtom)
+  const own = scope === 'session'
+  const saved = own ? undefined : await $.store.get(key)
   const before = await read($, wbAtom)
   const savedRev = model.isWorkbench(saved) ? (saved.rev ?? 0) : 0
+  const stamp = own ? await $.clock.now() : undefined
   const next = await update($, wbAtom, wb => {
+    // A session's own copy is only ever saved by that session, so there is no newer one to take.
     const base = model.isNewerElsewhere(saved, wb, sessionId) ? model.fill(saved) : wb
     const changed = model.withStatus(change(base))
 
-    return { ...changed, rev: Math.max(base.rev ?? 0, savedRev) + 1, ...(sessionId ? { savedBy: sessionId } : {}) }
+    return { ...changed, rev: Math.max(base.rev ?? 0, savedRev) + 1, ...(sessionId ? { savedBy: sessionId } : {}), ...(stamp !== undefined ? { savedAt: stamp } : {}) }
   })
   await $.store.set(key, next)
 
@@ -121,7 +183,8 @@ async function mutate($: $, change: (wb: Workbench) => Workbench): Promise<Workb
 
 // Takes another session's newer save before a prompt, so this one works from the same contract.
 async function pull($: $): Promise<void> {
-  const saved = await $.store.get(await storeKey($))
+  if (await isSessionScope($)) return
+  const saved = await $.store.get(await projectKey($))
   const { sessionId } = await read($, liveAtom)
 
   if (model.isNewerElsewhere(saved, await read($, wbAtom), sessionId)) {
@@ -133,6 +196,18 @@ async function pull($: $): Promise<void> {
 // Live feed for tools/live.mjs: one JSON line per event, written only while that server keeps the file in place.
 // Never throws and costs one fs.exists per event when nobody watches.
 const LIVE_FILE = '.claude/smartworkbench-live.jsonl'
+const PID_FILE = '.claude/smartworkbench-live.pid'
+
+// The feed and process note this session writes: the project's pair, or the session's own pair in session scope.
+async function liveFiles($: $): Promise<{ feed: string; note: string; feedRel: string; noteRel: string }> {
+  const root = await $.session.root()
+  const { scope, sessionId } = await read($, liveAtom)
+  const own = scope === 'session' && sessionId !== undefined
+  const feedRel = own ? `.claude/smartworkbench-live/${sessionId}.jsonl` : LIVE_FILE
+  const noteRel = own ? `.claude/smartworkbench-live/${sessionId}.pid` : PID_FILE
+
+  return { feed: `${root}/${feedRel}`, note: `${root}/${noteRel}`, feedRel, noteRel }
+}
 
 // tee is the cheap way to append one line; where it is missing (Windows without a Unix shell) or fails, node does it, for the rest of the session.
 const APPEND_SCRIPT = "require('fs').appendFileSync(process.argv[1], require('fs').readFileSync(0))"
@@ -243,9 +318,9 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
   // The prompt's full text is recorded where it is received; every other event is the feed's event.
   if (ledger && kind !== 'prompt') await record($, kind, detail)
   try {
-    const path = `${await $.session.root()}/${LIVE_FILE}`
+    const { feed: path, note } = await liveFiles($)
     // The feed is written only while a live server owns it: its process note must be beside it, so a feed file that was committed to the repository is never appended to.
-    if (!(await $.fs.exists(path)) || !(await $.fs.exists(`${await $.session.root()}/${PID_FILE}`))) return
+    if (!(await $.fs.exists(path)) || !(await $.fs.exists(note))) return
     const session = (await read($, liveAtom)).sessionId
     // Every text the feed carries is masked here, so a command summary or a URL cannot carry a secret around the prompt masking.
     const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? redact(scanned(value)) : value]))
@@ -871,7 +946,7 @@ async function treeState($: $): Promise<TreeState | undefined> {
   }
   // The mod's own files change whenever it works (the live feed on every event, the audit log on every pass): they are not the task's work.
   const auditPath = (await read($, liveAtom)).policy?.audit?.path
-  const own = [LIVE_FILE, PID_FILE, HANDOFF_PATH, AUDIT_PATH, ...(auditPath ? [auditPath] : [])].flatMap(one => [one, `${one}.1`])
+  const own = [LIVE_FILE, PID_FILE, '.claude/smartworkbench-live', HANDOFF_PATH, AUDIT_PATH, ...(auditPath ? [auditPath] : [])].flatMap(one => [one, `${one}.1`])
   const isOwn = (path: string) => own.some(one => path === one || path.endsWith(`/${one}`))
   const paths = codex.porcelainPaths(status.stdout).filter(path => !path.includes('\n') && !isOwn(path))
   const stats = new Map(paths.map(path => [path, ''] as const))
@@ -1450,6 +1525,67 @@ async function goalDraftFor($: $): Promise<string | undefined> {
 
 // ---- commands
 
+// Whether the workbench and the live view are kept per session (/swb scope). Off by default: sessions of a project share both.
+function scopeLine(live: Live): string {
+  return live.scope === 'session'
+    ? 'Scope: session (this session keeps its own workbench and live view)'
+    : 'Scope: project (every session of this project shares the workbench and the live view)'
+}
+
+async function scopeCommand($: $, args: string): Promise<{ text: string }> {
+  const wanted = args.trim().toLowerCase()
+  const live = await read($, liveAtom)
+
+  if (wanted === '' || wanted === 'status') {
+    const set = (await $.store.get(await scopeKey($)).catch(() => undefined)) === 'session'
+
+    return { text: `${scopeLine(live)}\nNew sessions of this project start ${set ? 'with their own workbench, copied from the project\'s at the start' : 'on the shared workbench'}.\n/swb scope session | project` }
+  }
+  if (wanted !== 'session' && wanted !== 'project') return { text: 'Usage: /swb scope [session|project|status]' }
+  if (wanted === (live.scope ?? 'project')) return { text: scopeLine(live) }
+  // The live files change place with the scope; a view that is running would be left writing to the old ones.
+  if (liveServer || (await foreignView($)).state !== 'none') return { text: 'A live view is running for this session: /swb live stop first, then change the scope.' }
+
+  if (wanted === 'session') {
+    const sessionId = live.sessionId
+    if (sessionId === undefined || !SESSION_ID.test(sessionId)) return { text: 'This session has no usable id, so it cannot keep its own workbench.' }
+    // The workbench as it is now moves along whole, evidence included: it is this session's own work.
+    const mine = await read($, wbAtom)
+    await $.store.set(await scopeKey($), 'session')
+    await setLive($, one => ({ ...one, scope: 'session' }))
+    const own = model.sessionCopy(mine, sessionId, await $.clock.now(), true)
+    await $.store.set(await activeKey($), own)
+    await update($, wbAtom, () => own)
+    await audit($, 'scope.session')
+
+    return { text: 'Scope: session. This session now keeps its own workbench and live view; the project\'s workbench is left as it was. Sessions opened from now on start from a copy of the project\'s. /swb live starts a view of this session only.' }
+  }
+
+  const answer = await $.ui
+    .ask("Back to one workbench for the whole project? This session's own workbench is replaced by the project's, or written over it.", { header: 'Scope', options: ["Take the project's workbench", "Write this session's workbench to the project (replaces what other sessions saved)", 'Cancel'] })
+    .catch(() => 'Cancel')
+  if (answer !== "Take the project's workbench" && !answer.startsWith('Write this session')) return { text: 'Scope unchanged.' }
+
+  const ownKey = await activeKey($)
+  const mine = await read($, wbAtom)
+  const project = await $.store.get(await projectKey($))
+  await $.store.delete(await scopeKey($))
+  await setLive($, one => ({ ...one, scope: undefined }))
+  if (answer.startsWith('Write this session')) {
+    // A revision above the project's own, so sessions that share it take this one at their next prompt.
+    const rev = (model.isWorkbench(project) ? (project.rev ?? 0) : 0) + 1
+    const written = { ...mine, rev, ...(live.sessionId ? { savedBy: live.sessionId } : {}), savedAt: undefined }
+    await $.store.set(await projectKey($), written)
+    await update($, wbAtom, () => written)
+  } else {
+    await update($, wbAtom, () => model.restore(project))
+  }
+  await $.store.delete(ownKey).catch(() => undefined)
+  await audit($, 'scope.project')
+
+  return { text: 'Scope: project. Every session of this project shares the workbench and the live view again.' }
+}
+
 function statusText(wb: Workbench, live: Live): string {
   const constraints = wb.task.constraints.filter(one => one.isActive).map(one => `  [${one.priority === 'hard' ? 'H' : 'S'}] ${one.text}`)
   const pins = wb.context.pins.map(one => `  ${one.kind === 'file' ? one.path : `Note: ${one.text}`}`)
@@ -1460,6 +1596,7 @@ function statusText(wb: Workbench, live: Live): string {
     ...(live.loop ? [loop.describe(live.loop).split('\n')[0]] : []),
     ...(constraints.length > 0 ? ['Constraints:', ...constraints] : []),
     ...(pins.length > 0 ? ['Pins:', ...pins] : []),
+    ...(live.scope === 'session' ? [scopeLine(live)] : []),
     ...(wb.team?.enabled ? [`Team mode: on (Opus reviews this session: ${live.track?.advisorRuns ?? 0})`] : []),
     ...((live.sessionAllows ?? []).length > 0 ? [`Allowed for this session: ${(live.sessionAllows ?? []).map(one => one.label).join(', ')}`] : []),
     ...(live.policy ? [`Guard file: ${live.policy.source} (${live.policy.rules.length} rules${live.policy.profile ? `, profile ${live.policy.profile}` : ''})`] : []),
@@ -1470,17 +1607,16 @@ function statusText(wb: Workbench, live: Live): string {
 // The live view's web server (tools/live.mjs), a child of this session: it ends with /swb live stop, the session or a reload.
 let liveServer: { url: string; stop: () => void } | undefined
 
-const PID_FILE = '.claude/smartworkbench-live.pid'
 // Exit 0 = the process runs, 1 = it does not, 2 = the note was written on another machine or container, so its pid means nothing here.
 const ALIVE_SCRIPT = "if(process.argv[1]!==require('os').hostname())process.exit(2);try{process.kill(Number(process.argv[2]),0)}catch(e){process.exit(e.code==='EPERM'?0:1)}"
 const REMOVE_SCRIPT = "for(const f of process.argv.slice(1))require('fs').rmSync(f,{force:true})"
 
 // A live view this session did not start: whether its feed file is there and whether the process that made it still runs.
 async function foreignView($: $): Promise<{ state: 'none' | 'alive' | 'dead' | 'unknown'; pid?: string }> {
-  const cwd = await $.session.root()
-  if (!(await $.fs.exists(`${cwd}/${LIVE_FILE}`))) return { state: 'none' }
+  const files = await liveFiles($)
+  if (!(await $.fs.exists(files.feed))) return { state: 'none' }
   // The note is a file of the project, so its words are untrusted: a host that begins with a dash would be read by node as an option.
-  const note = /^([A-Za-z0-9][A-Za-z0-9._-]*) (\d+)$/.exec(await $.fs.read(`${cwd}/${PID_FILE}`).then(text => text.trim(), () => ''))
+  const note = /^([A-Za-z0-9][A-Za-z0-9._-]*) (\d+)$/.exec(await $.fs.read(files.note).then(text => text.trim(), () => ''))
   if (!note) return { state: 'unknown' }
   const ran = await $.process.run(['node', '-e', ALIVE_SCRIPT, '--', note[1] ?? '', note[2] ?? '']).catch(() => undefined)
 
@@ -1502,13 +1638,13 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     if (!liveServer) {
       const other = await foreignView($)
       if (other.state === 'dead') {
-        const cwd = await $.session.root()
-        await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', `${cwd}/${LIVE_FILE}`, `${cwd}/${PID_FILE}`]).catch(() => undefined)
+        const files = await liveFiles($)
+        await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', files.feed, files.note]).catch(() => undefined)
 
         return { text: 'Removed a feed left behind by a live view that is no longer running.' }
       }
-      if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) serves this project's feed; stop it where it runs. If it is not running, delete ${LIVE_FILE} and ${PID_FILE}.` }
-      if (other.state === 'unknown') return { text: `The live view is not running in this session, but ${LIVE_FILE} exists (no process note beside it). Delete it if no live view is running.` }
+      if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) serves this project's feed; stop it where it runs. If it is not running, delete ${(await liveFiles($)).feedRel} and ${(await liveFiles($)).noteRel}.` }
+      if (other.state === 'unknown') return { text: `The live view is not running in this session, but ${(await liveFiles($)).feedRel} exists (no process note beside it). Delete it if no live view is running.` }
 
       return { text: 'The live view is not running.' }
     }
@@ -1520,8 +1656,8 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     for (let wait = 0; wait < 4; wait++) {
       const gone = await foreignView($)
       if (gone.state === 'dead') {
-        const cwd = await $.session.root()
-        await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', `${cwd}/${LIVE_FILE}`, `${cwd}/${PID_FILE}`]).catch(() => undefined)
+        const files = await liveFiles($)
+        await $.process.run(['node', '-e', REMOVE_SCRIPT, '--', files.feed, files.note]).catch(() => undefined)
         break
       }
       if (gone.state !== 'alive') break
@@ -1545,15 +1681,15 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { text: 'Usage: /swb live [port 1024-65535] [--no-prompts] | /swb live stop' }
 
   const other = await foreignView($)
-  if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) already serves this project's feed; a second one would empty it. Stop that one first, or delete ${LIVE_FILE} and ${PID_FILE} if it is not running.` }
+  if (other.state === 'alive') return { text: `A live view started elsewhere (process ${other.pid}) already serves this project's feed; a second one would empty it. Stop that one first, or delete ${(await liveFiles($)).feedRel} and ${(await liveFiles($)).noteRel} if it is not running.` }
 
   feedMissed = 0
   isFeedNoted = false
   await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined, feedError: undefined }))
   // All sessions on a port share one hub and are its tabs; with no port given, a port that something else holds is skipped.
-  const sessionId = (await read($, liveAtom)).sessionId
+  const { sessionId, scope } = await read($, liveAtom)
   let url = `http://127.0.0.1:${port}`
-  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.root(), '--join', ...(sessionId ? ['--session', sessionId] : []), '--port', String(port), ...(isAuto ? ['--auto'] : []), '--watch-parent'] })
+  const child = $.process.spawn({ argv: ['node', `${$.plugin.root}/tools/live.mjs`, await $.session.root(), '--join', ...(sessionId ? ['--session', sessionId] : []), ...(sessionId && scope === 'session' ? ['--per-session'] : []), '--port', String(port), ...(isAuto ? ['--auto'] : []), '--watch-parent'] })
   const iterator = child[Symbol.asyncIterator]()
   let output = ''
   const handle = { url, stop: () => void Promise.resolve(iterator.return?.()).catch(() => undefined) }
@@ -1840,6 +1976,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   if (word === 'ledger') return ledgerCommand($, name)
+  if (word === 'scope') return scopeCommand($, name)
 
   if (word === 'why') return whyCommand($, args.trim().slice(word.length))
 
@@ -2553,7 +2690,7 @@ export const register: Register = on => {
     treeRoot = undefined
     ledger = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
-    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|why|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|scope|why|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
@@ -2576,6 +2713,7 @@ export const register: Register = on => {
     }).catch(error => $.ui.log(`SmartWorkbench: could not register propose_contract_change: ${String(error)}`, { to: 'debug' }))
     const sessionId = await $.session.id().catch(() => undefined)
     if (sessionId) await setLive($, live => ({ ...live, sessionId }))
+    await startScope($, sessionId)
     await load($)
     await loadPolicy($)
     // Team mode's agents, with this project's chosen models: available to Claude at all times,

@@ -201,3 +201,30 @@ describe('contract proposals and goal drafts', () => {
     expect(model.goalDraft(undefined, 'main')).toBe(undefined)
   })
 })
+
+describe('session copy', () => {
+  test('keeps the contract, pins, profile and team, and leaves what was checked or changed behind', () => {
+    const wb = model.emptyWorkbench()
+    const source: Workbench = {
+      ...wb,
+      rev: 9,
+      savedBy: 'x',
+      task: { ...wb.task, goal: 'g', locked: true },
+      context: { pins: [{ id: 'p', kind: 'note', text: 't' } as never], observed: [{ path: 'a' } as never], excluded: ['b'] },
+      execution: { profile: 'strict', isPaused: true, recentCalls: [{ id: 'c' } as never] },
+      evidence: [{ id: 'e' } as never],
+      changed: { ...model.emptyChanged(), files: ['a'], added: 1 },
+      team: { enabled: true },
+    }
+    const copy = model.sessionCopy(source, 's1', 5)
+
+    expect(copy).toMatchObject({ rev: 0, savedBy: 's1', savedAt: 5, team: { enabled: true } })
+    expect(copy.task.goal).toBe('g')
+    expect(copy.task.locked).toBe(true)
+    expect(copy.context).toEqual({ pins: source.context.pins, observed: [], excluded: ['b'] })
+    expect(copy.execution).toEqual({ profile: 'strict', isPaused: true, recentCalls: [] })
+    expect(copy.evidence).toEqual([])
+    expect(copy.changed.files).toEqual([])
+    expect(model.sessionCopy(source, 's1', 5, true).evidence).toHaveLength(1)
+  })
+})

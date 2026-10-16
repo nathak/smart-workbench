@@ -7,8 +7,10 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { readPlain } from './live-tail.mjs'
 
 export const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
-export const feedOf = project => join(project, '.claude', 'smartworkbench-live.jsonl')
-export const noteOf = project => join(project, '.claude', 'smartworkbench-live.pid')
+// With a feed id (a session that keeps its own live view) the files sit in their own folder, one pair per session.
+export const FEED_DIR = 'smartworkbench-live'
+export const feedOf = (project, feedId) => (feedId ? join(project, '.claude', FEED_DIR, `${feedId}.jsonl`) : join(project, '.claude', 'smartworkbench-live.jsonl'))
+export const noteOf = (project, feedId) => (feedId ? join(project, '.claude', FEED_DIR, `${feedId}.pid`) : join(project, '.claude', 'smartworkbench-live.pid'))
 
 // The names a hub answers to besides loopback; one hub serves every session on its port, so sessions must agree on them.
 export const trustedHosts = () => (process.env.SWB_LIVE_HOSTS ?? '').split(',').map(one => one.trim().toLowerCase()).filter(Boolean).sort()
@@ -37,10 +39,24 @@ export function ensureRegistry(port, { create }) {
 // ---- the project's own feed and process note: made fresh, never through a link, one owner at a time ----
 
 // Throws with a message for the user; returns once this process owns the feed and the note.
-export function claimFeed(project, ownPid) {
-  const feed = feedOf(project)
-  const pidFile = noteOf(project)
+export function claimFeed(project, ownPid, feedId) {
+  const feed = feedOf(project, feedId)
+  const pidFile = noteOf(project, feedId)
   mkdirSync(join(project, '.claude'), { recursive: true })
+  if (feedId) {
+    if (!ID_PATTERN.test(feedId)) throw Object.assign(new Error('bad feed id'), { code: 'EINVAL' })
+    const folder = join(project, '.claude', FEED_DIR)
+    // The folder is made by us and is never a link: a link would send the feed and the note wherever it points.
+    const dirInfo = lstatSync(folder, { throwIfNoEntry: false })
+    if (dirInfo && !dirInfo.isDirectory()) throw Object.assign(new Error('not a regular folder'), { code: 'EINVAL' })
+    if (!dirInfo) mkdirSync(folder, { mode: 0o700 })
+    try {
+      // Nothing in it is worth committing.
+      writeFileSync(join(folder, '.gitignore'), '*\n', { flag: 'wx' })
+    } catch {
+      // Already there.
+    }
+  }
   // One view per project: a second one would empty the feed the first one is reading.
   if (existsSync(pidFile)) {
     const [host, pid] = readFileSync(pidFile, 'utf8').trim().split(/\s+/)
@@ -72,9 +88,37 @@ export function claimFeed(project, ownPid) {
   }
 }
 
-export function releaseFeed(project) {
-  rmSync(feedOf(project), { force: true })
-  rmSync(noteOf(project), { force: true })
+export function releaseFeed(project, feedId) {
+  rmSync(feedOf(project, feedId), { force: true })
+  rmSync(noteOf(project, feedId), { force: true })
+}
+
+// Feeds that sessions left behind: a note whose process is gone on this machine, or a feed with no note that nothing wrote to for ten minutes.
+// Notes from another machine are left alone, and nothing is followed through a link.
+export function sweepFeeds(project, ownId) {
+  const folder = join(project, '.claude', FEED_DIR)
+  const info = lstatSync(folder, { throwIfNoEntry: false })
+  if (!info?.isDirectory()) return
+  let names = []
+  try {
+    names = readdirSync(folder).slice(0, 500)
+  } catch {
+    return
+  }
+  const ids = new Set(names.map(name => /^([A-Za-z0-9_-]{1,64})\.(?:jsonl|pid)$/.exec(name)?.[1]).filter(Boolean))
+  for (const id of ids) {
+    if (id === ownId) continue
+    const feed = lstatSync(feedOf(project, id), { throwIfNoEntry: false })
+    const note = lstatSync(noteOf(project, id), { throwIfNoEntry: false })
+    let gone = false
+    if (note?.isFile()) {
+      const [host, pid] = (readPlain(noteOf(project, id), 200) ?? '').trim().split(/\s+/)
+      gone = host === hostname() && /^\d+$/.test(pid ?? '') && !pidAlive(Number(pid))
+    } else if (!note) {
+      gone = !feed || (feed.isFile() && Date.now() - feed.mtimeMs > 600_000)
+    }
+    if (gone) releaseFeed(project, id)
+  }
 }
 
 // ---- registrations ----
@@ -160,8 +204,12 @@ const sameHostAlive = entry => entry.host === hostname() && Number.isInteger(ent
 export function projectOk(reg) {
   try {
     if (realpathSync(join(reg.project, '.claude')) !== join(realpathSync(reg.project), '.claude')) return false
-    if (readPlain(noteOf(reg.project), 200)?.trim() !== `${reg.host} ${reg.pid}`) return false
-    const feedInfo = lstatSync(feedOf(reg.project), { throwIfNoEntry: false })
+    if (reg.feedId !== undefined) {
+      if (typeof reg.feedId !== 'string' || !ID_PATTERN.test(reg.feedId)) return false
+      if (realpathSync(join(reg.project, '.claude', FEED_DIR)) !== join(realpathSync(reg.project), '.claude', FEED_DIR)) return false
+    }
+    if (readPlain(noteOf(reg.project, reg.feedId), 200)?.trim() !== `${reg.host} ${reg.pid}`) return false
+    const feedInfo = lstatSync(feedOf(reg.project, reg.feedId), { throwIfNoEntry: false })
     return !feedInfo || feedInfo.isFile()
   } catch {
     return false

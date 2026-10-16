@@ -5,6 +5,7 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 ## [Unreleased]
 
 ### Added
+- `/swb scope session|project`: sessions of a project can keep their own workbench (contract, pins, guard profile, team settings, evidence, changed files, call history) and their own live view (a feed, a process note and a tab per session in `.claude/smartworkbench-live/`), each new session starting from a one-time copy of the project's workbench. Off by default, and then nothing changes; the live hub is version 2 and still serves sessions that share the project feed.
 - `/swb ledger export-wiki <path>`: the recorded sessions as pages of the llm-wiki (`content/qa-log/<project>/`, its front matter and `[[links]]`, a regenerated Korean block and a `## Notes` that survives), after a preview and a question, files only and no git in the wiki. `"ledger": { "wiki": "off" }` in the guard file forbids it.
 
 ### Security

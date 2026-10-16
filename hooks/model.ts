@@ -72,6 +72,23 @@ export function isNewerElsewhere(saved: unknown, mine: Workbench, sessionId: str
   return isWorkbench(saved) && (saved.rev ?? 0) > (mine.rev ?? 0) && saved.savedBy !== sessionId
 }
 
+// A session's own copy of the project's workbench: the contract, pins, guard profile and team come along, while what was
+// checked or changed belongs to the tree another session worked on and is left behind.
+export function sessionCopy(wb: Workbench, sessionId: string, now: number, keepEvidence = false): Workbench {
+  const copy: Workbench = {
+    ...wb,
+    context: { ...wb.context, observed: keepEvidence ? wb.context.observed : [] },
+    execution: { ...wb.execution, recentCalls: keepEvidence ? wb.execution.recentCalls : [] },
+    evidence: keepEvidence ? wb.evidence : [],
+    changed: keepEvidence ? wb.changed : emptyChanged(),
+    rev: 0,
+    savedBy: sessionId,
+    savedAt: now,
+  }
+
+  return withStatus(copy)
+}
+
 // What a saved workbench becomes on load: a call still running when the session ended never finished.
 export function restore(saved: unknown): Workbench {
   const wb = fill(saved)

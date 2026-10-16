@@ -34,7 +34,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 if (args.includes('--hub')) {
   runHub({ port })
 } else if (args.includes('--join')) {
-  await runJoin({ project, port, auto, session: sessionAt >= 0 ? (args[sessionAt + 1] ?? '') : '', watchParent: args.includes('--watch-parent') })
+  if (args.includes('--per-session') && !/^[A-Za-z0-9_-]{1,64}$/.test(sessionAt >= 0 ? (args[sessionAt + 1] ?? '') : '')) {
+    console.error('--per-session needs a valid --session id')
+    process.exit(1)
+  }
+  await runJoin({ project, port, auto, session: sessionAt >= 0 ? (args[sessionAt + 1] ?? '') : '', perSession: args.includes('--per-session'), watchParent: args.includes('--watch-parent') })
 } else {
   runSolo()
 }

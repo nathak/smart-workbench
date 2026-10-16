@@ -160,6 +160,8 @@ export type Workbench = {
   // Bumped on every save, with the session that saved, so sessions can see each other's changes.
   rev?: number
   savedBy?: string
+  // When a per-session copy was last saved (session scope only); old copies are swept.
+  savedAt?: number
   task: Task
   context: { pins: ContextPin[]; observed: Observed[]; excluded?: string[] }
   execution: { profile: GuardProfile; isPaused: boolean; recentCalls: ToolCallRecord[] }
@@ -202,6 +204,8 @@ export type Live = {
   lastSummary?: string
   policy?: ProjectPolicy
   sessionId?: string
+  // Whether this session keeps its own workbench and live feed (/swb scope); fixed at session start.
+  scope?: 'project' | 'session'
   user?: string
   // The Codex plugin's companion script found at session start (null = looked, not found); session-only.
   codexPath?: string | null
