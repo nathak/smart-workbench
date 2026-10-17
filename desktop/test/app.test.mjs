@@ -280,3 +280,21 @@ test('the status window page restricts what it loads, and the preload exposes th
   assert.equal([...preload.matchAll(/ipcRenderer\.\w+\('([^']+)'/g)].map(one => one[1]).join(), 'swb:overview,swb:send')
   assert.equal([...preload.matchAll(/exposeInMainWorld\('(\w+)'/g)].length, 1)
 })
+
+test('the app never writes the guard file itself, and its guard file texts come in both languages', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs')
+  const { fileURLToPath } = await import('node:url')
+  const { join, dirname } = await import('node:path')
+  const here = join(dirname(fileURLToPath(import.meta.url)), '..')
+  for (const name of readdirSync(here).filter(one => (one.endsWith('.mjs') || one.endsWith('.cjs')) && one !== 'i18n.mjs')) assert.ok(!/smartworkbench\.json/.test(readFileSync(join(here, name), 'utf8')), `${name} names the guard file`)
+  const ui = readFileSync(join(here, 'ui', 'status.js'), 'utf8')
+  assert.ok(!/['"]allow['"]\s*\]\s*\)/.test(ui.split('function ruleForm')[1]?.split('function guardFile')[0] ?? ''), 'the rule form offers allow')
+  const { strings } = await import('../i18n.mjs')
+  const en = strings('en').ui
+  const ko = strings('ko').ui
+  for (const key of ['guardFile', 'noFile', 'noFileProfile', 'clearProfile', 'fileRules', 'addRule', 'asksInSession', 'ruleHints', 'policyNote']) {
+    assert.ok(en[key] && ko[key] && en[key] !== ko[key], key)
+  }
+  assert.deepEqual(Object.keys(en.ruleHints), Object.keys(ko.ruleHints))
+  for (const reason of ['policy file is broken', 'invalid', 'unknown rule']) assert.ok(en.reasons[reason] && ko.reasons[reason], reason)
+})

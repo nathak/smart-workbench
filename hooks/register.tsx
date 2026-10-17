@@ -6,6 +6,7 @@ import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
+import { editPolicy, isPolicyEditOp, type PolicyEditOp } from './policy-edit'
 import { applyOps, isSettingOp, needsAnswer, snapshotText, type DeskOp, type SettingOp } from './desktop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
@@ -1515,7 +1516,7 @@ function isTaskInUse(wb: Workbench): boolean {
 // Re-reads the checked-in guard file; no file means the person's own profile and the built-in rules.
 async function loadPolicy($: $): Promise<void> {
   const text = await $.fs.read(await rooted($, POLICY_PATH)).catch(() => undefined)
-  const policy = text === undefined ? undefined : parsePolicy(text)
+  const policy = text === undefined ? undefined : { ...parsePolicy(text), hash: await sha256(text) }
   await setLive($, ({ policy: _old, ...live }) => (policy ? { ...live, policy } : live))
 
   if (policy && policy.errors.length > 0) {
@@ -1642,9 +1643,10 @@ let inboxBusy = false
 
 // One setting from the app, through the same code as its command. A setting that makes the guard watch less is asked here first,
 // in the session, so a command file alone never loosens it. The question gives up when the command expires.
-async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number): Promise<{ status: 'applied' | 'rejected' | 'declined'; reason?: string }> {
+async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number, batch: { asked: boolean } = { asked: false }): Promise<{ status: 'applied' | 'rejected' | 'declined'; reason?: string }> {
   const wb = await read($, wbAtom)
   const FROM = 'The desktop app asks: '
+  if (isPolicyEditOp(one)) return applyPolicyEdit($, one, expiresAt, gen, batch)
   if (needsAnswer(wb, one) && !(one.op === 'set_profile' && one.profile === 'off') && one.op !== 'codex') {
     const what = one.op === 'set_profile' ? `lower the guard from ${wb.execution.profile} to ${one.profile}` : one.op === 'pause' ? 'resume risky calls' : 'turn team mode on (Codex is on, so its reviews will then run without asking)'
     const waited = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - (await $.clock.now())) : 10 * 60 * 1000
@@ -1680,11 +1682,63 @@ async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number
   }
 }
 
+// An edit of the guard file from the app. The file is read here, the edit is made on its text (hooks/policy-edit.ts) and written back
+// by this plugin; the app never writes it. Whether the edit loosens the guard is worked out from the file as it is on disk.
+async function applyPolicyEdit($: $, one: PolicyEditOp, expiresAt: number, gen: number, batch: { asked: boolean }): Promise<{ status: 'applied' | 'rejected' | 'declined'; reason?: string }> {
+  const path = await rooted($, POLICY_PATH)
+  const readNow = async (): Promise<{ text: string | undefined; hash: string | null }> => {
+    const text = await $.fs.read(path).catch(() => undefined)
+
+    return { text, hash: text === undefined ? null : await sha256(text) }
+  }
+  const first = await readNow()
+  if (first.hash !== one.base) {
+    await loadPolicy($)
+    return { status: 'rejected', reason: 'stale' }
+  }
+  const edit = editPolicy(first.text, one)
+  if ('reason' in edit) return { status: 'rejected', reason: edit.reason }
+
+  if (edit.lowers) {
+    // One question per batch, as for the other settings.
+    if (batch.asked) return { status: 'rejected', reason: 'busy' }
+    batch.asked = true
+    const waited = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - (await $.clock.now())) : 10 * 60 * 1000
+    const answer = await Promise.race([
+      $.ui
+        .ask(`The desktop app asks: ${edit.summary} in ${POLICY_PATH} (the team shares this file; the guard will watch less). Allow it?`, { header: 'Desktop app', options: ['Allow', 'Decline'] })
+        .catch(() => 'Decline'),
+      $.clock.sleep(waited).then(() => 'Decline', () => 'Decline'),
+    ])
+    if (answer !== 'Allow') return { status: 'declined' }
+    // The session may have ended, or the file changed (the model, a pull, an editor), while the question waited.
+    if (gen !== inboxGen) return { status: 'declined' }
+    if ((await readNow()).hash !== first.hash) {
+      await loadPolicy($)
+      return { status: 'rejected', reason: 'stale' }
+    }
+  } else if (gen !== inboxGen) return { status: 'declined' }
+
+  await $.fs.write(path, edit.text)
+  // (Compared without a BOM or CR, in case the engine's read normalises them.)
+  const plain = (text: string | undefined): string | undefined => text?.replace(/^\uFEFF/, '').replace(/\r/g, '')
+  if (plain(await $.fs.read(path).catch(() => undefined)) !== plain(edit.text)) {
+    await loadPolicy($)
+    $.ui.toast(`SmartWorkbench: ${POLICY_PATH} could not be written as the desktop app asked; check the file`)
+    return { status: 'rejected', reason: 'error' }
+  }
+  await loadPolicy($)
+  await audit($, 'desktop.policy', { op: one.op, from: (first.hash ?? 'none').slice(0, 12), to: (await sha256(edit.text)).slice(0, 12) })
+  $.ui.toast(`SmartWorkbench: the desktop app changed ${POLICY_PATH} (${edit.summary}); commit it to share`)
+
+  return { status: 'applied' }
+}
+
 async function pollInbox($: $): Promise<void> {
   if (inboxBusy) return
   inboxBusy = true
   const gen = inboxGen
-  let hasAsked = false
+  const batch = { asked: false }
   try {
     const desk = await deskFresh($)
     const { sessionId } = await read($, liveAtom)
@@ -1701,17 +1755,19 @@ async function pollInbox($: $): Promise<void> {
         const first = command.ops[0]
         if (first && isSettingOp(first)) {
           // One question per batch: a pile of them would only teach the person to click through.
+          // (An edit of the guard file decides this itself, once it has read the file.)
           if (needsAnswer(await read($, wbAtom), first)) {
-            if (hasAsked) {
+            if (batch.asked) {
               await ackDesktop($, command.id, { status: 'rejected', reason: 'busy' })
               continue
             }
-            hasAsked = true
+            batch.asked = true
           }
-          const done = await applySetting($, first, command.expiresAt, gen)
+          const done = await applySetting($, first, command.expiresAt, gen, batch)
           await ackDesktop($, command.id, done)
           if (done.status === 'declined') await audit($, 'desktop.declined', { id: command.id, ops: first.op })
-          if (done.status === 'applied') {
+          // (A guard file edit has its own toast and audit entry.)
+          if (done.status === 'applied' && !isPolicyEditOp(first)) {
             $.ui.toast(`SmartWorkbench: the desktop app changed a setting (${first.op})`)
             await audit($, 'desktop.apply', { id: command.id, ops: first.op })
           }

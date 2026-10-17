@@ -4,6 +4,7 @@ import type { On } from 'claude-code'
 import type { Workbench } from '../types'
 import { workflowLabel, workflowOf } from '../hooks/workflow'
 import * as crew from '../hooks/crew'
+import { sha256 } from '../hooks/context'
 
 const CWD = '/work'
 const PLUGIN = 'smartworkbench'
@@ -2242,11 +2243,11 @@ const DESK = { v: 1, home: '/desk', port: 4317 }
 
 type Taken = { commands?: Array<{ id: string; ops: unknown[] }>; rejected?: Array<{ id: string; reason: string }> }
 
-async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], answer?: string) {
+async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], answer?: string, files: Record<string, string> = { ...DESK_FILES }, onAsk?: () => void) {
   const seen: Array<{ argv: string[]; stdin?: string }> = []
   const toasts: string[] = []
   const asked: string[] = []
-  const options: { taken?: Taken; desktop: Record<string, unknown>; processed: typeof seen; files: Record<string, string>; toasts: string[]; ask?: (labels: string[]) => string } = { desktop: DESK, processed: seen, files: DESK_FILES, toasts, ask: labels => (asked.push(labels.join('/')), answer ?? labels[0] ?? '') }
+  const options: { taken?: Taken; desktop: Record<string, unknown>; processed: typeof seen; files: Record<string, string>; toasts: string[]; ask?: (labels: string[]) => string } = { desktop: DESK, processed: seen, files, toasts, ask: labels => (asked.push(labels.join('/')), onAsk?.(), answer ?? labels[0] ?? '') }
   const made = world(on, options)
   await $.session.start(start)
   await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
@@ -2375,4 +2376,107 @@ test('the app asking for the guard to be off is asked in the session, and Cancel
   expect(asked).toEqual(['Turn off/Cancel'])
   expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'o1', status: 'declined' })])
   expect(workbench().execution.profile).not.toBe('off')
+})
+
+const POLICY_AT = '.claude/smartworkbench.json'
+const POLICY_FILE = `${JSON.stringify({ profile: 'balanced', rules: [{ tool: 'Bash', command: 'terraform\\s+apply', policy: 'block', reason: 'CI only' }, { tool: 'Bash', command: 'make', policy: 'allow' }] }, null, 2)}\n`
+const after = (files: Record<string, string>) => JSON.parse(files[POLICY_AT] ?? '{}')
+
+test('the app adds an ask or block rule to the guard file without a question, and the next call meets it', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
+  const { seen, deliver, asked, toasts } = await deskWorld($, on, 'Allow', files)
+  const base = await sha256(POLICY_FILE)
+  await deliver({ commands: [{ id: 'g1', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_add_rule', base, rule: { policy: 'block', tool: 'Bash', command: 'npm\\s+publish', reason: 'releases are manual' } }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'g1', status: 'applied' })])
+  expect(asked).toEqual([])
+  expect(after(files).rules).toHaveLength(3)
+  expect(after(files).rules[2]).toMatchObject({ policy: 'block', command: 'npm\\s+publish' })
+  const blocked = await $.tool.call({ tool: 'Bash', command: 'npm publish' })
+  expect(JSON.stringify(blocked)).toContain('releases are manual')
+})
+
+test('an edit made from an old view of the guard file changes nothing', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
+  const { seen, deliver } = await deskWorld($, on, 'Allow', files)
+  await deliver({ commands: [{ id: 'g2', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_add_rule', base: 'a'.repeat(64), rule: { policy: 'ask', tool: 'Bash' } }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'g2', status: 'rejected', reason: 'stale' })])
+  expect(files[POLICY_AT]).toBe(POLICY_FILE)
+})
+
+test('removing a block rule or lowering the file profile is asked in the session; a decline leaves the file as it was', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
+  const { seen, deliver, asked } = await deskWorld($, on, 'Decline', files)
+  const base = await sha256(POLICY_FILE)
+  await deliver({ commands: [{ id: 'g3', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_remove_rule', base, index: 0, policy: 'block' }] }] }, 3)
+  expect(asked).toEqual(['Allow/Decline'])
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'g3', status: 'declined' })])
+  expect(files[POLICY_AT]).toBe(POLICY_FILE)
+  seen.length = 0
+  await deliver({ commands: [{ id: 'g4', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_set_profile', base, profile: 'permissive' }] }, { id: 'g5', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_remove_rule', base, index: 0, policy: 'block' }] }] }, 6)
+  await waitFor(() => ackOf(seen).length >= 2)
+  expect(ackOf(seen)).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'g4', status: 'declined' }), expect.objectContaining({ id: 'g5', status: 'rejected', reason: 'busy' })]))
+  expect(files[POLICY_AT]).toBe(POLICY_FILE)
+})
+
+test('an allowed removal is written, and removing an allow rule needs no question', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
+  const { seen, deliver, asked } = await deskWorld($, on, 'Allow', files)
+  await deliver({ commands: [{ id: 'g6', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_remove_rule', base: await sha256(POLICY_FILE), index: 1, policy: 'allow' }] }] }, 3)
+  expect(asked).toEqual([])
+  expect(after(files).rules).toHaveLength(1)
+  seen.length = 0
+  await deliver({ commands: [{ id: 'g7', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_remove_rule', base: await sha256(files[POLICY_AT] ?? ''), index: 0, policy: 'block' }] }] }, 6)
+  expect(asked).toEqual(['Allow/Decline'])
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'g7', status: 'applied' })])
+  expect(after(files).rules).toEqual([])
+})
+
+test('a guard file edit is not applied when the file changed while the person was asked', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
+  const changed = POLICY_FILE.replace('CI only', 'CI only, really')
+  // The file changes underneath the question (a model edit, a pull, an editor).
+  const { seen, deliver, asked } = await deskWorld($, on, 'Allow', files, () => {
+    files[POLICY_AT] = changed
+  })
+  const base = await sha256(POLICY_FILE)
+  await deliver({ commands: [{ id: 'g8', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_remove_rule', base, index: 0, policy: 'block' }] }] }, 3)
+  expect(asked).toHaveLength(1)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'g8', status: 'rejected', reason: 'stale' })])
+  expect(files[POLICY_AT]).toBe(changed)
+})
+
+test('a broken guard file is not rewritten by the app', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: '{ "rules": [ ' }
+  const { seen, deliver } = await deskWorld($, on, 'Allow', files)
+  await deliver({ commands: [{ id: 'g9', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_add_rule', base: await sha256('{ "rules": [ '), rule: { policy: 'ask', tool: 'Bash' } }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'g9', status: 'rejected', reason: 'policy file is broken' })])
+  expect(files[POLICY_AT]).toBe('{ "rules": [ ')
+})
+
+test('the snapshot offers the guard file to the app: its hash, and each rule with its place in the file', async ($, on) => {
+  const seen: Array<{ argv: string[]; stdin?: string }> = []
+  const text = JSON.stringify({ profile: 'strict', rules: [{ policy: 'ask' }, { tool: 'Bash', command: 'x', policy: 'block', reason: 'no token=abcdef123456' }] })
+  const { clock } = world(on, { desktop: { v: 1, port: 4317, autoJoin: true }, processed: seen, files: { ...DESK_FILES, [POLICY_AT]: text } })
+  hubUp(on)
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+  await clock.set(Date.UTC(2026, 9, 8, 1, 0, 5))
+  await waitFor(() => seen.some(SNAP))
+  const file = JSON.parse(seen.find(SNAP)?.stdin ?? '{}').guard.file
+  expect(file.hash).toBe(await sha256(text))
+  expect(file.profile).toBe('strict')
+  expect(file.editable).toBe(true)
+  expect(file.rules).toEqual([expect.objectContaining({ i: 1, policy: 'block', tool: 'Bash' })])
+  expect(JSON.stringify(file)).not.toContain('abcdef123456')
+})
+
+test('with no guard file, a first rule from the app creates it, and the app is told once', async ($, on) => {
+  const files = { ...DESK_FILES }
+  delete (files as Record<string, string>)[POLICY_AT]
+  const { seen, deliver, toasts } = await deskWorld($, on, 'Allow', files)
+  await deliver({ commands: [{ id: 'n1', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_add_rule', base: null, rule: { policy: 'ask', path: 'migrations/**' } }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'n1', status: 'applied' })])
+  // The test's fs keeps a new file under its full path.
+  expect(JSON.parse(files[`${CWD}/${POLICY_AT}`] ?? '{}').rules).toEqual([{ policy: 'ask', path: 'migrations/**' }])
+  expect(toasts.filter(one => one.includes('changed a setting'))).toEqual([])
 })

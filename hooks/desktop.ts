@@ -4,6 +4,7 @@ import type { EvidenceRecord, Live, Workbench } from '../types'
 import { statusOf } from './evidence'
 import { codexOf } from './codex'
 import * as model from './model'
+import { isPolicyEditOp, type PolicyEditOp } from './policy-edit'
 import { redact } from './risk'
 
 export const SNAPSHOT_VERSION = 1
@@ -15,6 +16,22 @@ const bytes = (text: string): number => new TextEncoder().encode(text).length
 const clean = (text: string): string => redact(text).slice(0, TEXT_MAX)
 
 export type Snapshot = ReturnType<typeof snapshotOf>
+
+// The guard file as the app may edit it: the hash it must quote back, and each rule with its place in the file's own list.
+// Only a file that parsed (hash known) can be edited; a broken one is shown, not offered.
+function fileOf(live: Live) {
+  const policy = live.policy
+  if (!policy) return null
+  const cut = (text: string | undefined): string | null => (text === undefined ? null : redact(text).slice(0, 200))
+
+  return {
+    hash: policy.hash ?? null,
+    profile: policy.profile ?? null,
+    editable: policy.hash !== undefined && policy.ruleAt !== undefined && !policy.errors.some(one => one.startsWith('not valid JSON') || one.startsWith('expected an object') || one.startsWith('rules must')),
+    errors: policy.errors.length,
+    rules: policy.rules.slice(0, LIST_MAX).map((one, at) => ({ i: policy.ruleAt?.[at] ?? at, policy: one.policy, tool: cut(one.tool), command: cut(one.command), path: cut(one.path), reason: cut(one.reason) })),
+  }
+}
 
 export function snapshotOf(wb: Workbench, live: Live, at: number) {
   const lastEdit = Math.max(0, ...Object.values(wb.changed.edits ?? {}))
@@ -37,7 +54,7 @@ export function snapshotOf(wb: Workbench, live: Live, at: number) {
     },
     team: { enabled: team?.enabled === true, codex: team?.codex?.enabled === true, roles: { lead: team?.lead?.model ?? null, explorer: team?.explorer?.model ?? null, advisor: team?.advisor?.model ?? null }, efforts: { lead: team?.lead?.effort ?? null, explorer: team?.explorer?.effort ?? null, advisor: team?.advisor?.effort ?? null }, codexReview: team?.codex?.review === true, codexRescue: team?.codex?.rescue === true },
     codexFound: typeof live.codexPath === 'string',
-    guard: { profile: wb.execution.profile, paused: wb.execution.isPaused, fileProfile: live.policy?.profile ?? null, rules: live.policy?.rules.length ?? 0 },
+    guard: { profile: wb.execution.profile, paused: wb.execution.isPaused, fileProfile: live.policy?.profile ?? null, rules: live.policy?.rules.length ?? 0, file: fileOf(live) },
     // Which checks ran and how they ended; the command that ran is left out.
     evidence: evidence.slice(-20).map(one => ({ kind: one.kind, ok: one.ok, at: one.at })),
     proposals: (wb.proposals ?? []).filter(one => one.status === 'open').slice(0, 10).map(one => ({ id: one.id, change: one.change, text: one.text === undefined ? null : clean(one.text), reason: clean(one.reason) })),
@@ -50,9 +67,11 @@ export function snapshotOf(wb: Workbench, live: Live, at: number) {
 export function snapshotText(wb: Workbench, live: Live, at: number): string | undefined {
   const snap = snapshotOf(wb, live, at)
   let text = JSON.stringify(snap)
-  if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], task: { ...snap.task, constraints: snap.task.constraints.slice(0, 10), doneConditions: snap.task.doneConditions.slice(0, 10), nonGoals: [] } })
+  // The guard file's rules go first when the text is too big: they are the least needed to read the contract.
+  if (bytes(text) > SNAPSHOT_MAX_BYTES && snap.guard.file) text = JSON.stringify({ ...snap, guard: { ...snap.guard, file: { ...snap.guard.file, editable: false, rules: [] } } })
+  if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], guard: { ...snap.guard, file: snap.guard.file && { ...snap.guard.file, editable: false, rules: [] } }, task: { ...snap.task, constraints: snap.task.constraints.slice(0, 10), doneConditions: snap.task.doneConditions.slice(0, 10), nonGoals: [] } })
 
-  if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], team: { ...snap.team }, task: { ...snap.task, goal: snap.task.goal.slice(0, 200), constraints: [], doneConditions: snap.task.doneConditions.slice(0, 5).map(one => ({ ...one, text: one.text.slice(0, 100) })), nonGoals: [] } })
+  if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], guard: { ...snap.guard, file: snap.guard.file && { ...snap.guard.file, editable: false, rules: [] } }, task: { ...snap.task, goal: snap.task.goal.slice(0, 200), constraints: [], doneConditions: snap.task.doneConditions.slice(0, 5).map(one => ({ ...one, text: one.text.slice(0, 100) })), nonGoals: [] } })
 
   return bytes(text) > SNAPSHOT_MAX_BYTES ? undefined : text
 }
@@ -64,13 +83,16 @@ export type SettingOp =
   | { op: 'team_role'; role: 'lead' | 'explorer' | 'advisor'; model?: string; effort?: string }
   | { op: 'set_profile'; profile: 'off' | 'permissive' | 'balanced' | 'strict' }
   | { op: 'pause'; on: boolean }
+  | PolicyEditOp
 
-export const isSettingOp = (one: { op: string }): one is SettingOp => one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause'
+export const isSettingOp = (one: { op: string }): one is SettingOp => isPolicyEditOp(one) || one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause'
 
 const PROFILE_RANK = { off: 0, permissive: 1, balanced: 2, strict: 3 } as const
 
 /** Whether a setting makes the guard watch less than it does now: those wait for the person's answer in the session. */
 export function lowersGuard(wb: Workbench, one: SettingOp): boolean {
+  // An edit of the guard file is judged against the file on disk (editPolicy), which this function cannot see.
+  if (isPolicyEditOp(one)) return false
   if (one.op === 'set_profile') return PROFILE_RANK[one.profile] < PROFILE_RANK[wb.execution.profile]
   if (one.op === 'pause') return !one.on && wb.execution.isPaused
 
@@ -82,6 +104,7 @@ export function lowersGuard(wb: Workbench, one: SettingOp): boolean {
  * resuming) or because it lets Codex's reviews run without asking (Codex on, or team mode on while Codex is already on).
  */
 export function needsAnswer(wb: Workbench, one: SettingOp): boolean {
+  if (isPolicyEditOp(one)) return false
   if (lowersGuard(wb, one)) return true
   if (one.op === 'codex') return one.enabled && !codexOf(wb.team).enabled
   if (one.op === 'team_enabled') return one.enabled && wb.team?.enabled !== true && codexOf(wb.team).enabled

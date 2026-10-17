@@ -81,6 +81,7 @@ export function parsePolicy(text: string, source: string = POLICY_PATH): Project
   }
 
   const rules: ProjectRule[] = []
+  const ruleAt: number[] = []
   const list = Array.isArray(value.rules) ? value.rules : []
   if (value.rules !== undefined && !Array.isArray(value.rules)) {
     errors.push('rules must be a list')
@@ -104,6 +105,7 @@ export function parsePolicy(text: string, source: string = POLICY_PATH): Project
       errors.push(`rule ${i + 1}: "${bad}" is not a valid regular expression`)
       return
     }
+    ruleAt.push(i)
     rules.push({
       policy,
       ...(typeof rule.tool === 'string' ? { tool: rule.tool } : {}),
@@ -144,6 +146,7 @@ export function parsePolicy(text: string, source: string = POLICY_PATH): Project
     ...(profile ? { profile } : {}),
     ...(ledgerShare || ledgerWiki ? { ledger: { ...(ledgerShare ? { share: ledgerShare } : {}), ...(ledgerWiki ? { wiki: ledgerWiki } : {}) } } : {}),
     rules,
+    ruleAt,
     templates,
     ...(typeof defaultTemplate === 'string' && templates.some(one => one.name === defaultTemplate) ? { defaultTemplate } : {}),
     ...(audit ? { audit } : {}),

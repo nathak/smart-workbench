@@ -38,7 +38,18 @@ const TEXT_OPS = new Set(['set_goal', 'add_constraint', 'add_done_condition', 'a
 const REMOVE_OPS = new Set(['remove_constraint', 'remove_done_condition'])
 const BARE_OPS = new Set(['lock', 'unlock'])
 // Settings of the session, not of the contract: one per command, so its answer says what happened to it.
-export const SETTING_OPS = new Set(['team_enabled', 'team_role', 'codex', 'set_profile', 'pause'])
+export const SETTING_OPS = new Set(['team_enabled', 'team_role', 'codex', 'set_profile', 'pause', 'policy_add_rule', 'policy_remove_rule', 'policy_set_profile'])
+const HASH_RE = /^[0-9a-f]{64}$/
+const RULE_FIELD_MAX = 300
+const RULE_REASON_MAX = 200
+const regexOk = source => {
+  try {
+    new RegExp(source)
+    return true
+  } catch {
+    return false
+  }
+}
 const ROLE_NAMES = new Set(['lead', 'explorer', 'advisor'])
 const EFFORT_NAMES = new Set(['default', 'low', 'medium', 'high', 'xhigh', 'max'])
 const PROFILES = new Set(['off', 'permissive', 'balanced', 'strict'])
@@ -81,6 +92,32 @@ export function checkOps(ops) {
     } else if (op === 'set_profile') {
       if (!PROFILES.has(one.profile)) return { reason: 'bad set_profile' }
       clean.push({ op, profile: one.profile })
+    } else if (op === 'policy_add_rule') {
+      // Only ask and block: a rule that allows would loosen the guard, and it is added at the end, so it never shadows an earlier rule.
+      const rule = one.rule
+      const base = one.base === null || (typeof one.base === 'string' && HASH_RE.test(one.base)) ? one.base : undefined
+      if (base === undefined || rule === null || typeof rule !== 'object' || (rule.policy !== 'ask' && rule.policy !== 'block')) return { reason: 'bad policy_add_rule' }
+      const clean1 = { policy: rule.policy }
+      for (const key of ['tool', 'command', 'path']) {
+        if (rule[key] === undefined) continue
+        if (typeof rule[key] !== 'string' || rule[key].trim() === '' || rule[key].length > RULE_FIELD_MAX) return { reason: 'bad policy_add_rule' }
+        clean1[key] = rule[key]
+      }
+      if (rule.reason !== undefined) {
+        if (typeof rule.reason !== 'string' || rule.reason.length > RULE_REASON_MAX) return { reason: 'bad policy_add_rule' }
+        if (rule.reason.trim() !== '') clean1.reason = rule.reason.trim()
+      }
+      if (clean1.tool === undefined && clean1.command === undefined && clean1.path === undefined) return { reason: 'bad policy_add_rule' }
+      // The plugin matches a tool as ^(?:tool)$, so that form has to compile too.
+      if ((clean1.tool !== undefined && !regexOk(`^(?:${clean1.tool})$`)) || (clean1.command !== undefined && !regexOk(clean1.command))) return { reason: 'bad policy_add_rule' }
+      clean.push({ op, base, rule: clean1 })
+    } else if (op === 'policy_remove_rule') {
+      if (typeof one.base !== 'string' || !HASH_RE.test(one.base) || !Number.isInteger(one.index) || one.index < 0 || one.index > 1000 || !['allow', 'ask', 'block'].includes(one.policy)) return { reason: 'bad policy_remove_rule' }
+      clean.push({ op, base: one.base, index: one.index, policy: one.policy })
+    } else if (op === 'policy_set_profile') {
+      const base = one.base === null || (typeof one.base === 'string' && HASH_RE.test(one.base)) ? one.base : undefined
+      if (base === undefined || (one.profile !== null && !['permissive', 'balanced', 'strict'].includes(one.profile))) return { reason: 'bad policy_set_profile' }
+      clean.push({ op, base, profile: one.profile })
     } else if (op === 'pause') {
       if (typeof one.on !== 'boolean') return { reason: 'bad pause' }
       clean.push({ op, on: one.on })

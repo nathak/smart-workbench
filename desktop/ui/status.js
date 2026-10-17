@@ -59,6 +59,70 @@ const adder = (key, hint, label, onSend, disabled, max = 1000) => {
   return row
 }
 
+// The shared guard file (.claude/smartworkbench.json). Every edit quotes the hash of the file this view was made from, so a file
+// that changed since is refused. Only ask and block rules can be added; the plugin asks in the session before a rule is removed.
+const RULE_KEYS = ['tool', 'command', 'path']
+
+function ruleForm(session, L, op, base, disabled) {
+  const box = el('div', undefined, 'adder')
+  const policy = el('select')
+  for (const name of ['ask', 'block']) {
+    const option = el('option', name)
+    option.value = name
+    policy.append(option)
+  }
+  policy.disabled = disabled
+  box.append(policy)
+  const inputs = {}
+  for (const key of [...RULE_KEYS, 'reason']) {
+    const input = el('input')
+    input.type = 'text'
+    input.placeholder = L.ruleHints[key]
+    input.maxLength = key === 'reason' ? 200 : 300
+    input.disabled = disabled
+    const draft = `${session}:rule:${key}`
+    input.value = drafts.get(draft) ?? ''
+    input.addEventListener('input', () => drafts.set(draft, input.value))
+    inputs[key] = input
+    box.append(input)
+  }
+  const go = async () => {
+    const rule = { policy: policy.value }
+    for (const key of [...RULE_KEYS, 'reason']) if (inputs[key].value.trim()) rule[key] = inputs[key].value.trim()
+    if (!RULE_KEYS.some(key => rule[key])) return
+    if (await op([{ op: 'policy_add_rule', base, rule }])) for (const key of Object.keys(inputs)) (inputs[key].value = ''), drafts.delete(`${session}:rule:${key}`)
+  }
+  box.append(button(L.addRule, go, disabled))
+  return box
+}
+
+function guardFile(row, file, L, op, busy) {
+  const box = el('div')
+  box.append(el('h3', L.guardFile), el('div', `${file.profile ? `${L.fileProfile} ${file.profile}` : L.noFileProfile}${file.errors ? ` · ⚠ ${file.errors}` : ''}`))
+  if (!row.alive) return box
+  const off = busy || !file.editable || !file.hash
+  const bar = el('div', undefined, 'bar')
+  const rank = name => ['permissive', 'balanced', 'strict'].indexOf(name)
+  for (const profile of ['permissive', 'balanced', 'strict']) bar.append(button(rank(profile) < rank(file.profile) ? `${profile} (${L.asksInSession})` : profile, () => op([{ op: 'policy_set_profile', base: file.hash, profile }]), off || file.profile === profile))
+  if (file.profile) bar.append(button(`${L.clearProfile} (${L.asksInSession})`, () => op([{ op: 'policy_set_profile', base: file.hash, profile: null }]), off))
+  box.append(bar)
+  box.append(list(L.fileRules, file.rules, rule => {
+    const text = RULE_KEYS.filter(key => rule[key]).map(key => `${key}=${rule[key]}`).join(' ')
+    const li = el('li', `${rule.policy.toUpperCase()} ${text}${rule.reason ? ` — ${rule.reason}` : ''} `, rule.policy === 'block' ? 'failed' : undefined)
+    li.append(button(rule.policy === 'allow' ? L.remove : `${L.remove} (${L.asksInSession})`, () => op([{ op: 'policy_remove_rule', base: file.hash, index: rule.i, policy: rule.policy }]), off))
+    return li
+  }))
+  box.append(ruleForm(row.id, L, op, file.hash, off), el('div', L.policyNote, 'empty'))
+  return box
+}
+
+// No guard file yet: a first rule creates it.
+function guardFileNew(session, L, op, busy) {
+  const box = el('div')
+  box.append(el('h3', L.guardFile), el('div', L.noFile, 'empty'), ruleForm(session, L, op, null, busy))
+  return box
+}
+
 const EFFORTS = ['', 'default', 'low', 'medium', 'high', 'xhigh', 'max']
 
 // One team role: its model (free text) and effort, applied together.
@@ -156,6 +220,8 @@ function card(row, snap, L, acks) {
     bar.append(button(snap.guard.paused ? L.resume : L.pause, () => op([{ op: 'pause', on: !snap.guard.paused }]), busy))
     s.append(bar, el('div', L.guardNote, 'empty'))
   }
+  if (snap.guard.file) s.append(guardFile(row, snap.guard.file, L, op, busy))
+  else if (row.alive) s.append(guardFileNew(row.id, L, op, busy))
   s.append(list(L.evidence, snap.evidence, e => el('li', `${e.kind}: ${e.ok === true ? L.pass : e.ok === false ? L.fail : L.running}`, e.ok === true ? 'verified' : e.ok === false ? 'failed' : 'pending')))
   s.append(list(L.proposals, snap.proposals, p => el('li', `${p.change}${p.text ? `: ${p.text}` : ''} — ${p.reason}`)))
   return s

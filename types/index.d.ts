@@ -92,6 +92,9 @@ export type ProjectPolicy = {
   // "ledger": { "share": "off" } forbids publishing the decision ledger; no setting publishes by itself.
   ledger?: { share?: 'off'; wiki?: 'off' }
   rules: ProjectRule[]
+  // Where each parsed rule sits in the file's own "rules" list (a broken rule is skipped, so the two differ), and the file's sha256.
+  ruleAt?: number[]
+  hash?: string
   errors: string[]
 }
 

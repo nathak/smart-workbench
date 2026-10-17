@@ -195,3 +195,27 @@ test('settings are checked field by field and go one to a command', () => {
   assert.deepEqual(checkOps([{ op: 'team_role', role: 'advisor', model: 'claude-opus-5-5', effort: 'high', extra: 1 }]).ops, [{ op: 'team_role', role: 'advisor', model: 'claude-opus-5-5', effort: 'high' }])
   assert.equal(checkOps([{ op: 'codex', enabled: true }]).ops.length, 1)
 })
+
+test('guard file edits: only ask and block rules are added, every edit quotes the file it saw, and a setting goes alone', () => {
+  const base = 'a'.repeat(64)
+  const rule = { policy: 'block', tool: 'Bash', command: 'npm\\s+publish', reason: 'manual' }
+  assert.deepEqual(checkOps([{ op: 'policy_add_rule', base, rule }]).ops, [{ op: 'policy_add_rule', base, rule }])
+  assert.deepEqual(checkOps([{ op: 'policy_add_rule', base: null, rule: { policy: 'ask', path: 'migrations/**' } }]).ops?.[0].base, null)
+  assert.deepEqual(checkOps([{ op: 'policy_remove_rule', base, index: 3, policy: 'block' }]).ops, [{ op: 'policy_remove_rule', base, index: 3, policy: 'block' }])
+  assert.deepEqual(checkOps([{ op: 'policy_set_profile', base, profile: null }]).ops, [{ op: 'policy_set_profile', base, profile: null }])
+  for (const bad of [
+    { op: 'policy_add_rule', base, rule: { policy: 'allow', tool: 'Bash' } },
+    { op: 'policy_add_rule', rule },
+    { op: 'policy_add_rule', base: 'x', rule },
+    { op: 'policy_add_rule', base, rule: { policy: 'ask' } },
+    { op: 'policy_add_rule', base, rule: { policy: 'ask', command: '(' } },
+    { op: 'policy_add_rule', base, rule: { policy: 'ask', command: 'x'.repeat(301) } },
+    { op: 'policy_add_rule', base, rule: { policy: 'ask', tool: 'Bash', reason: 'r'.repeat(201) } },
+    { op: 'policy_remove_rule', base, index: 'x', policy: 'ask' },
+    { op: 'policy_remove_rule', base: null, index: 0, policy: 'ask' },
+    { op: 'policy_remove_rule', base, index: 0, policy: 'maybe' },
+    { op: 'policy_set_profile', base, profile: 'off' },
+    { op: 'policy_set_profile', profile: 'strict' },
+  ]) assert.ok(checkOps([bad]).reason, JSON.stringify(bad))
+  assert.equal(checkOps([{ op: 'policy_set_profile', base, profile: 'strict' }, { op: 'lock' }]).reason, 'a setting goes alone')
+})
