@@ -43,6 +43,8 @@ type WorldOptions = {
   desktop?: Record<string, unknown>
   // What tools/desktop-channel.mjs take prints, once: commands waiting in the app's inbox for this session.
   taken?: { commands?: Array<{ id: string; ops: unknown[] }>; rejected?: Array<{ id: string; reason: string }> }
+  // Forces the guard file write script's exit code, or makes starting it fail.
+  policyWrite?: number | 'throw'
   // Makes these commands fail as a non-zero exit would.
   fail?: (command: string) => boolean
   // Collects the toasts shown.
@@ -94,8 +96,19 @@ function world(on: On, options: WorldOptions = {}) {
     files[fileAt(e.path) ?? e.path] = e.text
     return { value: undefined }
   })
-  on('process.run', ($, e) => {
+  on('process.run', async ($, e) => {
     options.processed?.push({ argv: e.argv, stdin: e.init?.stdin, env: e.init?.env })
+    if (String(e.argv[1] ?? '').endsWith('tools/desktop-policy-write.mjs')) {
+      // The script, as the plugin sees it: it writes when the file still hashes to what the caller expected (3 when it does not).
+      const forced = options.policyWrite
+      if (forced === 'throw') throw new Error('spawn failed')
+      const path = `${e.argv[2]}/.claude/smartworkbench.json`
+      const name = fileAt(path)
+      const hash = name === undefined ? 'none' : await sha256(files[name] ?? '')
+      const code = forced ?? (hash === e.argv[3] ? 0 : 3)
+      if (code === 0) files[name ?? path] = e.init?.stdin ?? ''
+      return { value: { exitCode: code, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (String(e.argv[1] ?? '').endsWith('tools/desktop-channel.mjs') && e.argv[2] === 'take') {
       const out = JSON.stringify({ commands: [], rejected: [], ...options.taken })
       options.taken = undefined
@@ -2243,11 +2256,11 @@ const DESK = { v: 1, home: '/desk', port: 4317 }
 
 type Taken = { commands?: Array<{ id: string; ops: unknown[] }>; rejected?: Array<{ id: string; reason: string }> }
 
-async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], answer?: string, files: Record<string, string> = { ...DESK_FILES }, onAsk?: () => void) {
+async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], answer?: string, files: Record<string, string> = { ...DESK_FILES }, onAsk?: () => void, policyWrite?: number | 'throw') {
   const seen: Array<{ argv: string[]; stdin?: string }> = []
   const toasts: string[] = []
   const asked: string[] = []
-  const options: { taken?: Taken; desktop: Record<string, unknown>; processed: typeof seen; files: Record<string, string>; toasts: string[]; ask?: (labels: string[]) => string } = { desktop: DESK, processed: seen, files, toasts, ask: labels => (asked.push(labels.join('/')), onAsk?.(), answer ?? labels[0] ?? '') }
+  const options: { taken?: Taken; desktop: Record<string, unknown>; processed: typeof seen; files: Record<string, string>; toasts: string[]; policyWrite?: number | 'throw'; ask?: (labels: string[]) => string } = { desktop: DESK, processed: seen, files, toasts, policyWrite, ask: labels => (asked.push(labels.join('/')), onAsk?.(), answer ?? labels[0] ?? '') }
   const made = world(on, options)
   await $.session.start(start)
   await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
@@ -2479,4 +2492,66 @@ test('with no guard file, a first rule from the app creates it, and the app is t
   // The test's fs keeps a new file under its full path.
   expect(JSON.parse(files[`${CWD}/${POLICY_AT}`] ?? '{}').rules).toEqual([{ policy: 'ask', path: 'migrations/**' }])
   expect(toasts.filter(one => one.includes('changed a setting'))).toEqual([])
+})
+
+test('when the write script cannot write, the app is told it failed and the file is as it was; when the file changed, it is stale', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
+  const { seen, deliver, toasts } = await deskWorld($, on, 'Allow', files, undefined, 5)
+  const base = await sha256(POLICY_FILE)
+  await deliver({ commands: [{ id: 'w1', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_add_rule', base, rule: { policy: 'ask', tool: 'Bash' } }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'w1', status: 'rejected', reason: 'error' })])
+  expect(toasts.some(one => one.includes('could not be written'))).toBe(true)
+  expect(files[POLICY_AT]).toBe(POLICY_FILE)
+})
+
+test('a write script that fails to start is an error, not an applied change', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
+  const { seen, deliver } = await deskWorld($, on, 'Allow', files, undefined, 'throw')
+  await deliver({ commands: [{ id: 'w2', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_add_rule', base: await sha256(POLICY_FILE), rule: { policy: 'ask', tool: 'Bash' } }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'w2', status: 'rejected', reason: 'error' })])
+})
+
+test('a guard file changed by someone else is in force from the next prompt, and a half-saved file does not switch the rules off', async ($, on) => {
+  const files: Record<string, string> = { [POLICY_AT]: JSON.stringify({ rules: [] }) }
+  world(on, { files })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'npm publish' }))).not.toContain('releases are manual')
+  files[POLICY_AT] = JSON.stringify({ rules: [{ tool: 'Bash', command: 'npm\\s+publish', policy: 'block', reason: 'releases are manual' }] })
+  await $.prompt.submit({ text: 'go', ...COMPOSER })
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'npm publish' }))).toContain('releases are manual')
+  files[POLICY_AT] = '{ "rules": [ '
+  await $.prompt.submit({ text: 'again', ...COMPOSER })
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'npm publish' }))).toContain('releases are manual')
+})
+
+test('a session that is working, with no prompt, notices a changed guard file within about ten seconds', async ($, on) => {
+  const files: Record<string, string> = { [POLICY_AT]: JSON.stringify({ rules: [] }) }
+  const { clock } = world(on, { files, desktop: DESK })
+  await $.session.start(start)
+  files[POLICY_AT] = JSON.stringify({ rules: [{ tool: 'Bash', command: 'npm\\s+publish', policy: 'block', reason: 'releases are manual' }] })
+  for (let at = 2; at <= 14; at += 2) {
+    await clock.set(Date.UTC(2026, 9, 8, 1, 0, at))
+    await new Promise(done => setTimeout(done, 15))
+  }
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'npm publish' }))).toContain('releases are manual')
+})
+
+test('a guard file that is deleted or half saved leaves the rules in force, the app sees it as not editable, and the notice is not repeated', async ($, on) => {
+  const files: Record<string, string> = { [POLICY_AT]: JSON.stringify({ rules: [{ tool: 'Bash', command: 'npm\\s+publish', policy: 'block', reason: 'releases are manual' }] }) }
+  const toasts: string[] = []
+  world(on, { files, toasts })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(start)
+  delete files[POLICY_AT]
+  await $.prompt.submit({ text: 'one', ...COMPOSER })
+  await $.prompt.submit({ text: 'two', ...COMPOSER })
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'npm publish' }))).toContain('releases are manual')
+  expect(toasts.filter(one => one.includes('missing or not valid'))).toHaveLength(1)
+  files[POLICY_AT] = '{ "rules": [ '
+  await $.prompt.submit({ text: 'three', ...COMPOSER })
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'npm publish' }))).toContain('releases are manual')
+  files[POLICY_AT] = JSON.stringify({ rules: [] })
+  await $.prompt.submit({ text: 'four', ...COMPOSER })
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'npm publish' }))).not.toContain('releases are manual')
 })

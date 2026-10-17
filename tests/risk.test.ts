@@ -383,3 +383,11 @@ describe('the desktop app channel', () => {
     expect(blocked('Bash', { command: 'git commit -m "fix smartworkbench-desktop heartbeat"' })).toBe('allow')
   })
 })
+
+describe('the guard file write script', () => {
+  test('a command that runs it is a guard policy change that asks in every profile', () => {
+    const verdict = classify('Bash', { command: 'node /p/tools/desktop-policy-write.mjs /w none' })
+    expect(verdict).toMatchObject({ category: 'guard-policy', policy: 'ask' })
+    expect(decide(verdict, 'permissive', false)).toBe('ask')
+  })
+})

@@ -111,7 +111,7 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'medium',
     policy: 'ask',
     raw: true,
-    pattern: /\.claude\/smartworkbench\.json[^;&|\n]*(>|\|\s*tee\b)|(\btee\b|\bsed\s+-i\b|\brm\b|\bmv\b|\bcp\b|>)[^;&|\n]*\.claude\/smartworkbench\.json/,
+    pattern: /\bdesktop-policy-write\.mjs\b|\.claude\/smartworkbench\.json[^;&|\n]*(>|\|\s*tee\b)|(\btee\b|\bsed\s+-i\b|\brm\b|\bmv\b|\bcp\b|>)[^;&|\n]*\.claude\/smartworkbench\.json/,
     reason: 'changes the project guard policy',
   },
   {

@@ -1514,14 +1514,31 @@ function isTaskInUse(wb: Workbench): boolean {
 }
 
 // Re-reads the checked-in guard file; no file means the person's own profile and the built-in rules.
-async function loadPolicy($: $): Promise<void> {
+// onlyIfChanged (a background look): nothing happens when the file is as it was, and a file that does not parse (an editor may be in the
+// middle of saving) leaves the rules in force as they were, since a broken file would read as no rules at all.
+async function loadPolicy($: $, opts: { onlyIfChanged?: boolean } = {}): Promise<boolean> {
   const text = await $.fs.read(await rooted($, POLICY_PATH)).catch(() => undefined)
-  const policy = text === undefined ? undefined : { ...parsePolicy(text), hash: await sha256(text) }
+  const hash = text === undefined ? undefined : await sha256(text)
+  if (opts.onlyIfChanged) {
+    const known = (await read($, liveAtom)).policy
+    if (hash === known?.hash) return false
+    // A file that is gone or does not parse is not "no rules": the rules in force stay, and only the hash goes, so the app sees the file
+    // as not editable and the next good read replaces them. Only a full load (session start, /swb policy reload) drops them.
+    if (known && (text === undefined || parsePolicy(text).errors.some(one => one.startsWith('not valid JSON')))) {
+      await setLive($, live => (live.policy ? { ...live, policy: { ...live.policy, hash: undefined } } : live))
+      if (known.hash !== undefined) $.ui.toast(`SmartWorkbench: ${POLICY_PATH} is missing or not valid JSON; the rules stay as they were until it is fixed (/swb policy reload drops them)`)
+      return false
+    }
+    if (text !== undefined && parsePolicy(text).errors.some(one => one.startsWith('not valid JSON'))) return false
+  }
+  const policy = text === undefined ? undefined : { ...parsePolicy(text), hash }
   await setLive($, ({ policy: _old, ...live }) => (policy ? { ...live, policy } : live))
 
   if (policy && policy.errors.length > 0) {
     $.ui.toast(`SmartWorkbench: ${POLICY_PATH}: ${policy.errors[0]}${policy.errors.length > 1 ? ` (+${policy.errors.length - 1} more)` : ''}`)
   }
+
+  return true
 }
 
 // A checked-in guard file may only tighten the person's own setting: the stricter of the two applies.
@@ -1693,7 +1710,7 @@ async function applyPolicyEdit($: $, one: PolicyEditOp, expiresAt: number, gen: 
   }
   const first = await readNow()
   if (first.hash !== one.base) {
-    await loadPolicy($)
+    await loadPolicy($, { onlyIfChanged: true })
     return { status: 'rejected', reason: 'stale' }
   }
   const edit = editPolicy(first.text, one)
@@ -1713,19 +1730,23 @@ async function applyPolicyEdit($: $, one: PolicyEditOp, expiresAt: number, gen: 
     if (answer !== 'Allow') return { status: 'declined' }
     // The session may have ended, or the file changed (the model, a pull, an editor), while the question waited.
     if (gen !== inboxGen) return { status: 'declined' }
-    if ((await readNow()).hash !== first.hash) {
-      await loadPolicy($)
-      return { status: 'rejected', reason: 'stale' }
-    }
   } else if (gen !== inboxGen) return { status: 'declined' }
 
-  await $.fs.write(path, edit.text)
-  // (Compared without a BOM or CR, in case the engine's read normalises them.)
-  const plain = (text: string | undefined): string | undefined => text?.replace(/^\uFEFF/, '').replace(/\r/g, '')
-  if (plain(await $.fs.read(path).catch(() => undefined)) !== plain(edit.text)) {
-    await loadPolicy($)
-    $.ui.toast(`SmartWorkbench: ${POLICY_PATH} could not be written as the desktop app asked; check the file`)
-    return { status: 'rejected', reason: 'error' }
+  // The script checks the file again right before it renames the new one into place (the file may have changed while the person was asked)
+  // and writes nothing else; there is no fallback to a plain write, which would bring the gap back.
+  const ran = await $.process.run(['node', `${$.plugin.root}/tools/desktop-policy-write.mjs`, await $.session.root(), first.hash ?? 'none'], { stdin: edit.text, timeoutMs: 5000 }).catch(() => undefined)
+  if (ran?.exitCode === 3) {
+    await loadPolicy($, { onlyIfChanged: true })
+    return { status: 'rejected', reason: 'stale' }
+  }
+  if (ran?.exitCode !== 0) {
+    // A script that timed out may still have renamed the file: what is there decides.
+    const plain = (text: string | undefined): string | undefined => text?.replace(/^\uFEFF/, '').replace(/\r/g, '')
+    if (plain(await $.fs.read(path).catch(() => undefined)) !== plain(edit.text)) {
+      await loadPolicy($, { onlyIfChanged: true })
+      $.ui.toast(`SmartWorkbench: ${POLICY_PATH} could not be written as the desktop app asked; check the file`)
+      return { status: 'rejected', reason: 'error' }
+    }
   }
   await loadPolicy($)
   await audit($, 'desktop.policy', { op: one.op, from: (first.hash ?? 'none').slice(0, 12), to: (await sha256(edit.text)).slice(0, 12) })
@@ -1802,13 +1823,15 @@ function startInbox($: $): void {
   const gen = ++inboxGen
   inboxBusy = false
   void (async () => {
-    for (;;) {
+    for (let tick = 1; ; tick += 1) {
       try {
         await $.clock.sleep(INBOX_POLL_MS)
       } catch {
         return
       }
       if (gen !== inboxGen) return
+      // About every ten seconds the guard file is looked at too, so a rule added by another session or the app reaches a session that is working.
+      if (tick % 5 === 0) await loadPolicy($, { onlyIfChanged: true }).catch(() => undefined)
       if (isAskable) await pollInbox($).catch(() => undefined)
     }
   })()
@@ -3084,6 +3107,8 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     const startedAt = await $.clock.now()
     await pull($)
+    // A change another session or the desktop app made to the guard file is in force from this prompt on.
+    await loadPolicy($, { onlyIfChanged: true }).catch(() => undefined)
     const wb = await read($, wbAtom)
     const { policy } = await read($, liveAtom)
 
