@@ -2555,3 +2555,12 @@ test('a guard file that is deleted or half saved leaves the rules in force, the 
   await $.prompt.submit({ text: 'four', ...COMPOSER })
   expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'npm publish' }))).not.toContain('releases are manual')
 })
+
+test('a lead model the host\'s model setting refuses is answered as rejected, not applied', async ($, on) => {
+  const { seen, deliver } = await deskWorld($, on, 'Allow')
+  await deliver({ commands: [{ id: 'm1', ops: [{ op: 'team_enabled', enabled: true }] }] }, 3)
+  seen.length = 0
+  // This world has no model setting, so the host refuses the lead's model.
+  await deliver({ commands: [{ id: 'm2', ops: [{ op: 'team_role', role: 'lead', model: 'opus' }] }] }, 6)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'm2', status: 'rejected', reason: 'model refused' })])
+})

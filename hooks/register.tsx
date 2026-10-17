@@ -1680,8 +1680,9 @@ async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number
       await setTeam($, one.enabled)
       return { status: 'applied' }
     case 'team_role':
-      await changeRole($, one.role, { ...(one.model !== undefined ? { model: one.model } : {}), ...(one.effort !== undefined ? { effort: one.effort } : {}) })
-      return { status: 'applied' }
+      // changeRole says in its text when the host's model setting refused the lead's model; the app is told so, not that it worked.
+      const said = await changeRole($, one.role, { ...(one.model !== undefined ? { model: one.model } : {}), ...(one.effort !== undefined ? { effort: one.effort } : {}) })
+      return said.includes('setting refused it') ? { status: 'rejected', reason: 'model refused' } : { status: 'applied' }
     case 'codex': {
       const before = codex.codexOf(wb.team).enabled
       if (one.enabled && !before && !(await read($, liveAtom)).codexPath) return { status: 'rejected', reason: 'codex not found' }
