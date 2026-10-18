@@ -2693,6 +2693,22 @@ test('a plain inspection before the question leaves the answer from outside poss
   plain.release('Block')
 })
 
+test('a name that only starts like a plain inspection keeps answers from outside away', async ($, on) => {
+  const held = await heldAsk($, on, 'git push origin main', 'lsof -i')
+  await held.deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id: held.id, allow: true, by: 'app' }] }] }, 3)
+  expect(ackOf(held.seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'rejected', reason: 'a background command was started' })])
+  held.release('Block')
+  await held.call
+})
+
+test('a long option that runs a program keeps answers from outside away', async ($, on) => {
+  const held = await heldAsk($, on, 'git push origin main', 'git ls-files --output=x')
+  await held.deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id: held.id, allow: true, by: 'app' }] }] }, 3)
+  expect(ackOf(held.seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'rejected', reason: 'a background command was started' })])
+  held.release('Block')
+  await held.call
+})
+
 test('a question about the guard itself is answered in the session only', async ($, on) => {
   const { seen, deliver, release, call, id } = await heldAsk($, on, 'echo x >> .claude/smartworkbench.json')
   expect(id).not.toBe('')

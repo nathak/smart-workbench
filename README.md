@@ -346,7 +346,7 @@ location / {
 
 The server already sends `X-Accel-Buffering: no` and a `: ping` comment every 15 seconds, which keeps most proxies from buffering or closing an idle stream.
 
-**Security.** The live server has no login of its own. Everyone who can reach the listed name sees everything the page shows: your prompts (up to 2000 characters each, with secrets masked by a heuristic), the briefs and results of subagents, command summaries and Codex task text. Put access control in front of it (a VPN, a proxy with authentication, an identity-aware tunnel), list only names you control, and start it with `/swb live --no-prompts` if prompts must not leave the machine. The feed also carries the goal, conditions and the commands behind evidence lines (masked, cut to 120 characters), and these stay with `--no-prompts`; the page's export button builds a file in your browser from what it shows and sends nothing. Do not leave a view running on a repository you would not show.
+**Security.** The live server has no login of its own. Everyone who can reach the listed name sees everything the page shows: your prompts (up to 2000 characters each, with secrets masked by a heuristic), the briefs and results of subagents, command summaries and Codex task text. Put access control in front of it (a VPN, a proxy with authentication, an identity-aware tunnel), list only names you control, and start it with `/swb live --no-prompts` if prompts must not leave the machine. The feed also carries the goal (up to 200 characters), the conditions and the commands behind evidence lines (up to 120 characters, masked), and the first 120 characters of each command; these stay with `--no-prompts`; the page's export button builds a file in your browser from what it shows and sends nothing. Do not leave a view running on a repository you would not show.
 
 **If it does not work.**
 
@@ -824,7 +824,7 @@ location / {
 
 서버는 이미 `X-Accel-Buffering: no`를 보내고 15초마다 `: ping` 주석 줄을 보내므로, 대부분의 프록시가 스트림을 버퍼링하거나 유휴 연결로 닫는 것을 막아 줍니다.
 
-**보안.** 실시간 서버에는 자체 로그인이 없습니다. 목록에 적은 이름으로 접속할 수 있는 사람은 화면에 보이는 모든 것을 봅니다. 프롬프트(한 건당 2000자까지, 비밀은 휴리스틱으로 가림), 서브에이전트에게 준 브리프와 돌려받은 결과, 명령 요약, Codex 작업 문구가 그것입니다. 앞단에 접근 제어(VPN, 인증이 있는 프록시, 신원 기반 터널)를 두고, 직접 관리하는 이름만 적으세요. 프롬프트가 머신 밖으로 나가면 안 된다면 `/swb live --no-prompts`로 시작하세요. 피드에는 목표·조건·증거 줄의 명령(가림, 120자까지)도 실리며 `--no-prompts`에서도 남습니다. 화면의 내보내기 버튼은 보이는 내용으로 브라우저에서 파일을 만들 뿐 어디로도 보내지 않습니다. 남에게 보여 주기 곤란한 저장소에서는 보기를 띄워 두지 마세요.
+**보안.** 실시간 서버에는 자체 로그인이 없습니다. 목록에 적은 이름으로 접속할 수 있는 사람은 화면에 보이는 모든 것을 봅니다. 프롬프트(한 건당 2000자까지, 비밀은 휴리스틱으로 가림), 서브에이전트에게 준 브리프와 돌려받은 결과, 명령 요약, Codex 작업 문구가 그것입니다. 앞단에 접근 제어(VPN, 인증이 있는 프록시, 신원 기반 터널)를 두고, 직접 관리하는 이름만 적으세요. 프롬프트가 머신 밖으로 나가면 안 된다면 `/swb live --no-prompts`로 시작하세요. 피드에는 목표(200자까지)·조건·증거 줄의 명령(120자까지, 가림)과 각 명령의 앞 120자도 실리며 `--no-prompts`에서도 남습니다. 화면의 내보내기 버튼은 보이는 내용으로 브라우저에서 파일을 만들 뿐 어디로도 보내지 않습니다. 남에게 보여 주기 곤란한 저장소에서는 보기를 띄워 두지 마세요.
 
 **동작하지 않을 때.**
 
