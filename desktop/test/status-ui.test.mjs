@@ -53,8 +53,9 @@ function load(overview) {
       send: async (session, ops) => (sent.push(ops), { ok: true }),
     },
   }
-  vm.runInNewContext(source, { document, window, setInterval: () => 0, Date, Map, Object, String, Array, JSON, console })
-  return { main, sent }
+  const ctx = { document, window, setInterval: () => 0, Date, Map, Object, String, Array, JSON, console }
+  vm.runInNewContext(source, ctx)
+  return { main, sent, ctx }
 }
 
 // Objects made inside the vm are of another realm.
@@ -117,4 +118,45 @@ test('with no guard file the form creates one with a null base, and the rule for
   policy.value = 'block'
   await labelled(main, 'Add rule').listeners.click()
   assert.deepEqual(plain(sent.at(-1)), [{ op: 'policy_add_rule', base: null, rule: { policy: 'block', tool: 'Bash' } }])
+})
+
+const panels = main => [...main.walk()].filter(node => node.attrs?.role === 'tabpanel')
+const tabButtons = main => buttons(main).filter(node => node.attrs?.role === 'tab')
+
+test('a card shows one tab at a time, a click switches it without a redraw, and a redraw keeps the chosen tab', async () => {
+  const { main, ctx } = load(overview(FILE))
+  await settle()
+  assert.deepEqual(tabButtons(main).map(node => node.textContent), ['Intent', 'Evidence', 'Team', 'Guard'])
+  assert.deepEqual(panels(main).map(node => node.hidden), [false, true, true, true])
+  await tabButtons(main)[3].listeners.click()
+  assert.deepEqual(panels(main).map(node => node.hidden), [true, true, true, false])
+  assert.deepEqual(tabButtons(main).map(node => node.attrs['aria-selected']), ['false', 'false', 'false', 'true'])
+  await ctx.refresh(true)
+  assert.deepEqual(panels(main).map(node => node.hidden), [true, true, true, false])
+})
+
+test('while an answer is pending the tabs stay usable and the change buttons rest', async () => {
+  const { main } = load(overview(FILE, { acks: [{ id: 'c', session: 's1', label: 'lock', at: Date.now() }] }))
+  await settle()
+  assert.ok(tabButtons(main).every(node => !node.disabled))
+  assert.ok(buttons(main).filter(node => node.textContent === 'Add').every(node => node.disabled))
+})
+
+test('a proposal from Claude is shown with where to decide it, and the app offers no approve or reject', async () => {
+  const data = overview(FILE)
+  data.snaps.s1.proposals = [{ change: 'add_constraint', text: 'keep logs', reason: 'audit' }]
+  const { main } = load(data)
+  await settle()
+  const texts = [...main.walk()].map(node => node.textContent)
+  assert.ok(texts.some(text => text.includes('keep logs')))
+  assert.ok(texts.includes(strings('en').ui.proposalNote))
+  assert.ok(!buttons(main).some(node => /approve|reject|accept|deny/i.test(node.textContent)))
+})
+
+test('the ribbon counts the verified done conditions', async () => {
+  const data = overview(FILE)
+  data.snaps.s1.task.doneConditions = [{ id: 'a', text: 't', link: null, status: 'verified' }, { id: 'b', text: 'u', link: null, status: 'pending' }]
+  const { main } = load(data)
+  await settle()
+  assert.ok([...main.walk()].some(node => node.textContent === 'Done 1/2'))
 })

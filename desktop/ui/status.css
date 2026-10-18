@@ -55,3 +55,15 @@ select option { background: var(--surface); color: var(--text); }
 .adder input { flex: 1 1 8em; min-width: 0; }
 .bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
 .rolename { flex: 0 0 190px; min-width: 0; font: 12px/1.5 var(--mono); color: var(--muted); align-self: center; }
+[hidden] { display: none !important; }
+.ribbon { display: flex; flex-wrap: wrap; gap: 4px 0; align-items: baseline; margin: 0 0 6px; padding: 4px 8px; background: var(--canvas); border: 1px solid var(--line); border-radius: 4px; font: 12px/1.5 var(--mono); color: var(--muted); }
+.ribbon > span + span::before { content: "\2502\00a0"; content: "\2502\00a0" / ""; margin: 0 6px 0 4px; color: var(--line); }
+.ribbon .r-goal { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ribbon .dot.alive { color: var(--ok); }
+.ribbon .dot.quiet, .ribbon .warn { color: var(--amber); }
+.tabs { display: flex; flex-wrap: wrap; gap: 0; margin: 8px 0 0; border-bottom: 1px solid var(--line); }
+.tabs .tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 4px 12px; color: var(--muted); }
+.tabs .tab[aria-selected="true"] { border-bottom-color: var(--primary); color: var(--primary); }
+.tabs .tab:hover:not(:disabled) { background: transparent; border-color: transparent; border-bottom-color: var(--primary); }
+.panel { padding-top: 6px; }
+.foot { margin-top: 8px; border-top: 1px solid var(--line); }
