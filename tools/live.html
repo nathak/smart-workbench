@@ -49,6 +49,7 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 va
 .turnhead .mt{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
 .mc{display:inline-flex;gap:4px;align-items:center;padding:0 8px;border:1px solid var(--border-strong);border-radius:999px;color:var(--fg-muted);font-size:var(--fs-xs);line-height:18px}
 .mc .ic{width:12px;height:12px;margin:0}.mc.bad{color:var(--bad);border-color:var(--bad)}.mc.warn{color:var(--warn);border-color:var(--warn)}
+.trow:hover .arg,.trow[aria-selected=true] .arg{background:var(--surface);outline:1px solid var(--border)}
 .trow .ti{color:var(--fg-muted);margin:0}.trow .tn{font-weight:700;flex:none}.trow .arg{font:var(--fs-xs)/1.6 var(--mono);color:var(--fg-muted);background:var(--surface-2);padding:0 6px;border-radius:var(--r)}
 .trow .st .ic{width:12px;height:12px;margin-right:4px}.turnhead .tx{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .turnhead .mt{color:var(--fg-muted);font-size:var(--fs-xs)}
@@ -389,8 +390,8 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 
   <main>
   <div class="tabpanel" id="p-timeline" role="tabpanel" aria-labelledby="tab-timeline">
-  <section id="p-flow" aria-labelledby="h-flow">
-    <h2 class="sech" id="h-flow"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-tree"/></svg><span data-i="sec-flow"></span><span class="cnt" id="h-flow-n"></span></h2>
+  <section id="p-flow" aria-labelledby="h-flow-t">
+    <h2 class="sech" id="h-flow"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-tree"/></svg><span id="h-flow-t" data-i="sec-flow"></span><span class="cnt" id="h-flow-n"></span></h2>
 
     <div class="tools" id="tools">
       <button id="speed"></button><button id="motion"></button>
@@ -2355,7 +2356,7 @@ var kpiQueued = false;
 function queueKpi(){ if (!kpiQueued) { kpiQueued = true; requestAnimationFrame(function(){ safe('tiles', drawKpis); }); } }
 // While paused, replaying or playing back, time stands where the last event left it, so rates and ages do not drift.
 function nowFor(){ return replaying || playback || paused ? TR.lastAt : Date.now(); }
-function setCount(id, n, prefix, title){ var c = $(id); c.hidden = !n; c.textContent = prefix + n; c.title = title; }
+function setCount(id, n, prefix, title){ var c = $(id); c.hidden = !n; var shown = el('span', null, prefix + n); shown.setAttribute('aria-hidden', 'true'); c.replaceChildren(shown, el('span', 'sr', ', ' + n + ' ' + title)); c.title = title; }
 function agentRuns(){ var n = 0; TR.spans.forEach(function(sp){ if (sp.tool === 'Agent') n++; }); return n; }
 function drawKpis(){
   kpiQueued = false;
@@ -2450,7 +2451,7 @@ function translate(){
   lbl($('theme'), theme === 'dark' ? 'sun' : 'moon', theme === 'dark' ? T('th-light') : T('th-dark'));
   $('theme').title = L('switch theme', '테마 바꾸기');
   $('lang').setAttribute('aria-describedby', 'title');
-  [['tl', 'timeline', '타임라인'], ['mini', 'overview of the whole buffer: drag to zoom', '버퍼 전체 개요: 끌어서 확대'], ['tl-q', 'search', '검색'], ['tl-prev', 'previous match', '이전 일치'], ['tl-next', 'next match', '다음 일치'], ['tabs', 'views', '화면'], ['stabs', 'sessions', '세션'], ['kpis', 'metrics', '지표'], ['helpb', 'help', '도움말'], ['drawer', 'details', '상세']].forEach(function(a){ $(a[0]).setAttribute('aria-label', L(a[1], a[2])); });
+  [['tl', 'timeline', '타임라인'], ['mini', 'overview of the whole buffer: drag to zoom', '버퍼 전체 개요: 끌어서 확대'], ['tl-q', 'search', '검색'], ['tl-prev', 'previous match', '이전 일치'], ['tl-next', 'next match', '다음 일치'], ['tabs', 'views', '화면'], ['stabs', 'sessions', '세션'], ['kpis', 'metrics', '지표'], ['helpb', 'help', '도움말'], ['drawer', 'details', '상세'], ['dw-close', 'close', '닫기']].forEach(function(a){ $(a[0]).setAttribute('aria-label', L(a[1], a[2])); });
   Object.keys(edgeEl).forEach(function(id){ if (edgeEl[id].hitEl) edgeEl[id].hitEl.setAttribute('aria-label', edgeLabel(id)); });
   syncTools();
   renderSessions();
