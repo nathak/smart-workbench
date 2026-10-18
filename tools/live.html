@@ -113,6 +113,18 @@ dialog#help h3{margin:var(--sp-4) 0 var(--sp-2);font-size:var(--fs-md)}
 dialog#help dl{display:grid;grid-template-columns:auto 1fr;gap:var(--sp-2) var(--sp-4);margin:0;font-size:var(--fs-sm)}
 dialog#help dt{font-family:var(--mono)}dialog#help dd{margin:0;color:var(--fg-muted)}
 kbd{font-family:var(--mono);font-size:var(--fs-xs);border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:var(--r);padding:0 5px;background:var(--surface-2)}
+/* icons: one inline sprite, drawn in the colour of the text around them */
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+.ic{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
+button .ic{margin-right:6px}
+.srch{display:inline-flex;align-items:center;gap:var(--sp-2);flex:1 1 220px;min-width:0;color:var(--fg-muted)}
+.srch #tl-q{flex:1}
+.cnt{margin-left:auto;font:600 var(--fs-xs)/1.5 var(--mono);padding:0 6px;border:1px solid currentColor;border-radius:999px}
+.cnt.warn{color:var(--warn)}
+.k-i{position:absolute;top:10px;right:10px;color:var(--fg-muted)}
+.tile.bad .k-i{color:var(--bad)}.tile.warn .k-i{color:var(--warn)}.tile.ok .k-i{color:var(--ok)}
+.tile .k-l{padding-right:26px}
+.tile .k-v{font-size:clamp(22px,2.4vw,30px)}
 /* KPI tiles */
 .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--sp-3);margin:var(--sp-4) 0}
 @media(max-width:1100px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -158,7 +170,7 @@ nav.stabs .sb.ask::before{content:"? "}
 .sidenav{position:sticky;top:44px;align-self:start;max-height:calc(100vh - 44px);overflow:auto;background:var(--surface);border-right:1px solid var(--border);padding:var(--sp-4) 0;height:calc(100vh - 44px)}
 .sidenav h2{margin:0 var(--sp-5) var(--sp-3);font:600 var(--fs-xs)/1.4 var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--fg-muted)}
 .sidenav nav.tabs{flex-direction:column;border-bottom:0;margin:0;overflow:visible}
-.sidenav nav.tabs button{text-align:left;width:100%;border-bottom:0;border-left:2px solid transparent;padding:var(--sp-3) var(--sp-5);text-transform:none;font-size:var(--fs-md);letter-spacing:0}
+.sidenav nav.tabs button{display:flex;gap:10px;align-items:center;text-align:left;width:100%;border-bottom:0;border-left:2px solid transparent;padding:var(--sp-3) var(--sp-5);text-transform:none;font-size:var(--fs-md);letter-spacing:0}
 .sidenav nav.tabs button:hover{background:var(--surface-2);border-left-color:var(--border-strong)}
 .sidenav nav.tabs button[aria-selected=true]{background:var(--surface-2);border-left-color:var(--focus)}
 .statusstrip{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;margin:var(--sp-4) 0 0;padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-radius:var(--r);font:var(--fs-sm)/1.4 var(--mono)}
@@ -274,6 +286,38 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 </style>
 </head>
 <body>
+<svg class="sprite" aria-hidden="true" focusable="false"><defs>
+<symbol id="i-flow" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+<symbol id="i-team" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5a3 3 0 0 1 0 6M18 14c2 .7 3 2.6 3 6"/></symbol>
+<symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4 18a8 8 0 1 1 16 0M12 18l4-6"/></symbol>
+<symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3L2 21h20zM12 10v5M12 18v.01"/></symbol>
+<symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.7M12 17v.01"/></symbol>
+<symbol id="i-ctx" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 9 9h-9z"/></symbol>
+<symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h14l-4-4M20 16H6l4 4"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></symbol>
+<symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 4v4M9 13v1M15 13v1M2 14v2M22 14v2"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></symbol>
+<symbol id="i-codex" viewBox="0 0 24 24"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6"/></symbol>
+<symbol id="i-loop" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6"/></symbol>
+<symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+<symbol id="i-tree" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6"/><rect x="15" y="3" width="6" height="6"/><rect x="15" y="15" width="6" height="6"/><path d="M9 6h6M6 9v9h9"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+<symbol id="i-replay" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15A8 8 0 0 1 9 4a8 8 0 1 0 11 11z"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+</defs></svg>
 <div class="page">
   <header class="topbar" id="topbar">
     <span class="brand">SmartWorkbench · Live</span>
@@ -290,9 +334,9 @@ button:hover{color:var(--fg);background:var(--surface-2)}
   <aside class="sidenav">
     <h2 data-i="nav-h"></h2>
     <nav class="tabs" role="tablist" id="tabs" aria-label="views">
-      <button role="tab" id="tab-timeline" aria-controls="p-timeline" data-tab="timeline"></button>
-      <button role="tab" id="tab-guard" aria-controls="p-guard" data-tab="guard"></button>
-      <button role="tab" id="tab-agents" aria-controls="p-agents" data-tab="agents"></button>
+      <button role="tab" id="tab-timeline" aria-controls="p-timeline" data-tab="timeline"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-flow"/></svg><span data-i="tab-timeline"></span></button>
+      <button role="tab" id="tab-guard" aria-controls="p-guard" data-tab="guard"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><span data-i="tab-guard"></span><span class="cnt warn" id="nav-guard-n" hidden></span></button>
+      <button role="tab" id="tab-agents" aria-controls="p-agents" data-tab="agents"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-team"/></svg><span data-i="tab-agents"></span><span class="cnt" id="nav-agents-n" hidden></span></button>
     </nav>
   </aside>
   <div class="maincol">
@@ -304,7 +348,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <span id="notices"></span>
     <span class="badge warn" id="srv-warn" hidden role="status"></span>
     <span class="badge bad" id="errs" hidden role="status"></span>
-    <input id="tl-q" type="search" autocomplete="off" spellcheck="false" aria-label="search">
+    <label class="srch"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-search"/></svg><input id="tl-q" type="search" autocomplete="off" spellcheck="false" aria-label="search"></label>
     <span class="muted mono" id="tl-hits"></span>
     <button id="tl-prev" aria-label="previous match">‹</button><button id="tl-next" aria-label="next match">›</button>
     <button id="pause"></button>
@@ -312,12 +356,12 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <span class="grow"><button id="lang"></button><button id="helpb" aria-label="help" aria-haspopup="dialog">?</button></span>
   </div>
   <section class="kpis" id="kpis" aria-label="metrics">
-    <button class="tile" id="k-calls"><span class="k-l" data-i="k-calls"></span><span class="k-v" id="k-calls-v">0</span><span class="k-s" id="k-calls-s"></span><svg class="spark" id="k-calls-sp" viewBox="0 0 64 22" aria-hidden="true"></svg></button>
-    <button class="tile" id="k-lat"><span class="k-l" data-i="k-lat"></span><span class="k-v" id="k-lat-v">–</span><span class="k-s" id="k-lat-s"></span></button>
-    <button class="tile" id="k-fail"><span class="k-l" data-i="k-fail"></span><span class="k-v" id="k-fail-v">0</span><span class="k-s" id="k-fail-s"></span><svg class="spark" id="k-fail-sp" viewBox="0 0 64 22" aria-hidden="true"></svg></button>
-    <button class="tile" id="k-ask"><span class="k-l" data-i="k-ask"></span><span class="k-v" id="k-ask-v">0</span><span class="k-s" id="k-ask-s"></span></button>
-    <button class="tile" id="ctx"><span class="k-l" data-i="k-ctx"></span><span class="k-v" id="ctx-t">–</span><span class="cbar"><i id="ctx-f"></i></span><span class="k-s" id="k-ctx-s"></span><span class="k-s" id="ctx-spark"></span></button>
-    <button class="tile" id="k-tok"><span class="k-l" data-i="k-tok"></span><span class="k-v" id="k-tok-v">–</span><span class="k-s" id="k-tok-s"></span></button>
+    <button class="tile" id="k-calls"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-gauge"/></svg><span class="k-l" data-i="k-calls"></span><span class="k-v" id="k-calls-v">0</span><span class="k-s" id="k-calls-s"></span><svg class="spark" id="k-calls-sp" viewBox="0 0 64 22" aria-hidden="true"></svg></button>
+    <button class="tile" id="k-lat"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-timer"/></svg><span class="k-l" data-i="k-lat"></span><span class="k-v" id="k-lat-v">–</span><span class="k-s" id="k-lat-s"></span></button>
+    <button class="tile" id="k-fail"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-alert"/></svg><span class="k-l" data-i="k-fail"></span><span class="k-v" id="k-fail-v">0</span><span class="k-s" id="k-fail-s"></span><svg class="spark" id="k-fail-sp" viewBox="0 0 64 22" aria-hidden="true"></svg></button>
+    <button class="tile" id="k-ask"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-help"/></svg><span class="k-l" data-i="k-ask"></span><span class="k-v" id="k-ask-v">0</span><span class="k-s" id="k-ask-s"></span></button>
+    <button class="tile" id="ctx"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-ctx"/></svg><span class="k-l" data-i="k-ctx"></span><span class="k-v" id="ctx-t">–</span><span class="cbar"><i id="ctx-f"></i></span><span class="k-s" id="k-ctx-s"></span><span class="k-s" id="ctx-spark"></span></button>
+    <button class="tile" id="k-tok"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-swap"/></svg><span class="k-l" data-i="k-tok"></span><span class="k-v" id="k-tok-v">–</span><span class="k-s" id="k-tok-s"></span></button>
   </section>
 
   <main>
@@ -420,7 +464,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <div class="muted" id="tl-note" role="status"></div>
     <div id="tl" role="tree" tabindex="0" aria-label="timeline"></div>
     <aside id="drawer" role="region" aria-labelledby="dw-title" hidden>
-    <button id="dw-close" aria-label="close">✕</button>
+    <button id="dw-close" aria-label="close"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-x"/></svg></button>
     <h3 id="dw-title"></h3><div id="dw-item" hidden></div><div id="dw-stats"></div><div id="dw-links"></div><div id="dw-prompts" hidden></div><div id="dw-list"></div>
   </aside>
   </div>
@@ -492,6 +536,7 @@ var DICT = {
   'w-sub': ['Sonnet · edits + tests', 'Sonnet · 편집 + 테스트'], 'w-edit-l': ['edits', '편집'], 'w-sh-l': ['shell', '셸'],
   'e-sub': ['Haiku · read code + docs', 'Haiku · 코드·문서 읽기'], 'e-read-l': ['reads', '읽기'], 'e-run-l': ['running', '실행 중'],
   'p-sub': ['repeats a task', '회차 반복'], 'p-pass-l': ['pass', '회차'], 'p-turn-l': ['turns', '턴'],
+  'nav-wait': ['waiting', '대기 중'], 'nav-runs': ['agent runs', '에이전트 실행'],
   'sec-flow': ['Request flow', '요청 흐름'], 'sec-tl': ['Execution timeline', '실행 타임라인'],
   'nav-h': ['Workbench sectors', '워크벤치 영역'],
   'tab-timeline': ['Live flow & timeline', '실시간 흐름·타임라인'],
@@ -1198,6 +1243,8 @@ function reset(){
 
 function $(id){ return document.getElementById(id); }
 // Text from the feed only ever reaches the page through textContent, so it can never become markup.
+function ico(n, c){ var s = sv('svg', { 'class': 'ic' + (c ? ' ' + c : ''), 'aria-hidden': 'true', focusable: 'false' }); s.appendChild(sv('use', { href: '#i-' + n })); return s; }
+function lbl(node, n, text){ node.replaceChildren(ico(n), el('span', null, text)); }
 function el(tag, cls, text){ var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
 // Parts are plain strings (text) or [tag, text] pairs for <i> and <code>.
 function fill(node, parts){
@@ -1430,9 +1477,9 @@ function endPlayback(restart){
 
 var SPEEDS = [0.5, 1, 2, 4];
 function syncTools(){
-  $('pause').textContent = paused ? L('▶ resume', '▶ 재개') + (pending.length ? ' +' + pending.length : '') : L('⏸ pause', '⏸ 일시정지');
+  lbl($('pause'), paused ? 'play' : 'pause', paused ? L('resume', '재개') + (pending.length ? ' +' + pending.length : '') : L('pause', '일시정지'));
   $('pause').setAttribute('aria-pressed', paused ? 'true' : 'false');
-  $('replay').textContent = playback ? L('■ stop replay', '■ 다시보기 중지') : L('↺ replay last', '↺ 최근 다시보기');
+  lbl($('replay'), playback ? 'x' : 'replay', playback ? L('stop replay', '다시보기 중지') : L('replay last', '최근 다시보기'));
   $('speed').textContent = L('speed ', '속도 ') + speed + '×';
   $('motion').textContent = motion ? L('motion on', '모션 켬') : L('motion off', '모션 끔');
   $('motion').setAttribute('aria-pressed', motion ? 'true' : 'false');
@@ -2261,14 +2308,16 @@ var kpiQueued = false;
 function queueKpi(){ if (!kpiQueued) { kpiQueued = true; requestAnimationFrame(function(){ safe('tiles', drawKpis); }); } }
 // While paused, replaying or playing back, time stands where the last event left it, so rates and ages do not drift.
 function nowFor(){ return replaying || playback || paused ? TR.lastAt : Date.now(); }
+function setCount(id, n, prefix, title){ var c = $(id); c.hidden = !n; c.textContent = prefix + n; c.title = title; }
+function agentRuns(){ var n = 0; TR.spans.forEach(function(sp){ if (sp.tool === 'Agent') n++; }); return n; }
 function drawKpis(){
   kpiQueued = false;
   var K = kpis(TR, nowFor() || Date.now());
   $('k-calls-v').textContent = K.callsPerMin;
   $('k-calls-s').textContent = L(K.spans + ' calls in the buffer', '버퍼 내 호출 ' + K.spans + '개');
   spark($('k-calls-sp'), K.callSpark);
-  $('k-lat-v').textContent = K.latN ? fmtMs(K.p50) + ' · ' + fmtMs(K.p95) : '–';
-  $('k-lat-s').textContent = L('p50 · p95 of ' + K.latN + ' calls', K.latN + '개 호출의 p50 · p95');
+  $('k-lat-v').textContent = K.latN ? fmtMs(K.p50) : '–';
+  $('k-lat-s').textContent = L('p50 · p95 ' + (K.latN ? fmtMs(K.p95) : '–') + ' · ' + K.latN + ' calls', 'p50 · p95 ' + (K.latN ? fmtMs(K.p95) : '–') + ' · ' + K.latN + '개 호출');
   $('k-lat').title = L('Excludes asks (they wait on a person), blocked or declined calls, Agent and Workflow calls and Codex background runs (they only start something), calls of zero length and calls still running.', '확인을 기다린 호출, 차단·거절된 호출, Agent·Workflow 호출과 Codex 백그라운드 실행(시작만 함), 길이 0인 호출, 진행 중인 호출은 뺍니다.');
   $('k-fail-v').textContent = (K.fails ? '▲ ' : '') + K.fails;
   $('k-fail-s').textContent = L('blocked ' + K.blocked + ' · errors ' + K.errors + ' · aborted ' + K.aborted, '차단 ' + K.blocked + ' · 오류 ' + K.errors + ' · 중단 ' + K.aborted);
@@ -2277,6 +2326,8 @@ function drawKpis(){
   $('k-ask-v').textContent = (K.askPending ? '? ' : '') + K.askPending;
   $('k-ask-s').textContent = K.askPending ? L('oldest ' + fmtMs(K.askAge) + ' · answer in the terminal', '가장 오래된 것 ' + fmtMs(K.askAge) + ' · 터미널에서 답하세요') : L('none waiting', '대기 없음');
   $('k-ask').className = 'tile' + (K.askPending ? ' warn' : '');
+  setCount('nav-guard-n', K.askPending, '? ', T('nav-wait'));
+  setCount('nav-agents-n', agentRuns(), '', T('nav-runs'));
   $('k-tok-v').textContent = K.tokIn || K.tokOut ? k(K.tokIn) + ' / ' + k(K.tokOut) : '–';
   $('k-tok-s').textContent = L('input includes cache · ' + K.turns + ' turns · active ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · loop ' + K.loopPasses : ''), '입력은 캐시 포함 · ' + K.turns + '턴 · 활동 ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · 루프 ' + K.loopPasses : ''));
 }
@@ -2346,11 +2397,10 @@ function translate(){
   document.documentElement.lang = lang;
   var nodes = document.querySelectorAll('[data-i]');
   for (var i = 0; i < nodes.length; i++) nodes[i].textContent = T(nodes[i].getAttribute('data-i'));
-  $('lang').textContent = lang === 'ko' ? 'EN' : '한국어';
+  lbl($('lang'), 'globe', lang === 'ko' ? 'EN' : '한국어');
   $('lang').title = lang === 'ko' ? 'Switch to English' : '한글로 보기';
   $('title').textContent = location.host;
-  TABS.forEach(function(t){ $('tab-' + t).textContent = T('tab-' + t); });
-  $('theme').textContent = theme === 'dark' ? T('th-light') : T('th-dark');
+  lbl($('theme'), theme === 'dark' ? 'sun' : 'moon', theme === 'dark' ? T('th-light') : T('th-dark'));
   $('theme').title = L('switch theme', '테마 바꾸기');
   $('lang').setAttribute('aria-describedby', 'title');
   [['tl', 'timeline', '타임라인'], ['mini', 'overview of the whole buffer: drag to zoom', '버퍼 전체 개요: 끌어서 확대'], ['tl-q', 'search', '검색'], ['tl-prev', 'previous match', '이전 일치'], ['tl-next', 'next match', '다음 일치'], ['tabs', 'views', '화면'], ['stabs', 'sessions', '세션'], ['kpis', 'metrics', '지표'], ['helpb', 'help', '도움말'], ['drawer', 'details', '상세']].forEach(function(a){ $(a[0]).setAttribute('aria-label', L(a[1], a[2])); });
