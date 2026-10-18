@@ -1654,7 +1654,7 @@ let lastBackgroundAt = 0
 
 // A command is taken to be able to leave a process behind unless it is a plain, short inspection: no shell operators or substitutions, and a command known
 // to finish and do nothing else. Anything else (a script, an interpreter, a build tool, a trailing &) may write an answer later.
-const SHORT_SAFE = /^\s*(?:ls|pwd|cat|head|tail|wc|stat|file|which|date|whoami|echo|printf|git\s+(?:status|rev-parse|ls-files))\b[^;&|`$()<>\n]*$/
+const SHORT_SAFE = /^\s*(?:ls|pwd|cat|head|tail|wc|stat|file|which|date|whoami|echo|printf|git\s+(?:status|rev-parse|ls-files))(?=\s|$)(?!.*\s--?(?:exec|pre|upload-pack|receive-pack|ext-diff|output)\b)[^;&|`$()<>\n]*$/
 const mayDetach = (command: string): boolean => !SHORT_SAFE.test(command)
 
 // Why a question cannot be answered from outside, or undefined when it can.
@@ -2112,7 +2112,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     if (noPrompts) {
       await setLive($, live => ({ ...live, livePrompts: false }))
 
-      return { text: `Live view: ${liveServer.url}\nFrom now on the feed keeps only the first 120 characters of a prompt (lines already written stay).` }
+      return { text: `Live view: ${liveServer.url}\nFrom now on the feed keeps only the first 120 characters of a prompt and no subagent results or tool input and output (lines already written stay).` }
     }
 
     return { text: `Live view: ${liveServer.url}\n/swb live stop to end it.${await feedNote($)}` }
@@ -2175,7 +2175,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
   )
 
   if (await Promise.race([started, timeout])) {
-    return { text: `Live view: ${url}\nOpen it in a browser. /swb live stop to end it. The feed holds prompts up to 2000 characters with secrets masked (a heuristic); /swb live --no-prompts keeps only their first 120 characters. Do not commit .claude/smartworkbench-live.jsonl.` }
+    return { text: `Live view: ${url}\nOpen it in a browser. /swb live stop to end it. The feed holds prompts up to 2000 characters with secrets masked (a heuristic); /swb live --no-prompts keeps only their first 120 characters and drops subagent results and tool input and output. Do not commit .claude/smartworkbench-live.jsonl.` }
   }
   handle.stop()
 
