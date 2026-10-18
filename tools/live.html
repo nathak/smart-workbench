@@ -44,7 +44,13 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 va
 .tlbar{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center;margin-bottom:var(--sp-3);font-size:var(--fs-sm)}
 .turnhead{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;width:100%;text-align:left;border:0;border-bottom:1px solid var(--border);border-radius:0;background:var(--surface-2);color:var(--fg);padding:var(--sp-3) var(--sp-4);position:sticky;top:0;z-index:2;min-height:30px;font:var(--fs-sm)/1.4 var(--mono);border-left:2px solid var(--focus)}
 .turnhead:hover{background:var(--surface-2)}
-.turnhead .tt{font-weight:700;color:var(--focus)}.turnhead .tx{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.turnhead .tt{display:inline-flex;align-items:center;font-weight:700;color:var(--focus);padding:0 8px 0 4px;border:1px solid var(--focus);border-radius:var(--r);text-transform:uppercase;letter-spacing:.06em;font-size:var(--fs-xs)}
+.turnhead .tt .ic{width:14px;height:14px;margin-right:2px;transition:transform .15s}.turnhead .tt .rot{transform:rotate(90deg)}
+.turnhead .mt{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
+.mc{display:inline-flex;gap:4px;align-items:center;padding:0 8px;border:1px solid var(--border-strong);border-radius:999px;color:var(--fg-muted);font-size:var(--fs-xs);line-height:18px}
+.mc .ic{width:12px;height:12px;margin:0}.mc.bad{color:var(--bad);border-color:var(--bad)}.mc.warn{color:var(--warn);border-color:var(--warn)}
+.trow .ti{color:var(--fg-muted);margin:0}.trow .tn{font-weight:700;flex:none}.trow .arg{font:var(--fs-xs)/1.6 var(--mono);color:var(--fg-muted);background:var(--surface-2);padding:0 6px;border-radius:var(--r)}
+.trow .st .ic{width:12px;height:12px;margin-right:4px}.turnhead .tx{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .turnhead .mt{color:var(--fg-muted);font-size:var(--fs-xs)}
 .trow{display:grid;grid-template-columns:minmax(0,1fr) 150px 64px;gap:var(--sp-3);align-items:center;min-height:26px;padding:0 var(--sp-4);border-bottom:1px solid var(--border);font-size:var(--fs-sm);cursor:pointer;width:100%;text-align:left;border-radius:0;color:var(--fg);background:transparent;border-left:0;border-right:0;border-top:0}
 .trow:hover{background:var(--surface-2)}
@@ -53,7 +59,7 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 va
 .trow .nm .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .trow .tm{color:var(--fg-muted);font-size:var(--fs-xs)}
 .trow .nm .st{order:9;margin-left:auto}
-.trow .st{display:inline-block;min-width:78px;font-size:var(--fs-xs);font-family:var(--mono);padding:0 6px;border:1px solid currentColor;border-radius:var(--r);text-align:center;line-height:18px}
+.trow .st{display:inline-flex;align-items:center;justify-content:center;min-width:78px;font-size:var(--fs-xs);font-family:var(--mono);padding:0 6px;border:1px solid currentColor;border-radius:var(--r);text-align:center;line-height:18px}
 .st.ok{color:var(--ok)}.st.error,.st.blocked,.st.declined{color:var(--bad)}.st.ask,.st.running{color:var(--warn)}.st.bg{color:var(--loop)}
 .trow .who{font-size:var(--fs-xs);min-width:64px}
 .trow .caret{width:14px;color:var(--fg-muted);flex:none}
@@ -83,7 +89,8 @@ mark{background:var(--warn-bg);color:var(--fg);outline:1px solid var(--warn);bor
 .mini .lbl{fill:var(--fg-muted);font-size:9px}
 /* tables and lists for the Guard and Agents tabs */
 .sect{margin:0 0 var(--sp-5)}
-.sech{margin:var(--sp-5) 0 var(--sp-3);font:700 var(--fs-lg)/1.3 var(--mono);letter-spacing:-.02em}
+.sech{display:flex;align-items:center;gap:10px;margin:var(--sp-5) 0 var(--sp-3);font:700 var(--fs-lg)/1.3 var(--mono);letter-spacing:-.02em}
+#p-flow .cnt,.sech .cnt{margin-left:0;color:var(--fg-muted);border-color:var(--border-strong);font-weight:500}
 #p-flow{margin-bottom:var(--sp-5);scroll-margin-top:52px}
 .sect h2{font:700 var(--fs-md)/1.3 var(--mono);text-transform:uppercase;letter-spacing:.04em;margin:0 0 var(--sp-3)}
 .queue{display:flex;flex-direction:column;gap:var(--sp-2)}
@@ -382,7 +389,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
   <main>
   <div class="tabpanel" id="p-timeline" role="tabpanel" aria-labelledby="tab-timeline">
   <section id="p-flow" aria-labelledby="h-flow">
-    <h2 class="sech" id="h-flow" data-i="sec-flow"></h2>
+    <h2 class="sech" id="h-flow"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-tree"/></svg><span data-i="sec-flow"></span><span class="cnt" id="h-flow-n"></span></h2>
 
     <div class="tools" id="tools">
       <button id="speed"></button><button id="motion"></button>
@@ -469,7 +476,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     </div>
 
   </section>
-    <h2 class="sech" id="h-tl" data-i="sec-tl"></h2>
+    <h2 class="sech" id="h-tl"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="sec-tl"></span><span class="cnt" id="h-tl-n"></span></h2>
     <svg class="mini" id="mini" viewBox="0 0 1000 48" preserveAspectRatio="none" role="img" aria-label="overview"></svg>
     <div class="tlbar">
       <button id="tl-follow" aria-pressed="true"></button>
@@ -1323,6 +1330,8 @@ function render(){
   $('p-state').textContent = S.pass ? L('looping', '반복 중') : L('idle', '대기');
   $('b-loop').classList.toggle('busy', !!S.pass);
   $('count').textContent = S.events + L(' events', '개 이벤트');
+  $('h-flow-n').textContent = S.events + L(' events passed', '개 이벤트 통과');
+  $('h-tl-n').textContent = TR.turns.length + L(' turns', '턴');
   var ids = Object.keys(S.sessions);
   $('sess').textContent = ids.length ? L('session ', '세션 ') + ids[0].slice(0, 8) : '';
   var nt = $('notices');
@@ -1696,7 +1705,11 @@ function turnOpen(t, i, n){
   return auto;
 }
 function stWord(st){ return T('s-' + st); }
-function stBadge(st){ return el('span', 'st ' + st, (STATUS_ICON[st] || '•') + ' ' + stWord(st)); }
+var STATUS_SVG = { ok: 'check', error: 'alert', blocked: 'x', declined: 'x', aborted: 'pause', running: 'timer', bg: 'play', ask: 'help' };
+var TOOL_ICON = { Read: 'file', Edit: 'pen', Write: 'pen', MultiEdit: 'pen', NotebookEdit: 'pen', Bash: 'term', Agent: 'bot', Task: 'bot', Grep: 'search', Glob: 'search', WebSearch: 'search', WebFetch: 'globe', Workflow: 'tree', TodoWrite: 'list' };
+function toolIcon(tool){ return Object.prototype.hasOwnProperty.call(TOOL_ICON, tool) ? TOOL_ICON[tool] : 'bolt'; }
+function stBadge(st){ var b = el('span', 'st ' + st); b.appendChild(ico(STATUS_SVG[st] || 'flow')); b.appendChild(el('span', null, stWord(st))); return b; }
+function chip(text, cls, icon){ var c = el('span', 'mc' + (cls ? ' ' + cls : '')); if (icon) c.appendChild(ico(icon)); c.appendChild(el('span', null, text)); return c; }
 var tlq = { text: '', parsed: parseQuery(''), crit: false, range: null, hits: [], hitAt: -1, runOpen: Object.create(null) };
 function setQuery(text){
   tlq.text = text; tlq.parsed = parseQuery(text); tlq.hitAt = -1;
@@ -1763,10 +1776,18 @@ function drawTimeline(){
     var head = el('button', 'turnhead');
     head.setAttribute('aria-expanded', open ? 'true' : 'false'); head.setAttribute('role', 'treeitem'); head.setAttribute('aria-level', '1');
     head.dataset.key = 'turn:' + t.n; tl.extra.set(head.dataset.key, head);
-    head.appendChild(el('span', 'tt', (open ? '▾ ' : '▸ ') + (t.early ? L('before the first prompt', '첫 프롬프트 이전') : '#' + t.n)));
+    var tt = el('span', 'tt'); tt.appendChild(ico('chev', open ? 'rot' : '')); tt.appendChild(el('span', null, t.early ? L('before the first prompt', '첫 프롬프트 이전') : L('TURN ', '턴 ') + t.n)); head.appendChild(tt);
     if (!t.early) head.appendChild(el('span', 'tag ' + (t.loop ? 'loop' : ''), t.loop ? L('LOOP', '루프') : t.resumed ? L('RESUMED', '재개') : t.origin === 'plugin' ? L('PLUGIN', '플러그인') : L('PROMPT', '프롬프트')));
     head.appendChild(hl(el('span', 'tx'), t.early ? L('(the start of the feed may have been cut)', '(피드의 앞부분이 잘렸을 수 있음)') : t.resumed ? L('continued with no prompt: a background agent or a hook resumed the session', '프롬프트 없이 이어짐: 백그라운드 에이전트나 훅이 세션을 다시 이어 감') : cut(t.text, 140)));
-    head.appendChild(el('span', 'mt', L(calls + ' calls', '호출 ' + calls) + (errs ? ' · ' + (L('▲ ' + errs + ' failed', '▲ 실패 ' + errs)) : '') + ' · ' + fmtMs(tEnd - t.at) + (t.ctx != null ? ' · ' + L('ctx ', '컨텍스트 ') + t.ctx + '%' : '') + (t.tokIn || t.tokOut ? ' · ' + k(t.tokIn) + '/' + k(t.tokOut) : '') + (t.aborted ? ' · ' + L('aborted', '중단') : t.end === null ? ' · ' + L('running', '진행 중') : '')));
+    var mt = el('span', 'mt');
+    mt.appendChild(chip(L(calls + ' calls', '호출 ' + calls)));
+    if (errs) mt.appendChild(chip(L(errs + ' failed', '실패 ' + errs), 'bad', 'alert'));
+    mt.appendChild(chip(fmtMs(tEnd - t.at), '', 'timer'));
+    if (t.ctx != null) mt.appendChild(chip(L('ctx ', '컨텍스트 ') + t.ctx + '%', '', 'ctx'));
+    if (t.tokIn || t.tokOut) mt.appendChild(chip(k(t.tokIn) + '/' + k(t.tokOut), '', 'swap'));
+    if (t.aborted) mt.appendChild(chip(L('aborted', '중단'), 'bad', 'pause'));
+    else if (t.end === null) mt.appendChild(chip(L('running', '진행 중'), 'warn', 'timer'));
+    head.appendChild(mt);
     turnWarns(t).forEach(function(w){
       head.appendChild(el('span', 'badge warn', w.kind === 'repeat' ? L('⚠ repeated ' + cut(w.tool, 20), '⚠ 반복 ' + cut(w.tool, 20)) : w.kind === 'errors' ? L('⚠ ' + w.n + ' failures', '⚠ 실패 ' + w.n + '개') : L('⚠ repeated error', '⚠ 같은 오류 반복')));
     });
@@ -1788,10 +1809,12 @@ function drawTimeline(){
       if (sub.length) row.setAttribute('aria-expanded', tl.spanClosed[sp.id] ? 'false' : 'true');
       var nm = el('span', 'nm'); nm.style.paddingLeft = depth * 16 + 'px';
       nm.appendChild(el('span', 'caret', sub.length ? (tl.spanClosed[sp.id] ? '▸' : '▾') : ''));
-      nm.appendChild(stBadge(st));
+      nm.appendChild(ico(toolIcon(sp.tool), 'ti'));
+      nm.appendChild(hl(el('b', 'tn'), sp.tool));
+      if (sp.summary) nm.appendChild(hl(el('code', 'tx arg'), sp.summary));
       nm.appendChild(el('span', 'tm', clock(sp.at)));
       nm.appendChild(el('span', 'who ' + who[1], who[0]));
-      nm.appendChild(hl(el('span', 'tx'), sp.tool + ' ' + sp.summary));
+      nm.appendChild(stBadge(st));
       if (critSet && critSet[sp.id]) nm.appendChild(el('span', 'sub2', '◆'));
       if (sp.est) nm.appendChild(el('span', 'sub2', L('(guessed parent)', '(부모 추정)')));
       if (sp.tool === 'Agent' && sp.agentRun) { var as = agentStats(TR, sp); nm.appendChild(el('span', 'sub2', L(as.calls + ' calls', '호출 ' + as.calls) + (as.fails ? ' · ▲ ' + as.fails : '') + (as.tokIn || as.tokOut ? ' · ' + k(as.tokIn) + '/' + k(as.tokOut) : ''))); }
