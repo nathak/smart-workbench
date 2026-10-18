@@ -205,22 +205,37 @@ pre.full{margin:0;padding:6px 8px;font-size:var(--fs-sm);white-space:pre-wrap;ov
 .grid{position:relative;display:grid;grid-template-columns:minmax(210px,270px) minmax(0,1fr);gap:18px;align-items:start}
 .box{position:relative;z-index:1;border:1px solid var(--border);border-top:2px solid var(--border-strong);border-radius:var(--r);padding:10px 13px;background:var(--surface);min-width:0}
 body.ready .box{transition:box-shadow .2s}
-.box h3{margin:0 0 3px;font:700 var(--fs-sm)/1.3 var(--mono);text-transform:uppercase;letter-spacing:.04em}
-.box .sub{color:var(--fg-muted);font-size:var(--fs-sm)}
+.box h3{display:flex;gap:8px;align-items:center;margin:0 0 2px;font:700 var(--fs-md)/1.3 var(--mono)}
+.bh{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;font:600 var(--fs-xs)/1.4 var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--fg-muted)}
+.box.opus{--accent:var(--opus)}.box.codex{--accent:var(--codex)}.box.sonnet{--accent:var(--sonnet)}.box.haiku{--accent:var(--haiku)}.box.guard{--accent:var(--guard)}.box.loop{--accent:var(--loop)}.box.user{--accent:var(--fg-muted)}
+.box .bh .mdl{color:var(--accent)}
+.box h3 .ic{color:var(--accent);margin:0}
+.stats{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:10px}
+.stat{display:flex;flex-direction:column;min-width:0}
+.stat b{font:700 22px/1.15 var(--mono);letter-spacing:-.02em}
+.stat span{font:var(--fs-xs)/1.4 var(--mono);color:var(--fg-muted);text-transform:uppercase;letter-spacing:.04em}
+.stat.allow b{color:var(--ok)}.stat.ask b{color:var(--warn)}.stat.block b{color:var(--bad)}
+.stack{display:flex;height:6px;margin-top:10px;border-radius:3px;overflow:hidden;background:var(--surface-2)}
+.nowrow{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:var(--fs-xs);color:var(--fg-muted);min-width:0}
+.nowrow code{font:var(--fs-xs)/1.5 var(--mono);color:var(--fg);background:var(--surface-2);padding:0 6px;border-radius:var(--r);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.quote{font-style:italic}
+.dot{display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;background:currentColor;vertical-align:0}
+.dot.allow{background:var(--ok)}.dot.ask{background:var(--warn)}.dot.block{background:var(--bad)}.dot.hold{background:var(--hold)}.dot.loop{background:var(--loop)}
+.box .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg-muted);font-size:var(--fs-sm)}
 .side{display:flex;flex-direction:column;gap:18px;min-width:0}
-.box.codex{border-top-color:var(--codex)} .box.codex h3{color:var(--codex)}.box.codex.busy{color:var(--codex)}.c-codex{color:var(--codex)}.sq.codex{background:var(--codex)}
-.box.opus{border-top-color:var(--opus)} .box.opus h3{color:var(--opus)}
-.box.sonnet{border-top-color:var(--sonnet)} .box.sonnet h3{color:var(--sonnet)}
-.box.haiku{border-top-color:var(--haiku)} .box.haiku h3{color:var(--haiku)}
-.box.guard{border-top-color:var(--guard)} .box.guard h3{color:var(--guard)}
-.box.loop{border-top-color:var(--loop)} .box.loop h3{color:var(--loop)}
-.box.user{border-top-color:var(--border-strong)} .box.user h3{color:var(--fg)}
+.box.codex{border-top-color:var(--codex)}.box.codex.busy{color:var(--codex)}.c-codex{color:var(--codex)}.sq.codex{background:var(--codex)}
+.box.opus{border-top-color:var(--opus)}
+.box.sonnet{border-top-color:var(--sonnet)}
+.box.haiku{border-top-color:var(--haiku)}
+.box.guard{border-top-color:var(--guard)}
+.box.loop{border-top-color:var(--loop)}
+.box.user{border-top-color:var(--border-strong)}
 .box.busy{box-shadow:0 0 0 1px currentColor}
 .box.opus.busy{color:var(--opus)}.box.sonnet.busy{color:var(--sonnet)}.box.haiku.busy{color:var(--haiku)}.box.loop.busy{color:var(--loop)}
 .kv{display:flex;justify-content:space-between;gap:10px;font-size:var(--fs-sm);padding:1px 0}
 .kv span:first-child{color:var(--fg-muted)}
-.state{margin-top:8px;font-size:var(--fs-sm)}
-.state.run{color:inherit}
+.state{display:inline-flex;gap:4px;align-items:center;margin-top:10px;padding:1px 10px;border-radius:999px;border:1px solid currentColor;font-size:var(--fs-xs);font-family:var(--mono)}
+.state.run{color:var(--ok);background:var(--ok-bg)}
 .state.run::before{content:"\25D0\00a0";content:"\25D0\00a0" / ""}
 .state.idle{color:var(--fg-muted)}
 .tree{display:flex;flex-direction:column;align-items:stretch;min-width:0}
@@ -321,9 +336,9 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 <div class="page">
   <header class="topbar" id="topbar">
     <span class="brand">SmartWorkbench · Live</span>
-    <span class="mchip sonnet">◆ Sonnet · <span data-i="lg-lead"></span></span>
-    <span class="mchip opus">◆ Opus · <span data-i="lg-advisor"></span></span>
-    <span class="mchip haiku">◆ Haiku · <span data-i="lg-sub"></span></span>
+    <span class="mchip sonnet"><i class="dot"></i>Sonnet · <span data-i="lg-lead"></span></span>
+    <span class="mchip opus"><i class="dot"></i>Opus · <span data-i="lg-advisor"></span></span>
+    <span class="mchip haiku"><i class="dot"></i>Haiku · <span data-i="lg-sub"></span></span>
     <span class="muted mono" id="sess"></span>
     <span class="muted mono" id="srv"></span>
     <span class="grow">
@@ -368,84 +383,87 @@ button:hover{color:var(--fg);background:var(--surface-2)}
   <div class="tabpanel" id="p-timeline" role="tabpanel" aria-labelledby="tab-timeline">
   <section id="p-flow" aria-labelledby="h-flow">
     <h2 class="sech" id="h-flow" data-i="sec-flow"></h2>
-    <div class="legend">
-      <span><span class="sq opus"></span><span data-i="lg-advisor"></span></span><span><span class="sq sonnet"></span><span data-i="lg-lead"></span></span>
-      <span><span class="sq haiku"></span><span data-i="lg-sub"></span></span><span><span class="sq guard"></span><span data-i="lg-guard"></span></span><span><span class="sq codex"></span>codex</span>
-      <span><span class="sq allow"></span>allow</span><span><span class="sq ask"></span>ask</span>
-      <span><span class="sq block"></span>block</span><span><span class="sq opus"></span>hold</span><span><span class="sq loop"></span>loop</span>
-    </div>
 
     <div class="tools" id="tools">
       <button id="speed"></button><button id="motion"></button>
-      <button id="chip-allow">allow</button><button id="chip-ask">ask</button><button id="chip-block">block</button><button id="chip-hold">hold</button><button id="chip-loop">loop</button>
+      <button id="chip-allow"><i class="dot allow"></i>allow</button><button id="chip-ask"><i class="dot ask"></i>ask</button><button id="chip-block"><i class="dot block"></i>block</button><button id="chip-hold"><i class="dot hold"></i>hold</button><button id="chip-loop"><i class="dot loop"></i>loop</button>
       <button id="focus" hidden></button>
     </div>
     <div class="grid" id="grid">
       <svg id="flow"></svg>
       <div class="side">
       <aside class="box opus" id="b-opus">
-        <h3>Opus · on call</h3>
+        <div class="bh"><span class="role" data-i="r-review"></span><span class="mdl">Opus</span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-spark"/></svg><span data-i="h-opus"></span></h3>
         <div class="sub" data-i="o-sub"></div>
-        <div style="margin:10px 0 4px" class="sub" data-i="o-when"></div>
-        <div class="kv"><span data-i="o-design-l"></span><span id="o-design">0</span></div>
-        <div class="kv"><span data-i="o-plan-l"></span><span id="o-plan">0</span></div>
-        <div class="kv"><span data-i="o-final-l"></span><span id="o-final">0</span></div>
-        <div style="margin:10px 0 0;border-top:1px dashed var(--line);padding-top:8px"></div>
-        <div class="kv"><span data-i="o-calls-l"></span><span id="o-calls">0</span></div>
-        <div class="kv"><span data-i="o-team-l"></span><span id="o-team">?</span></div>
+        <div class="stats"><div class="stat "><b id="o-design">0</b><span data-i="o-design-l"></span></div><div class="stat "><b id="o-plan">0</b><span data-i="o-plan-l"></span></div><div class="stat "><b id="o-final">0</b><span data-i="o-final-l"></span></div></div>
+        <div class="stats"><div class="stat "><b id="o-calls">0</b><span data-i="o-calls-l"></span></div><div class="stat "><b id="o-team">?</b><span data-i="o-team-l"></span></div></div>
         <div class="state idle" id="o-state"></div>
       </aside>
       <aside class="box codex" id="b-codex">
-        <h3>OpenAI Codex</h3>
+        <div class="bh"><span class="role" data-i="r-cross"></span><span class="mdl">Codex</span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-codex"/></svg><span data-i="h-codex"></span></h3>
         <div class="sub" data-i="x-sub"></div>
-        <div class="kv" style="margin-top:6px"><span data-i="x-rev-l"></span><span id="x-rev">0</span></div>
-        <div class="kv"><span data-i="x-task-l"></span><span id="x-task">0</span></div>
-        <div class="kv"><span data-i="x-set-l"></span><span id="x-set">?</span></div>
+        <div class="stats"><div class="stat "><b id="x-rev">0</b><span data-i="x-rev-l"></span></div><div class="stat "><b id="x-task">0</b><span data-i="x-task-l"></span></div><div class="stat "><b id="x-set">?</b><span data-i="x-set-l"></span></div></div>
         <div class="state idle" id="x-state"></div>
       </aside>
       </div>
 
       <div class="tree">
-        <div class="box user" id="b-user"><h3 data-i="u-h"></h3><div class="sub" id="u-text"></div></div>
+      <div class="box user" id="b-user">
+        <div class="bh"><span class="role" data-i="r-src"></span><span class="mdl"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-user"/></svg></span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-user"/></svg><span data-i="h-user"></span></h3>
+        <div class="sub quote" id="u-text"></div>
+      </div>
         <div class="link"></div>
-        <div class="box sonnet" id="b-lead">
-          <h3>Sonnet · main session</h3>
-          <div class="sub" data-i="l-sub"></div>
-          <div class="kv" style="margin-top:6px"><span data-i="l-now-l"></span><span id="l-now"></span></div>
-          <div class="kv"><span data-i="l-calls-l"></span><span id="l-calls">0</span></div>
-        </div>
+      <div class="box sonnet" id="b-lead">
+        <div class="bh"><span class="role" data-i="r-orch"></span><span class="mdl">Sonnet</span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-bot"/></svg><span data-i="h-lead"></span></h3>
+        <div class="sub" data-i="l-sub"></div>
+        <div class="stats"><div class="stat "><b id="l-calls">0</b><span data-i="l-calls-l"></span></div></div>
+        <div class="nowrow"><span data-i="l-now-l"></span><code id="l-now"></code></div>
+      </div>
         <div class="link"></div>
-        <div class="box guard" id="b-guard">
-          <h3 data-i="g-h"></h3>
-          <div class="bars">
-            <div class="bar-row"><span>allow</span><div class="track"><div class="fill allow" id="f-allow"></div></div><b id="n-allow">0</b></div>
-            <div class="bar-row"><span>ask</span><div class="track"><div class="fill ask" id="f-ask"></div></div><b id="n-ask">0</b></div>
-            <div class="bar-row"><span>block</span><div class="track"><div class="fill block" id="f-block"></div></div><b id="n-block">0</b></div>
-          </div>
-          <div class="note" data-i="g-note"></div>
+      <div class="box guard" id="b-guard">
+        <div class="bh"><span class="role" data-i="r-gate"></span><span class="mdl">rules</span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><span data-i="h-guard"></span></h3>
+        <div class="stats">
+          <div class="stat allow"><b id="n-allow">0</b><span>allow</span></div>
+          <div class="stat ask"><b id="n-ask">0</b><span>ask</span></div>
+          <div class="stat block"><b id="n-block">0</b><span>block</span></div>
         </div>
+        <div class="stack"><div class="fill allow" id="f-allow"></div><div class="fill ask" id="f-ask"></div><div class="fill block" id="f-block"></div></div>
+      </div>
         <div class="link"></div>
-        <div class="box haiku" id="b-sub">
-          <h3>HAIKU · SUBAGENT DISPATCHER</h3>
-          <div class="sub" data-i="s-sub"></div>
-          <div class="kv" style="margin-top:6px"><span data-i="s-exp-l"></span><span id="s-exp">0</span></div>
-          <div class="kv"><span data-i="s-calls-l"></span><span id="s-calls">0</span></div>
-          <div class="kv"><span data-i="s-wf-l"></span><span id="s-wf">0</span></div>
-        </div>
+      <div class="box haiku" id="b-sub">
+        <div class="bh"><span class="role" data-i="r-disp"></span><span class="mdl">Haiku</span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-tree"/></svg><span data-i="h-sub"></span></h3>
+        <div class="sub" data-i="s-sub"></div>
+        <div class="stats"><div class="stat "><b id="s-exp">0</b><span data-i="s-exp-l"></span></div><div class="stat "><b id="s-calls">0</b><span data-i="s-calls-l"></span></div><div class="stat "><b id="s-wf">0</b><span data-i="s-wf-l"></span></div></div>
+      </div>
         <div class="link"></div>
         <div class="rows">
-          <div class="box sonnet" id="b-worker"><h3>worker</h3><div class="sub" data-i="w-sub"></div>
-            <div class="kv" style="margin-top:6px"><span data-i="w-edit-l"></span><span id="w-edit">0</span></div>
-            <div class="kv"><span data-i="w-sh-l"></span><span id="w-sh">0</span></div>
-            <div class="state idle" id="w-state"></div></div>
-          <div class="box haiku" id="b-explorer"><h3>explorer</h3><div class="sub" data-i="e-sub"></div>
-            <div class="kv" style="margin-top:6px"><span data-i="e-read-l"></span><span id="e-read">0</span></div>
-            <div class="kv"><span data-i="e-run-l"></span><span id="e-run">0</span></div>
-            <div class="state idle" id="e-state"></div></div>
-          <div class="box loop" id="b-loop"><h3>loop</h3><div class="sub" data-i="p-sub"></div>
-            <div class="kv" style="margin-top:6px"><span data-i="p-pass-l"></span><span id="p-pass">-</span></div>
-            <div class="kv"><span data-i="p-turn-l"></span><span id="p-turn">0</span></div>
-            <div class="state idle" id="p-state"></div></div>
+      <div class="box sonnet" id="b-worker">
+        <div class="bh"><span class="role" data-i="r-exec"></span><span class="mdl">Sonnet</span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-bolt"/></svg><span data-i="h-worker"></span></h3>
+        <div class="sub" data-i="w-sub"></div>
+        <div class="stats"><div class="stat "><b id="w-edit">0</b><span data-i="w-edit-l"></span></div><div class="stat "><b id="w-sh">0</b><span data-i="w-sh-l"></span></div></div>
+        <div class="state idle" id="w-state"></div>
+      </div>
+      <div class="box haiku" id="b-explorer">
+        <div class="bh"><span class="role" data-i="r-exec"></span><span class="mdl">Haiku</span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-search"/></svg><span data-i="h-expl"></span></h3>
+        <div class="sub" data-i="e-sub"></div>
+        <div class="stats"><div class="stat "><b id="e-read">0</b><span data-i="e-read-l"></span></div><div class="stat "><b id="e-run">0</b><span data-i="e-run-l"></span></div></div>
+        <div class="state idle" id="e-state"></div>
+      </div>
+      <div class="box loop" id="b-loop">
+        <div class="bh"><span class="role" data-i="r-loop"></span><span class="mdl"></span></div>
+        <h3><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-loop"/></svg><span data-i="h-loop"></span></h3>
+        <div class="sub" data-i="p-sub"></div>
+        <div class="stats"><div class="stat "><b id="p-pass">-</b><span data-i="p-pass-l"></span></div><div class="stat "><b id="p-turn">0</b><span data-i="p-turn-l"></span></div></div>
+        <div class="state idle" id="p-state"></div>
+      </div>
         </div>
       </div>
     </div>
@@ -526,7 +544,7 @@ var DICT = {
   'lg-advisor': ['advisor', '조언자'], 'lg-lead': ['lead', '리드'], 'lg-sub': ['subagents', '서브에이전트'], 'lg-guard': ['guard', '가드'],
   'clear': ['clear', '비우기'],
   'o-sub': ['/advisor · reviewer (read-only)', '/advisor · 조언자 (읽기 전용)'], 'o-when': ['called when', '호출 시점'],
-  'o-design-l': ['◇ design before a big edit', '◇ 큰 편집 전 설계'], 'o-plan-l': ['◇ plan review', '◇ 계획 검토'], 'o-final-l': ['◇ final check', '◇ 종료 전 점검'],
+  'o-design-l': ['design', '설계'], 'o-plan-l': ['plan', '계획'], 'o-final-l': ['final', '종점검'],
   'x-sub': ['cross-review · rescue (team setting)', '교차검증 · 구조 (팀 설정)'], 'x-rev-l': ['reviews', '리뷰'], 'x-task-l': ['tasks', '작업'], 'x-set-l': ['setting', '설정'],
   'o-calls-l': ['calls', '호출'], 'o-team-l': ['team mode', '팀 모드'],
   'u-h': ['USER · PROMPT', '사용자 · 프롬프트'],
@@ -536,6 +554,8 @@ var DICT = {
   'w-sub': ['Sonnet · edits + tests', 'Sonnet · 편집 + 테스트'], 'w-edit-l': ['edits', '편집'], 'w-sh-l': ['shell', '셸'],
   'e-sub': ['Haiku · read code + docs', 'Haiku · 코드·문서 읽기'], 'e-read-l': ['reads', '읽기'], 'e-run-l': ['running', '실행 중'],
   'p-sub': ['repeats a task', '회차 반복'], 'p-pass-l': ['pass', '회차'], 'p-turn-l': ['turns', '턴'],
+  'r-src': ['source', '출발점'], 'r-orch': ['orchestrator', '조율'], 'r-gate': ['policy gate', '정책 관문'], 'r-exec': ['execution', '실행'], 'r-disp': ['dispatch', '분배'], 'r-review': ['deep review', '심층 검토'], 'r-cross': ['cross-check', '교차 검증'], 'r-loop': ['repeat', '반복'],
+  'h-user': ['Your prompt', '내 프롬프트'], 'h-lead': ['Lead session', '리드 세션'], 'h-guard': ['Guard', '가드'], 'h-sub': ['Dispatcher', '분배기'], 'h-worker': ['Worker', '워커'], 'h-expl': ['Explorer', '탐색기'], 'h-loop': ['Loop', '루프'], 'h-opus': ['Advisor', '조언자'], 'h-codex': ['Codex', 'Codex'],
   'nav-wait': ['waiting', '대기 중'], 'nav-runs': ['agent runs', '에이전트 실행'],
   'sec-flow': ['Request flow', '요청 흐름'], 'sec-tl': ['Execution timeline', '실행 타임라인'],
   'nav-h': ['Workbench sectors', '워크벤치 영역'],
@@ -1266,23 +1286,26 @@ function setBusy(boxId, stateId, n, label){
   $(boxId).classList.toggle('busy', n > 0);
   var st = $(stateId);
   st.className = 'state ' + (n > 0 ? 'run' : 'idle');
-  st.textContent = n > 0 ? '[ ' + (label || L('running', '실행 중')) + (n > 1 ? ' ×' + n : '') + ' ]' : L('[ idle ]', '[ 대기 ]');
+  st.textContent = n > 0 ? (label || L('running', '실행 중')) + (n > 1 ? ' ×' + n : '') : L('idle', '대기');
 }
 function render(){
   var total = S.allow + S.ask + S.block || 1;
-  ['allow', 'ask', 'block'].forEach(function(k){ $('f-' + k).style.width = Math.round(S[k] / total * 100) + '%'; $('n-' + k).textContent = S[k]; });
+  ['allow', 'ask', 'block'].forEach(function(k){ $('f-' + k).style.width = (S[k] / total * 100) + '%'; $('n-' + k).textContent = S[k]; });
+  $('b-guard').title = L('rule-based · no model call', '규칙 판정 · 모델 호출 없음');
   $('o-design').textContent = S.design; $('o-plan').textContent = S.plan; $('o-final').textContent = S.final;
   $('o-calls').textContent = S.opusCalls; $('o-team').textContent = S.team === null ? '?' : S.team ? 'ON' : 'OFF';
   var adv = running('advisor');
   $('b-opus').classList.toggle('busy', adv > 0);
   $('o-state').className = 'state ' + (adv > 0 ? 'run' : 'idle');
-  $('o-state').textContent = adv > 0 ? L('[ reviewing ]', '[ 검토 중 ]') : L('stands by until called', '호출될 때까지 대기');
+  $('o-state').textContent = adv > 0 ? L('reviewing', '검토 중') : L('standby', '대기');
+  $('o-state').title = L('stands by until called', '호출될 때까지 대기');
   var cdx = running('codex');
   $('b-codex').classList.toggle('busy', cdx > 0);
   $('x-rev').textContent = S.codexReviews; $('x-task').textContent = S.codexTasks;
   $('x-set').textContent = S.codexOn === null ? '?' : S.codexOn ? 'ON' : L('off', '꺼짐');
   $('x-state').className = 'state ' + (cdx > 0 ? 'run' : 'idle');
-  $('x-state').textContent = cdx > 0 ? L('[ running ]', '[ 실행 중 ]') : S.codexBg > 0 ? L('background jobs: state not tracked here', '백그라운드 작업: 상태는 여기서 추적하지 않음') : L('stands by', '대기');
+  $('x-state').textContent = cdx > 0 ? L('running', '실행 중') : S.codexBg > 0 ? L('background', '백그라운드') : L('standby', '대기');
+  $('x-state').title = S.codexBg > 0 ? L('background jobs: state not tracked here', '백그라운드 작업: 상태는 여기서 추적하지 않음') : '';
   var leadNow = null;
   inflight.forEach(function(c){ if (c.lane === 'lead' || c.lane === 'worker') leadNow = c; });
   $('b-lead').classList.toggle('busy', !!leadNow);
@@ -1297,7 +1320,7 @@ function render(){
   setBusy('b-explorer', 'e-state', running('explorer') + running('sub'));
   $('p-pass').textContent = S.pass || '-'; $('p-turn').textContent = S.turn;
   $('p-state').className = 'state ' + (S.pass ? 'run' : 'idle');
-  $('p-state').textContent = S.pass ? L('[ looping ]', '[ 반복 중 ]') : L('[ idle ]', '[ 대기 ]');
+  $('p-state').textContent = S.pass ? L('looping', '반복 중') : L('idle', '대기');
   $('b-loop').classList.toggle('busy', !!S.pass);
   $('count').textContent = S.events + L(' events', '개 이벤트');
   var ids = Object.keys(S.sessions);
