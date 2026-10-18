@@ -40,7 +40,7 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 va
 .mono,.tm,pre,dl.detail dd,.tag,.kv span:last-child{font-family:var(--mono)}
 
 /* timeline */
-#tl{height:calc(100vh - 300px);min-height:320px;overflow:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);position:relative}
+#tl{height:min(70vh,720px);min-height:320px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);position:relative}
 .tlbar{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center;margin-bottom:var(--sp-3);font-size:var(--fs-sm)}
 .turnhead{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;width:100%;text-align:left;border:0;border-bottom:1px solid var(--border);border-radius:0;background:var(--surface-2);color:var(--fg);padding:var(--sp-3) var(--sp-4);position:sticky;top:0;z-index:2;min-height:30px;font:var(--fs-sm)/1.4 var(--mono);border-left:2px solid var(--focus)}
 .turnhead:hover{background:var(--surface-2)}
@@ -82,6 +82,8 @@ mark{background:var(--warn-bg);color:var(--fg);outline:1px solid var(--warn);bor
 .mini .lbl{fill:var(--fg-muted);font-size:9px}
 /* tables and lists for the Guard and Agents tabs */
 .sect{margin:0 0 var(--sp-5)}
+.sech{margin:var(--sp-5) 0 var(--sp-3);font:700 var(--fs-lg)/1.3 var(--mono);letter-spacing:-.02em}
+#p-flow{margin-bottom:var(--sp-5)}
 .sect h2{font:700 var(--fs-md)/1.3 var(--mono);text-transform:uppercase;letter-spacing:.04em;margin:0 0 var(--sp-3)}
 .queue{display:flex;flex-direction:column;gap:var(--sp-2)}
 .qitem{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;padding:var(--sp-3) var(--sp-4);border:1px solid var(--border);border-left:2px solid var(--warn);border-radius:var(--r);background:var(--surface);font-size:var(--fs-sm)}
@@ -281,7 +283,6 @@ button:hover{color:var(--fg);background:var(--surface-2)}
       <button role="tab" id="tab-timeline" aria-controls="p-timeline" data-tab="timeline"></button>
       <button role="tab" id="tab-guard" aria-controls="p-guard" data-tab="guard"></button>
       <button role="tab" id="tab-agents" aria-controls="p-agents" data-tab="agents"></button>
-      <button role="tab" id="tab-flow" aria-controls="p-flow" data-tab="flow"></button>
     </nav>
   </aside>
   <div class="maincol">
@@ -311,21 +312,8 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 
   <main>
   <div class="tabpanel" id="p-timeline" role="tabpanel" aria-labelledby="tab-timeline">
-    <svg class="mini" id="mini" viewBox="0 0 1000 48" preserveAspectRatio="none" role="img" aria-label="overview"></svg>
-    <div class="tlbar">
-      <button id="tl-follow" aria-pressed="true"></button>
-      <button id="tl-fail" aria-pressed="false"></button>
-      <button id="tl-crit" aria-pressed="false"></button>
-      <button id="tl-zoom" hidden></button>
-      <button id="tl-expand"></button><button id="tl-collapse"></button>
-    </div>
-    <div class="chips" id="tl-chips"></div>
-    <div class="muted" id="tl-note" role="status"></div>
-    <div id="tl" role="tree" tabindex="0" aria-label="timeline"></div>
-  </div>
-  <div class="tabpanel" id="p-flow" role="tabpanel" aria-labelledby="tab-flow" hidden>
-    <div class="head"><b>SMARTWORKBENCH FLOW</b>
-      <span class="m c-opus">◆ OPUS · ON CALL</span><span class="m c-sonnet">◆ SONNET · LEAD</span><span class="m c-haiku">◆ HAIKU · SWARM</span></div>
+  <section id="p-flow" aria-labelledby="h-flow">
+    <h2 class="sech" id="h-flow" data-i="sec-flow"></h2>
     <div class="legend">
       <span><span class="sq opus"></span><span data-i="lg-advisor"></span></span><span><span class="sq sonnet"></span><span data-i="lg-lead"></span></span>
       <span><span class="sq haiku"></span><span data-i="lg-sub"></span></span><span><span class="sq guard"></span><span data-i="lg-guard"></span></span><span><span class="sq codex"></span>codex</span>
@@ -408,8 +396,20 @@ button:hover{color:var(--fg);background:var(--surface-2)}
       </div>
     </div>
 
+  </section>
+    <h2 class="sech" id="h-tl" data-i="sec-tl"></h2>
+    <svg class="mini" id="mini" viewBox="0 0 1000 48" preserveAspectRatio="none" role="img" aria-label="overview"></svg>
+    <div class="tlbar">
+      <button id="tl-follow" aria-pressed="true"></button>
+      <button id="tl-fail" aria-pressed="false"></button>
+      <button id="tl-crit" aria-pressed="false"></button>
+      <button id="tl-zoom" hidden></button>
+      <button id="tl-expand"></button><button id="tl-collapse"></button>
+    </div>
+    <div class="chips" id="tl-chips"></div>
+    <div class="muted" id="tl-note" role="status"></div>
+    <div id="tl" role="tree" tabindex="0" aria-label="timeline"></div>
   </div>
-
   <div class="tabpanel" id="p-guard" role="tabpanel" aria-labelledby="tab-guard" hidden>
     <div class="sect"><h2 data-i="g-queue"></h2><div class="queue" id="g-queue"></div></div>
     <div class="sect"><h2 data-i="g-cats"></h2><div class="tblwrap"><table class="tbl" id="g-cats"></table></div></div>
@@ -482,6 +482,7 @@ var DICT = {
   'w-sub': ['Sonnet · edits + tests', 'Sonnet · 편집 + 테스트'], 'w-edit-l': ['edits', '편집'], 'w-sh-l': ['shell', '셸'],
   'e-sub': ['Haiku · read code + docs', 'Haiku · 코드·문서 읽기'], 'e-read-l': ['reads', '읽기'], 'e-run-l': ['running', '실행 중'],
   'p-sub': ['repeats a task', '회차 반복'], 'p-pass-l': ['pass', '회차'], 'p-turn-l': ['turns', '턴'],
+  'sec-flow': ['Request flow', '요청 흐름'], 'sec-tl': ['Execution timeline', '실행 타임라인'],
   'nav-h': ['Workbench sectors', '워크벤치 영역'],
   'tab-timeline': ['Live flow & timeline', '실시간 흐름·타임라인'],
   's-aborted': ['aborted', '중단됨'], 's-ok': ['ok', '완료'], 's-error': ['error', '오류'], 's-blocked': ['blocked', '차단'], 's-declined': ['declined', '거절'], 's-running': ['running', '실행 중'], 's-bg': ['started', '시작됨'], 's-ask': ['asking', '확인 중'],
@@ -1033,7 +1034,7 @@ function pathFor(id){
 var layoutQueued = false;
 function layout(){
   layoutQueued = false;
-  if ($('p-flow').hidden) return;
+  if ($('p-timeline').hidden) return;
   var grid = $('grid');
   $('flow').setAttribute('width', grid.clientWidth);
   $('flow').setAttribute('height', grid.clientHeight);
@@ -1049,7 +1050,7 @@ function layout(){
 function queueLayout(){ if (!layoutQueued) { layoutQueued = true; requestAnimationFrame(layout); } }
 
 function canAnimate(){
-  return motion && !replaying && !document.hidden && !$('p-flow').hidden && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  return motion && !replaying && !document.hidden && !$('p-timeline').hidden && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 function heat(id){
   var p = edgeEl[id];
@@ -1960,7 +1961,7 @@ function openItem(key){
 }
 var keysOff = stored('swb-keys') === 'off';
 var HELP_KEYS = [
-  ['1 2 3 4', 'switch to Timeline, Guard, Agents, Flow', 'Timeline, 가드, 에이전트, 흐름 탭으로 이동'],
+  ['1 2 3 4', 'go to Live, Guard, Team, or the flow section', '실시간, 가드, 팀 화면이나 흐름 구역으로 이동'],
   ['j / k  ↑ / ↓', 'next / previous call', '다음 / 이전 호출'],
   ['→ / ←', 'open / close the calls under a row', '행 아래 호출 펼치기 / 접기'],
   ['Enter', 'open the details of the selected call', '선택한 호출의 상세 열기'],
@@ -1999,7 +2000,8 @@ function helpBuild(){
     if (e.key === '?') { e.preventDefault(); open(); return; }
     if (keysOff) return;
     var n = Number(e.key);
-    if (n >= 1 && n <= TABS.length) { e.preventDefault(); showTab(TABS[n - 1], true); }
+    var keyTabs = ['timeline', 'guard', 'agents', 'flow'];
+    if (n >= 1 && n <= keyTabs.length) { e.preventDefault(); showTab(keyTabs[n - 1], true); }
     else if (e.key === 't') { $('theme').click(); }
     else if (e.key === 'p') { setPaused(!paused); }
     else if (tab === 'timeline') {
@@ -2280,8 +2282,11 @@ function drawSrv(){
 setInterval(pollInfo, 10000);
 
 // ---- tabs: roving tabindex, the choice kept in the address and in storage ----
-var TABS = ['timeline', 'guard', 'agents', 'flow'], tab = 'timeline';
+var TABS = ['timeline', 'guard', 'agents'], tab = 'timeline';
 function showTab(name, focusIt){
+  // flow is no longer a view of its own: the address, the saved choice and the key still lead to its section
+  var toFlow = name === 'flow';
+  if (toFlow) name = 'timeline';
   if (TABS.indexOf(name) < 0) name = 'timeline';
   tab = name;
   TABS.forEach(function(t){
@@ -2292,7 +2297,8 @@ function showTab(name, focusIt){
   });
   store('swb-tab', name);
   syncHash();
-  if (name === 'flow') queueLayout();
+  if (name === 'timeline') queueLayout();
+  if (toFlow) $('p-flow').scrollIntoView({ block: 'start' });
   queueView();
   if (focusIt) $('tab-' + name).focus();
 }
@@ -2300,8 +2306,8 @@ function tabsBuild(){
   TABS.forEach(function(t){ $('tab-' + t).onclick = function(){ showTab(t); }; });
   $('tabs').addEventListener('keydown', function(e){
     var i = TABS.indexOf(tab);
-    if (e.key === 'ArrowRight') { e.preventDefault(); showTab(TABS[(i + 1) % TABS.length], true); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); showTab(TABS[(i + TABS.length - 1) % TABS.length], true); }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); showTab(TABS[(i + 1) % TABS.length], true); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); showTab(TABS[(i + TABS.length - 1) % TABS.length], true); }
     else if (e.key === 'Home') { e.preventDefault(); showTab(TABS[0], true); }
     else if (e.key === 'End') { e.preventDefault(); showTab(TABS[TABS.length - 1], true); }
   });
