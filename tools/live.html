@@ -268,7 +268,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
   #b-user{grid-area:u}#b-lead{grid-area:l}#b-guard{grid-area:g}#b-worker{grid-area:w}
   #b-loop{grid-area:p}#b-opus{grid-area:o}#b-sub{grid-area:d}#b-explorer{grid-area:e}#b-codex{grid-area:x}
 }
-@media (min-width:1200px){#drawer{position:relative;z-index:auto;top:auto;right:auto;bottom:auto;width:auto;max-width:none;max-height:60vh;margin-top:var(--sp-4)}}
+@media (min-width:1200px){#drawer.item{position:relative;z-index:auto;top:auto;right:auto;bottom:auto;width:auto;max-width:none;max-height:60vh;margin-top:var(--sp-4)}}
 @media (max-width:820px){#drawer{left:8px;right:8px;top:auto;bottom:8px;width:auto;max-width:none;max-height:55vh}.grid{grid-template-columns:1fr}.rows{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.tile,.pill{transition:none}.wf i.running{background:var(--warn)}#flow .pk.wait{animation:none}body.ready .box,body.ready .fill{transition:none}}
 </style>
@@ -1276,7 +1276,7 @@ function render(){
   $('ctx').className = 'tile' + (lvl === 'block' ? ' bad' : lvl === 'ask' ? ' warn' : '');
   $('tok').textContent = Object.keys(TR.tok).map(function(m){ return m + ' ' + L('in ', '입력 ') + k(TR.tok[m].i) + ' · ' + L('out ', '출력 ') + k(TR.tok[m].o); }).join('  |  ');
   queueLayout();
-  if (!$('drawer').hidden && !replaying && !$('drawer').contains(document.activeElement) && !$('dw-list').querySelector('.detail:not([hidden])') && !$('dw-prompts').querySelector('.full:not([hidden])')) drawRefresh();
+  if (!$('drawer').hidden && !$('p-timeline').hidden && !replaying && !$('drawer').contains(document.activeElement) && !$('dw-list').querySelector('.detail:not([hidden])') && !$('dw-prompts').querySelector('.full:not([hidden])')) drawRefresh();
 }
 
 var HOLD = {
@@ -1465,6 +1465,7 @@ function openDrawer(f, trigger){
   lastTriggerKey = null;
   lastTrigger = trigger || lastTrigger;
   drawRefresh();
+  $('drawer').classList.remove('item');
   $('drawer').hidden = false;
   $('dw-close').focus();
   applyFilter(); syncTools();
@@ -1577,7 +1578,7 @@ function uiBuild(){
   });
   grid.addEventListener('pointerleave', function(){ tip.hidden = true; });
   $('dw-close').onclick = closeDrawer;
-  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !e.defaultPrevented && !$('help').open && !$('drawer').hidden) closeDrawer(); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !e.defaultPrevented && !$('help').open && !$('drawer').hidden && !$('p-timeline').hidden) closeDrawer(); });
   $('pause').onclick = function(){ setPaused(!paused); };
   $('replay').onclick = function(){ if (playback) endPlayback(false); else startPlayback(Number($('replay-n').value) || 20); };
   $('speed').onclick = function(){ speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]; store('swb-speed', String(speed)); syncTools(); };
@@ -1976,7 +1977,10 @@ function openItem(key){
     var cr = el('button', null, L('copy JSON', 'JSON 복사')); cr.onclick = function(){ copyText(raw.textContent, cr); };
     box.appendChild(cr);
   }
+  var wasHidden = $('drawer').hidden;
+  $('drawer').classList.add('item');
   $('drawer').hidden = false;
+  if (wasHidden && window.matchMedia && matchMedia(PIPE).matches && $('drawer').scrollIntoView) $('drawer').scrollIntoView({ block: 'nearest' });
   if (document.activeElement && document.activeElement.dataset && document.activeElement.dataset.key) lastTriggerKey = document.activeElement.dataset.key;
 }
 var keysOff = stored('swb-keys') === 'off';
@@ -2320,7 +2324,7 @@ function showTab(name, focusIt){
   if (name === 'timeline') queueLayout();
   if (toFlow) $('p-flow').scrollIntoView({ block: 'start' });
   queueView();
-  if (focusIt) $('tab-' + name).focus();
+  if (focusIt) $('tab-' + name).focus(toFlow ? { preventScroll: true } : undefined);
 }
 function tabsBuild(){
   TABS.forEach(function(t){ $('tab-' + t).onclick = function(){ showTab(t); }; });
