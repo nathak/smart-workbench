@@ -134,6 +134,32 @@ button .ic{margin-right:6px}
 .tile.bad .k-i{color:var(--bad)}.tile.warn .k-i{color:var(--warn)}.tile.ok .k-i{color:var(--ok)}
 .tile .k-l{padding-right:26px}
 .tile .k-v{font-size:clamp(22px,2.4vw,30px)}
+/* intent, evidence, guard ribbon, team gates */
+.goalcard{padding:var(--sp-4);background:var(--surface);border:1px solid var(--border);border-top:2px solid var(--focus);border-radius:var(--r);margin-bottom:var(--sp-3)}
+.goalcard h3{margin:var(--sp-2) 0 0;font:700 var(--fs-lg)/1.4 var(--sans)}
+.goalcard .bh{display:flex;justify-content:space-between;gap:8px;font:600 var(--fs-xs)/1.4 var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--fg-muted)}
+.hud{margin:var(--sp-3) 0}
+.hud .stat{padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-radius:var(--r);min-width:120px}
+.banner{display:flex;gap:var(--sp-3);align-items:center;margin:var(--sp-3) 0;padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--border-strong);border-radius:var(--r);font-size:var(--fs-sm)}
+.banner.warn{border-left-color:var(--warn);color:var(--fg)}.banner.ok{border-left-color:var(--ok)}
+.banner .ic{margin:0}.banner.warn .ic{color:var(--warn)}.banner.ok .ic{color:var(--ok)}
+.conds{display:flex;flex-direction:column;gap:var(--sp-2)}
+.cond{display:flex;gap:var(--sp-4);align-items:center;padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-radius:var(--r)}
+.cond .grow{flex:1;min-width:0;overflow-wrap:anywhere}
+.cpill{display:inline-flex;gap:4px;align-items:center;padding:0 8px;border:1px solid currentColor;border-radius:999px;font:var(--fs-xs)/18px var(--mono);white-space:nowrap}
+.cpill .ic{width:12px;height:12px;margin:0}
+.cpill.verified{color:var(--ok);background:var(--ok-bg)}.cpill.failed{color:var(--bad);background:var(--bad-bg)}.cpill.pending{color:var(--fg-muted)}.cpill.observed,.cpill.waived{color:var(--warn);background:var(--warn-bg)}
+.seg{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-4)}
+.seg-i{display:inline-flex;gap:6px;align-items:center;padding:var(--sp-2) var(--sp-4);border:1px solid var(--border-strong);border-radius:var(--r);font:600 var(--fs-xs)/1.4 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--fg-muted)}
+.seg-i .ic{width:14px;height:14px;margin:0}
+.seg-i.on{color:var(--focus);border-color:var(--focus);background:var(--surface-2);box-shadow:inset 0 -2px 0 var(--focus)}
+.gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--sp-3)}
+.gate{display:flex;flex-direction:column;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-top:2px solid var(--border-strong);border-radius:var(--r)}
+.gate.hot{border-top-color:var(--warn)}
+.gate b{display:flex;gap:8px;align-items:center;font:700 var(--fs-md)/1.3 var(--mono)}.gate b .ic{color:var(--focus);margin:0}
+.wbchips{display:inline-flex;flex-wrap:wrap;gap:var(--sp-2)}
+.wbchips .mc{background:var(--surface);color:var(--fg)}.wbchips .mc.ok{color:var(--ok)}.wbchips .mc.warn{color:var(--warn)}
+@media(max-width:1099px){.wbchips{display:none}}
 /* KPI tiles */
 .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--sp-3);margin:var(--sp-4) 0}
 @media(max-width:1100px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -193,6 +219,7 @@ nav.stabs .sb.ask::before{content:"? "}
   .sidenav nav.tabs button:hover{border-bottom-color:var(--border-strong)}
   .sidenav nav.tabs button[aria-selected=true]{border-bottom-color:var(--focus)}}
 @media(max-width:560px){.mchip{display:none}}
+.mc.ok{color:var(--ok);border-color:var(--ok)}
 .footer .r{margin-right:var(--sp-5)}
 
 .head{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-5);align-items:baseline;margin-bottom:var(--sp-2);font-size:var(--fs-md)}
@@ -349,6 +376,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <span class="mchip sonnet"><i class="dot"></i>Sonnet · <span data-i="lg-lead"></span></span>
     <span class="mchip opus"><i class="dot"></i>Opus · <span data-i="lg-advisor"></span></span>
     <span class="mchip haiku"><i class="dot"></i>Haiku · <span data-i="lg-sub"></span></span>
+    <span class="wbchips" id="wbchips" hidden></span>
     <span class="muted mono" id="sess"></span>
     <span class="muted mono" id="srv"></span>
     <span class="grow">
@@ -360,7 +388,9 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <h2 data-i="nav-h"></h2>
     <nav class="tabs" role="tablist" id="tabs" aria-label="views">
       <button role="tab" id="tab-timeline" aria-controls="p-timeline" data-tab="timeline"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-flow"/></svg><span data-i="tab-timeline"></span></button>
+      <button role="tab" id="tab-intent" aria-controls="p-intent" data-tab="intent"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-file"/></svg><span data-i="tab-intent"></span><span class="cnt" id="nav-intent-n" hidden></span></button>
       <button role="tab" id="tab-guard" aria-controls="p-guard" data-tab="guard"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><span data-i="tab-guard"></span><span class="cnt warn" id="nav-guard-n" hidden></span></button>
+      <button role="tab" id="tab-evidence" aria-controls="p-evidence" data-tab="evidence"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i="tab-evidence"></span><span class="cnt" id="nav-evidence-n" hidden></span></button>
       <button role="tab" id="tab-agents" aria-controls="p-agents" data-tab="agents"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-team"/></svg><span data-i="tab-agents"></span><span class="cnt" id="nav-agents-n" hidden></span></button>
     </nav>
   </aside>
@@ -496,7 +526,23 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <h3 id="dw-title"></h3><div id="dw-item" hidden></div><div id="dw-stats"></div><div id="dw-links"></div><div id="dw-prompts" hidden></div><div id="dw-list"></div>
   </aside>
   </div>
+  <div class="tabpanel" id="p-intent" role="tabpanel" aria-labelledby="tab-intent" hidden>
+    <div class="muted" id="i-empty" data-i="i-none"></div>
+    <div id="i-body" hidden>
+      <div class="goalcard"><div class="bh"><span class="role" data-i="i-goal"></span><span id="i-pill"></span></div><h3 id="i-goal-t"></h3></div>
+      <div class="stats hud" id="i-hud"></div>
+      <div class="banner warn" id="i-prop" hidden><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-help"/></svg><span id="i-prop-t"></span></div>
+      <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="i-conds"></span></h2><div class="conds" id="i-conds-list"></div></div>
+    </div>
+  </div>
+  <div class="tabpanel" id="p-evidence" role="tabpanel" aria-labelledby="tab-evidence" hidden>
+    <div class="banner" id="e-banner"></div>
+    <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i="e-matrix"></span></h2><div class="tblwrap"><table class="tbl" id="e-matrix"></table></div></div>
+    <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-file"/></svg><span data-i="e-changed"></span></h2><div class="stats hud" id="e-changed"></div></div>
+    <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="e-hist"></span></h2><div class="tblwrap"><table class="tbl" id="e-hist"></table></div></div>
+  </div>
   <div class="tabpanel" id="p-guard" role="tabpanel" aria-labelledby="tab-guard" hidden>
+    <div class="seg" id="g-ribbon" role="group" aria-label="profile"></div>
     <div class="sect"><h2 data-i="g-queue"></h2><div class="queue" id="g-queue"></div></div>
     <div class="sect"><h2 data-i="g-cats"></h2><div class="tblwrap"><table class="tbl" id="g-cats"></table></div></div>
     <div class="sect"><h2 data-i="g-table"></h2>
@@ -505,6 +551,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="g-audit"></span> <button id="g-export" data-i="g-export"></button></h2><div class="tblwrap"><table class="tbl" id="g-audit"></table></div></div>
   </div>
   <div class="tabpanel" id="p-agents" role="tabpanel" aria-labelledby="tab-agents" hidden>
+    <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><span data-i="t-gates"></span> <span class="mc" id="t-state"></span></h2><div class="gates" id="t-gates"></div></div>
     <div class="sect"><h2 data-i="a-kinds"></h2><div class="tblwrap"><table class="tbl" id="a-kinds"></table></div></div>
     <div class="sect"><h2 data-i="a-runs"></h2><div class="tblwrap"><table class="tbl" id="a-runs"></table></div></div>
     <div class="sect"><h2 data-i="a-wf"></h2><div class="tblwrap"><table class="tbl" id="a-wf"></table></div></div>
@@ -571,6 +618,16 @@ var DICT = {
   'nav-wait': ['waiting', '대기 중'], 'nav-runs': ['agent runs', '에이전트 실행'],
   'sec-flow': ['Request flow', '요청 흐름'], 'sec-tl': ['Execution timeline', '실행 타임라인'],
   'g-audit': ['Audit trail', '감사 기록'], 'g-export': ['Export buffer', '버퍼 내보내기'], 'a-audit': ['Team audit', '팀 감사 기록'],
+  'tab-intent': ['Intent', '의도'], 'tab-evidence': ['Evidence', '증거'],
+  'wb-done': ['Done', '완료'], 'wb-ctx': ['Ctx', '컨텍스트'], 'wb-pins': ['pins', '핀'], 'wb-guard': ['Guard', '가드'], 'wb-paused': ['paused', '일시정지'], 'wb-team': ['Team', '팀'], 't-on': ['on', '켬'], 't-off': ['off', '끔'],
+  'i-none': ['No contract in this session yet', '이 세션에는 아직 계약이 없습니다'], 'i-goal': ['primary goal', '주요 목표'], 'i-locked': ['locked', '잠김'], 'i-unlocked': ['unlocked', '잠금 해제'],
+  'i-conds': ['Done conditions', '완료 조건'], 'i-constraints': ['active constraints', '활성 제약'], 'i-nongoals': ['non-goals', '비목표'], 'i-props': ['proposals waiting', '대기 중인 제안'],
+  'i-review': ['Decide them in /swb or in the tray app; this page cannot.', '/swb나 트레이 앱에서 결정하세요. 이 화면에서는 결정할 수 없습니다.'],
+  'c-pending': ['pending', '대기'], 'c-observed': ['observed', '관찰됨'], 'c-verified': ['verified', '검증됨'], 'c-failed': ['failed', '실패'], 'c-waived': ['waived', '면제'],
+  'e-banner': ['conditions verified', '조건 검증됨'], 'e-matrix': ['Condition matrix', '조건 매트릭스'], 'e-changed': ['Changed files', '변경 파일'], 'e-hist': ['Verification history', '검증 이력'], 'e-files': ['files', '파일'],
+  'e-none': ['No check ran yet', '아직 실행된 검증이 없습니다'], 'e-col-cond': ['condition', '조건'], 'e-col-status': ['status', '상태'], 'e-col-kind': ['check', '검증'], 'e-col-cmd': ['command', '명령'], 'e-col-result': ['result', '결과'],
+  'e-ok': ['passed', '통과'], 'e-fail': ['failed', '실패'], 'e-unk': ['unknown', '알 수 없음'], 'g-rules': ['rules', '규칙'],
+  't-gates': ['Safety gates', '안전 게이트'], 't-gate-design': ['Design first', '설계 먼저'], 't-gate-plan': ['Plan review', '계획 검토'], 't-gate-repeat': ['Repeated error', '반복 오류'], 't-gate-final': ['Final check', '최종 점검'], 't-fired': ['raised', '발생'],
   'nav-h': ['Workbench sectors', '워크벤치 영역'],
   'tab-timeline': ['Live flow & timeline', '실시간 흐름·타임라인'],
   's-aborted': ['aborted', '중단됨'], 's-ok': ['ok', '완료'], 's-error': ['error', '오류'], 's-blocked': ['blocked', '차단'], 's-declined': ['declined', '거절'], 's-running': ['running', '실행 중'], 's-bg': ['started', '시작됨'], 's-ask': ['asking', '확인 중'],
@@ -600,7 +657,7 @@ var STATUS = Object.assign(Object.create(null), { ok: 'ok', error: 'error', bloc
 function newTrace(){
   return { turns: [], spans: new Map(), byAgent: new Map(), pendingAsk: new Map(), attention: [], agentTok: Object.create(null),
     tok: Object.create(null), ctx: null, ctxHist: [], sessions: Object.create(null), missed: 0, loopPasses: 0, loopActive: false, activeMs: 0,
-    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0, audit: [] };
+    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0, audit: [], wb: null, evid: [] };
 }
 function turnOf(tr, at, extra){
   var t = { n: tr.turns.length, at: at, end: null, aborted: false, text: '', origin: 'user', loop: false, spans: [], marks: [], warn: [], ctx: null, tokIn: 0, tokOut: 0, models: Object.create(null), early: !!(extra && extra.early) };
@@ -688,6 +745,13 @@ function ingest(tr, ev){
         (tr.byAgent.get(sp.agentRun) || []).forEach(function(c){ c.parent = sp.id; c.est = false; });
       }
       if (statusOf(sp) === 'error' || sp.outcome === 'blocked' || sp.outcome === 'declined') { tr.failAt.push(at); tr.failTotal++; }
+      break;
+    case 'wb':
+      tr.wb = ev;
+      break;
+    case 'evidence':
+      tr.evid.push({ at: at, id: clean(ev.id, 60), kind: clean(ev.ekind, 20), command: clean(ev.command, 120), ok: ev.ok === true ? true : ev.ok === false ? false : null });
+      if (tr.evid.length > 100) tr.evid.shift();
       break;
     case 'guard.ask': case 'guard.block':
       sp = ev.id != null ? tr.spans.get(String(ev.id)) : null;
@@ -1342,6 +1406,7 @@ function render(){
   $('p-state').textContent = S.pass ? L('looping', '반복 중') : L('idle', '대기');
   $('b-loop').classList.toggle('busy', !!S.pass);
   $('count').textContent = S.events + L(' events', '개 이벤트');
+  drawChips();
   $('h-flow-n').textContent = S.events + L(' events passed', '개 이벤트 통과');
   $('h-tl-n').textContent = TR.turns.length + L(' turns', '턴');
   var ids = Object.keys(S.sessions);
@@ -1699,7 +1764,7 @@ function queueTl(){ tl.dirty = true; if (tab === 'timeline' && !tlQueued) { tlQu
 var viewQueued = false;
 function queueView(){
   if (tab === 'timeline') { queueTl(); return; }
-  if ((tab === 'guard' || tab === 'agents') && !viewQueued) { viewQueued = true; requestAnimationFrame(function(){ viewQueued = false; safe(tab, function(){ withFocus(function(){ if (tab === 'guard') drawGuard(); else if (tab === 'agents') drawAgents(); }); }); }); }
+  if ((tab === 'guard' || tab === 'agents' || tab === 'intent' || tab === 'evidence') && !viewQueued) { viewQueued = true; requestAnimationFrame(function(){ viewQueued = false; safe(tab, function(){ withFocus(function(){ if (tab === 'guard') drawGuard(); else if (tab === 'agents') drawAgents(); else if (tab === 'intent') drawIntent(); else if (tab === 'evidence') drawEvidence(); }); }); }); }
 }
 function isFail(sp){ var st = statusOf(sp); return st === 'error' || st === 'blocked' || st === 'declined'; }
 function whoOf(sp){
@@ -2093,7 +2158,7 @@ function openItem(key){
 }
 var keysOff = stored('swb-keys') === 'off';
 var HELP_KEYS = [
-  ['1 2 3 4', 'go to Live, Guard, Team, or the flow section', '실시간, 가드, 팀 화면이나 흐름 구역으로 이동'],
+  ['1 2 3 4 5 6', 'go to Live, Intent, Guard, Evidence, Team, or the flow section', '실시간, 의도, 가드, 증거, 팀 화면이나 흐름 구역으로 이동'],
   ['j / k  ↑ / ↓', 'next / previous call', '다음 / 이전 호출'],
   ['→ / ←', 'open / close the calls under a row', '행 아래 호출 펼치기 / 접기'],
   ['Enter', 'open the details of the selected call', '선택한 호출의 상세 열기'],
@@ -2132,7 +2197,7 @@ function helpBuild(){
     if (e.key === '?') { e.preventDefault(); open(); return; }
     if (keysOff) return;
     var n = Number(e.key);
-    var keyTabs = ['timeline', 'guard', 'agents', 'flow'];
+    var keyTabs = ['timeline', 'intent', 'guard', 'evidence', 'agents', 'flow'];
     if (n >= 1 && n <= keyTabs.length) { e.preventDefault(); showTab(keyTabs[n - 1], true); }
     else if (e.key === 't') { $('theme').click(); }
     else if (e.key === 'p') { setPaused(!paused); }
@@ -2292,7 +2357,78 @@ function exportBuffer(){
     setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
   } catch (e) { pageError('export', e); }
 }
+var COND_ICON = { verified: 'check', failed: 'x', pending: 'timer', observed: 'alert', waived: 'help' };
+function condPill(st){ var b = el('span', 'cpill ' + st); b.appendChild(ico(COND_ICON[st] || 'help')); b.appendChild(el('span', null, T('c-' + st))); return b; }
+function statBox(value, label, cls){ var d = el('div', 'stat ' + (cls || '')); d.appendChild(el('b', null, value)); d.appendChild(el('span', null, label)); return d; }
+function drawIntent(){
+  var w = TR.wb;
+  $('i-empty').hidden = !!w; $('i-body').hidden = !w;
+  if (!w) return;
+  $('i-goal-t').textContent = w.goal ? String(w.goal) : L('(no goal set)', '(목표 없음)');
+  var pill = $('i-pill'); pill.textContent = '';
+  pill.appendChild(chip(String(w.status || ''), 'ok'));
+  pill.appendChild(chip(w.locked ? T('i-locked') : T('i-unlocked'), w.locked ? 'warn' : '', 'shield'));
+  var hud = $('i-hud'); hud.textContent = '';
+  hud.appendChild(statBox(w.met + ' / ' + w.total, T('c-verified'), w.total && w.met === w.total ? 'allow' : ''));
+  hud.appendChild(statBox(String(w.constraints), T('i-constraints')));
+  hud.appendChild(statBox(String(w.nonGoals), T('i-nongoals')));
+  hud.appendChild(statBox(String(w.proposals), T('i-props'), w.proposals ? 'ask' : ''));
+  $('i-prop').hidden = !w.proposals;
+  $('i-prop-t').textContent = w.proposals ? w.proposals + ' ' + T('i-props') + ' · ' + T('i-review') : '';
+  var list = $('i-conds-list'); list.textContent = '';
+  if (!w.conds || !w.conds.length) list.appendChild(el('div', 'muted', L('no done conditions', '완료 조건 없음')));
+  (w.conds || []).forEach(function(c){
+    var row = el('div', 'cond');
+    row.appendChild(condPill(String(c.s)));
+    row.appendChild(el('span', 'grow', String(c.t)));
+    if (c.link) row.appendChild(chip(String(c.link), '', 'tree'));
+    list.appendChild(row);
+  });
+  if (w.total > (w.conds || []).length) list.appendChild(el('div', 'muted', L('+ ' + (w.total - w.conds.length) + ' more', '+ ' + (w.total - w.conds.length) + '개 더')));
+}
+function lastEvid(kind){ for (var i = TR.evid.length - 1; i >= 0; i--) if (TR.evid[i].kind === kind) return TR.evid[i]; return null; }
+function okPill(ok){ var b = el('span', 'cpill ' + (ok === true ? 'verified' : ok === false ? 'failed' : 'pending')); b.appendChild(ico(ok === true ? 'check' : ok === false ? 'x' : 'help')); b.appendChild(el('span', null, ok === true ? T('e-ok') : ok === false ? T('e-fail') : T('e-unk'))); return b; }
+function drawEvidence(){
+  var w = TR.wb, ban = $('e-banner');
+  ban.textContent = '';
+  ban.className = 'banner' + (w && w.total && w.met === w.total ? ' ok' : w ? ' warn' : '');
+  ban.appendChild(ico(w && w.total && w.met === w.total ? 'check' : 'alert'));
+  ban.appendChild(el('span', null, w ? w.met + ' / ' + w.total + ' ' + T('e-banner') : T('i-none')));
+  var rows = ((w && w.conds) || []).map(function(c){
+    var ev = c.link ? lastEvid(String(c.link)) : null;
+    return { cells: [String(c.t), condPill(String(c.s)), c.link ? String(c.link) : '–', ev ? el('code', 'arg', ev.command) : '–', ev ? okPill(ev.ok) : '–', ev ? clock(ev.at) : '–'] };
+  });
+  drawTable($('e-matrix'), [{ label: T('e-col-cond') }, { label: T('e-col-status') }, { label: T('e-col-kind') }, { label: T('e-col-cmd') }, { label: T('e-col-result') }, { label: L('time', '시각') }], rows, null, null, null, T('i-none'));
+  var ch = $('e-changed'); ch.textContent = '';
+  if (w) { ch.appendChild(statBox(String(w.files), T('e-files'))); ch.appendChild(statBox('+' + w.added, L('added', '추가'), 'allow')); ch.appendChild(statBox('-' + w.removed, L('removed', '삭제'), 'block')); }
+  drawTable($('e-hist'), [{ label: L('time', '시각') }, { label: T('e-col-kind') }, { label: T('e-col-cmd') }, { label: T('e-col-result') }],
+    TR.evid.slice(-10).reverse().map(function(r){ return { cells: [clock(r.at), r.kind, el('code', 'arg', r.command), okPill(r.ok)] }; }), null, null, null, T('e-none'));
+}
+function drawChips(){
+  var w = TR.wb, box = $('wbchips');
+  box.hidden = !w;
+  if (!w) return;
+  box.textContent = '';
+  box.appendChild(chip(cut(w.goal || L('no goal', '목표 없음'), 26), '', 'flow'));
+  box.appendChild(chip(T('wb-done') + ' ' + w.met + '/' + w.total, w.total && w.met === w.total ? 'ok' : '', 'check'));
+  box.appendChild(chip(T('wb-ctx') + ' +' + w.pins + ' ' + T('wb-pins') + (TR.ctx && TR.ctx.p != null ? ' · ' + TR.ctx.p + '%' : ''), '', 'ctx'));
+  box.appendChild(chip(T('wb-guard') + ' ' + String(w.profile).toUpperCase() + (w.paused ? ' · ' + T('wb-paused') : ''), w.paused ? 'warn' : '', 'shield'));
+  box.title = w.goal || '';
+  setCount('nav-intent-n', w.total, '', T('c-verified'));
+  $('nav-intent-n').textContent = w.met + '/' + w.total;
+  var okN = TR.evid.filter(function(r){ return r.ok === true; }).length;
+  setCount('nav-evidence-n', okN, '✓ ', T('e-ok'));
+}
 function drawGuard(){
+  var wbp = TR.wb, rib = $('g-ribbon');
+  rib.textContent = '';
+  ['strict', 'balanced', 'permissive', 'off'].forEach(function(pn){
+    var b = el('span', 'seg-i' + (wbp && wbp.profile === pn ? ' on' : ''));
+    b.appendChild(ico(wbp && wbp.profile === pn ? 'check' : 'shield')); b.appendChild(el('span', null, pn));
+    if (wbp && wbp.profile === pn) b.setAttribute('aria-current', 'true');
+    rib.appendChild(b);
+  });
+  if (wbp) { rib.appendChild(chip(T('g-rules') + ' ' + wbp.rules, '', 'list')); if (wbp.paused) rib.appendChild(chip(T('wb-paused'), 'warn', 'pause')); }
   drawAudit('g-audit', /^(guard|contract|evidence|task|condition|session|desktop)\./);
   var now = nowFor() || Date.now();
   var q = $('g-queue'); q.textContent = '';
@@ -2343,7 +2479,22 @@ function drawGuard(){
   syncTabsText();
 }
 function tokText(a){ return a.tokIn || a.tokOut ? k(a.tokIn) + ' / ' + k(a.tokOut) : ''; }
+var GATES = [['team.design-required', 't-gate-design', 'pen'], ['team.plan-review-required', 't-gate-plan', 'file'], ['team.repeat-error', 't-gate-repeat', 'alert'], ['team.final-check-required', 't-gate-final', 'check']];
+function drawGates(){
+  var box = $('t-gates'); box.textContent = '';
+  GATES.forEach(function(g){
+    var hits = TR.audit.filter(function(a){ return a.kind === g[0]; });
+    var card = el('div', 'gate' + (hits.length ? ' hot' : ''));
+    var h = el('b'); h.appendChild(ico(g[2])); h.appendChild(el('span', null, T(g[1]))); card.appendChild(h);
+    card.appendChild(el('code', 'arg', g[0]));
+    card.appendChild(el('span', 'muted', hits.length ? hits.length + ' ' + T('t-fired') + ' · ' + clock(hits[hits.length - 1].at) : L('not raised', '발생 없음')));
+    box.appendChild(card);
+  });
+  var tm = TR.wb ? TR.wb.team : null;
+  $('t-state').textContent = tm === null ? '' : T('wb-team') + ' ' + (tm ? T('t-on') : T('t-off'));
+}
 function drawAgents(){
+  drawGates();
   drawAudit('a-audit', /^(team|codex)\./);
   var now = nowFor() || Date.now();
   var ks = kindStats(TR, now);
@@ -2418,7 +2569,7 @@ function drawKpis(){
   $('k-tok-v').textContent = K.tokIn || K.tokOut ? k(K.tokIn) + ' / ' + k(K.tokOut) : '–';
   $('k-tok-s').textContent = L('input includes cache · ' + K.turns + ' turns · active ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · loop ' + K.loopPasses : ''), '입력은 캐시 포함 · ' + K.turns + '턴 · 활동 ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · 루프 ' + K.loopPasses : ''));
 }
-setInterval(function(){ if (!replaying && !playback && !paused && !document.hidden) { queueKpi(); if (tab === 'guard') queueView(); } }, 1000);
+setInterval(function(){ if (!replaying && !playback && !paused && !document.hidden) { queueKpi(); if (tab === 'guard' || tab === 'intent' || tab === 'evidence') queueView(); } }, 1000);
 
 // ---- the server's own count of what it read, against what this page received ----
 var srv = null, srvBase = 0, rtt = null;
@@ -2436,8 +2587,10 @@ function drawSrv(){
   $('ft-git').textContent = srv.git ? srv.git.branch + (srv.git.head ? ' @' + srv.git.head : '') : '';
   box.title = L('project ', '프로젝트 ') + srv.project + '\n' + L('feed ', '피드 ') + srv.feed + '\n' + L('server started ', '서버 시작 ') + clock(srv.startedAt) + ' (pid ' + srv.pid + ')\n' + L('lines read ', '읽은 줄 ') + srv.linesRead + ' · ' + L('page events ', '화면 이벤트 ') + S.events;
   var expected = Math.min(srv.linesRead - srvBase, 2000), got = events.length;
-  var bad = !paused && !playback && expected - got > 5;
-  var lost = Math.max(0, expected - got);
+  // The events and this answer travel apart: for the first seconds the page has not caught up, which is not a loss.
+  var settled = Date.now() - loadedAt > 5000;
+  var bad = settled && !paused && !playback && expected - got > 5;
+  var lost = settled ? Math.max(0, expected - got) : 0;
   $('ft-drop').textContent = L(lost + ' dropped', '유실 ' + lost);
   $('ft-buf').textContent = L('buffer ', '버퍼 ') + got + '/2000';
   $('ft-rtt').textContent = rtt === null ? '' : L('server ', '서버 ') + rtt + 'ms';
@@ -2449,7 +2602,7 @@ function drawSrv(){
 setInterval(pollInfo, 10000);
 
 // ---- tabs: roving tabindex, the choice kept in the address and in storage ----
-var TABS = ['timeline', 'guard', 'agents'], tab = 'timeline';
+var TABS = ['timeline', 'intent', 'guard', 'evidence', 'agents'], tab = 'timeline';
 function showTab(name, focusIt){
   // flow is no longer a view of its own: the address, the saved choice and the key still lead to its section
   var toFlow = name === 'flow';
