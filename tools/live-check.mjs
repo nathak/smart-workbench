@@ -84,6 +84,7 @@ try {
   check((await request('/', `evil.test:${port}`)).status === 403, 'refuses a foreign Host header')
   check((await request('/', `127.0.0.1:${port}`)).status === 200, 'serves the page on a loopback Host')
   const info = JSON.parse((await request('/info', `127.0.0.1:${port}`)).body || '{}')
+  check('git' in info && info.git === null, 'the info names the git branch, and says null for a folder that is not a repository')
   check(info.pid > 0 && typeof info.linesRead === 'number' && typeof info.startedAt === 'number' && typeof info.feed === 'string' && info.feed.endsWith('smartworkbench-live.jsonl') && (await request('/info', `evil.test:${port}`)).status === 403, 'reports where the feed is and how many lines it read, and only to a trusted Host')
   check(await headerOf('/', 'content-security-policy').then(value => value?.includes("default-src 'none'")), 'sends a content security policy with the page')
 
@@ -542,6 +543,21 @@ check(tr1.turns[2].marks.some(m => m.kind === 'loop.stop'), 'a loop event after 
 check(M.statusOf(tr1.spans.get('f')) === 'bg' && M.statusOf(trWait.spans.get('w1')) === 'running' && M.statusOf(tr1.spans.get('g')) === 'aborted' && M.statusOf(tr1.spans.get('d')) === 'blocked', 'span statuses: background start, running, cut short by the next prompt, blocked')
 check(Object.keys(M.criticalPath([], 9)).length === 0 && M.pct([], 50) === null && M.pct([5], 95) === 5 && M.pct([1, 2, 3, 4], 50) === 2 && M.pct([1, 2, 3, 4], 95) === 4, 'percentiles use the nearest rank')
 check(M.buckets([100, 190, 250, 9999], 300, 3, 100).join() === '1,1,1' && M.buckets([-5], 300, 3, 100).join() === '0,0,0', 'buckets count events into equal slices ending now and ignore the future and the too old')
+const trWb = feedOf([
+  { kind: 'prompt', text: 'p' },
+  { kind: 'wb', goal: 'g', met: 1, total: 2, conds: [{ id: 'a', t: 'x', link: 'test', s: 'verified' }], profile: 'balanced' },
+  { kind: 'evidence', id: 'e1', ekind: 'test', command: 'npm test', ok: true }, { kind: 'evidence', id: 'e2', ekind: 'lint', command: 'npm run lint', ok: false }, { kind: 'evidence', id: 'e3', ekind: 'x', command: 'c', ok: 'maybe' },
+  { kind: 'guard.profile', profile: 'strict' }, { kind: 'wb', goal: 'g2', met: 2, total: 2, conds: [], profile: 'strict' },
+])
+check(trWb.wb?.goal === 'g2' && trWb.wb.met === 2 && trWb.evid.length === 3 && trWb.evid[0].ok === true && trWb.evid[1].ok === false && trWb.evid[2].ok === null && trWb.evid[0].kind === 'test', 'the latest state line is kept and each evidence line is a result with a known or unknown outcome')
+check(trWb.audit.some(a => a.kind === 'guard.profile') && !trWb.audit.some(a => a.kind === 'wb' || a.kind === 'evidence'), 'guard and team events go to the audit list; the state and evidence lines do not')
+const trRate = feedOf([
+  { kind: 'prompt', text: 'a', at: 0 }, { kind: 'tool.start', id: 'r1', tool: 'Read', policy: 'allow', at: 1000 }, { kind: 'tool.start', id: 'r2', tool: 'Read', policy: 'allow', at: 2000 }, { kind: 'turn', at: 60000 },
+  { kind: 'prompt', text: 'b', at: 60000 }, { kind: 'tool.start', id: 'r3', tool: 'Read', policy: 'allow', at: 61000 }, { kind: 'tool.start', id: 'r4', tool: 'Read', policy: 'allow', at: 62000 }, { kind: 'tool.start', id: 'r5', tool: 'Read', policy: 'allow', at: 63000 }, { kind: 'turn', at: 120000 },
+])
+check(M.kpis(trRate, 120000).rateDelta === 50 && M.kpis(feedOf([{ kind: 'prompt', text: 'a' }]), 5000).rateDelta === null, 'the rate is compared with the previous turn, and a single turn has nothing to compare with')
+const { gitOf } = await import('./live-git.mjs')
+check(gitOf('relative/path') === null && gitOf(join(tmpdir(), 'swb-no-such-dir-x')) === null && (!existsSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.git')) || typeof gitOf(join(dirname(fileURLToPath(import.meta.url)), '..'))?.branch === 'string'), 'the branch comes only for an absolute path that is a git repository')
 const tr2 = feedOf([
   { kind: 'prompt', text: 'p' },
   { kind: 'tool.start', id: 'A', tool: 'Agent', subagent: 'x:explorer' },
