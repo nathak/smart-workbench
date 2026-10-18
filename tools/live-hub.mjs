@@ -6,6 +6,7 @@ import { hostname } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { gitOf } from './live-git.mjs'
 import { ID_PATTERN, ensureRegistry, feedOf, registryDir, scan, trustedHosts } from './live-registry.mjs'
 import { makeTail } from './live-tail.mjs'
 
@@ -202,7 +203,7 @@ export function runHub({ port, keep = false, watchParent = false }) {
           res.end(JSON.stringify({ missing: true }))
           return
         }
-        res.end(JSON.stringify({ project: own.reg.project, feed: feedOf(own.reg.project, own.reg.feedId), pid: process.pid, startedAt, linesRead: own.tail.linesRead, badLines: own.tail.badLines, kept: own.tail.recent.length, clients: own.clients.size }))
+        res.end(JSON.stringify({ project: own.reg.project, git: gitOf(own.reg.project), feed: feedOf(own.reg.project, own.reg.feedId), pid: process.pid, startedAt, linesRead: own.tail.linesRead, badLines: own.tail.badLines, kept: own.tail.recent.length, clients: own.clients.size }))
         return
       }
       res.end(JSON.stringify({ hub: 'smartworkbench', v: HUB_VERSION, pid: process.pid, port, startedAt, registry: registryDir(port), host: hostname(), hosts: TRUSTED, sessions: sessions.size, clients: everyone.size }))

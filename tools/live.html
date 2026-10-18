@@ -93,6 +93,7 @@ mark{background:var(--warn-bg);color:var(--fg);outline:1px solid var(--warn);bor
 .sech{display:flex;align-items:center;gap:10px;margin:var(--sp-5) 0 var(--sp-3);font:700 var(--fs-lg)/1.3 var(--mono);letter-spacing:-.02em}
 #p-flow .cnt,.sech .cnt{margin-left:0;color:var(--fg-muted);border-color:var(--border-strong);font-weight:500}
 #p-flow{margin-bottom:var(--sp-5);scroll-margin-top:52px}
+.sect h2 .ic{margin-right:8px}
 .sect h2{font:700 var(--fs-md)/1.3 var(--mono);text-transform:uppercase;letter-spacing:.04em;margin:0 0 var(--sp-3)}
 .queue{display:flex;flex-direction:column;gap:var(--sp-2)}
 .qitem{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;padding:var(--sp-3) var(--sp-4);border:1px solid var(--border);border-left:2px solid var(--warn);border-radius:var(--r);background:var(--surface);font-size:var(--fs-sm)}
@@ -501,12 +502,14 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <div class="sect"><h2 data-i="g-table"></h2>
       <div class="fchips" id="g-chips"></div>
       <div class="tblwrap"><table class="tbl" id="g-tbl"></table></div><div class="muted" id="g-more" hidden></div></div>
+    <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="g-audit"></span> <button id="g-export" data-i="g-export"></button></h2><div class="tblwrap"><table class="tbl" id="g-audit"></table></div></div>
   </div>
   <div class="tabpanel" id="p-agents" role="tabpanel" aria-labelledby="tab-agents" hidden>
     <div class="sect"><h2 data-i="a-kinds"></h2><div class="tblwrap"><table class="tbl" id="a-kinds"></table></div></div>
     <div class="sect"><h2 data-i="a-runs"></h2><div class="tblwrap"><table class="tbl" id="a-runs"></table></div></div>
     <div class="sect"><h2 data-i="a-wf"></h2><div class="tblwrap"><table class="tbl" id="a-wf"></table></div></div>
     <div class="sect"><h2 data-i="a-codex"></h2><div class="tblwrap"><table class="tbl" id="a-codex"></table></div></div>
+    <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="a-audit"></span></h2><div class="tblwrap"><table class="tbl" id="a-audit"></table></div></div>
   </div>
   </main>
   </div>
@@ -524,7 +527,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <p class="muted" data-i="h-note"></p>
     <button id="help-close" data-i="h-close"></button>
   </dialog>
-  <footer class="footer"><span class="r mono" id="title"></span><span class="r" id="count">0 events</span><span class="r" id="tok"></span></footer>
+  <footer class="footer"><span class="r mono" id="title"></span><span class="r" id="ft-git"></span><span class="r" id="count">0 events</span><span class="r" id="ft-drop"></span><span class="r" id="ft-buf"></span><span class="r" id="ft-rtt"></span><span class="r" id="tok"></span></footer>
 </div>
 <script>
 var loadedAt = Date.now();
@@ -567,6 +570,7 @@ var DICT = {
   'h-user': ['Your prompt', '내 프롬프트'], 'h-lead': ['Lead session', '리드 세션'], 'h-guard': ['Guard', '가드'], 'h-sub': ['Dispatcher', '분배기'], 'h-worker': ['Worker', '워커'], 'h-expl': ['Explorer', '탐색기'], 'h-loop': ['Loop', '루프'], 'h-opus': ['Advisor', '조언자'], 'h-codex': ['Codex', 'Codex'],
   'nav-wait': ['waiting', '대기 중'], 'nav-runs': ['agent runs', '에이전트 실행'],
   'sec-flow': ['Request flow', '요청 흐름'], 'sec-tl': ['Execution timeline', '실행 타임라인'],
+  'g-audit': ['Audit trail', '감사 기록'], 'g-export': ['Export buffer', '버퍼 내보내기'], 'a-audit': ['Team audit', '팀 감사 기록'],
   'nav-h': ['Workbench sectors', '워크벤치 영역'],
   'tab-timeline': ['Live flow & timeline', '실시간 흐름·타임라인'],
   's-aborted': ['aborted', '중단됨'], 's-ok': ['ok', '완료'], 's-error': ['error', '오류'], 's-blocked': ['blocked', '차단'], 's-declined': ['declined', '거절'], 's-running': ['running', '실행 중'], 's-bg': ['started', '시작됨'], 's-ask': ['asking', '확인 중'],
@@ -596,7 +600,7 @@ var STATUS = Object.assign(Object.create(null), { ok: 'ok', error: 'error', bloc
 function newTrace(){
   return { turns: [], spans: new Map(), byAgent: new Map(), pendingAsk: new Map(), attention: [], agentTok: Object.create(null),
     tok: Object.create(null), ctx: null, ctxHist: [], sessions: Object.create(null), missed: 0, loopPasses: 0, loopActive: false, activeMs: 0,
-    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0 };
+    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0, audit: [] };
 }
 function turnOf(tr, at, extra){
   var t = { n: tr.turns.length, at: at, end: null, aborted: false, text: '', origin: 'user', loop: false, spans: [], marks: [], warn: [], ctx: null, tokIn: 0, tokOut: 0, models: Object.create(null), early: !!(extra && extra.early) };
@@ -648,6 +652,8 @@ function ingest(tr, ev){
   tr.events++;
   tr.lastAt = Math.max(tr.lastAt, at);
   if (ev.session) tr.sessions[String(ev.session).slice(0, 12)] = 1;
+  // what the guard, the team, the contract and the session recorded, for the audit lists of the Guard and Team views
+  if (/^(guard|team|codex|task|contract|evidence|condition|desktop|session)\./.test(String(ev.kind))) { tr.audit.push({ at: at, kind: String(ev.kind).slice(0, 60), ev: ev }); if (tr.audit.length > 300) tr.audit.shift(); }
   var t, sp, id;
   switch (ev.kind) {
     case 'prompt':
@@ -756,7 +762,11 @@ function kpis(tr, now){
   Object.keys(tr.tok).forEach(function(m){ tokIn += tr.tok[m].i; tokOut += tr.tok[m].o; });
   var oldest = null;
   tr.pendingAsk.forEach(function(a){ if (oldest === null || a < oldest) oldest = a; });
+  var rt = tr.turns.filter(function(t){ return !t.early && t.spans.length; });
+  var rate = function(t){ return t.spans.length / Math.max(1000, (t.end === null ? tr.lastAt : t.end) - t.at) * 60000; };
+  var rateDelta = rt.length >= 2 && rate(rt[rt.length - 2]) > 0 ? Math.round((rate(rt[rt.length - 1]) - rate(rt[rt.length - 2])) / rate(rt[rt.length - 2]) * 100) : null;
   return {
+    rateDelta: rateDelta,
     callsPerMin: tr.startAt.filter(function(a){ return now - a <= 60000 && now - a >= 0; }).length,
     callSpark: buckets(tr.startAt, now, 12, 30000),
     p50: pct(lat, 50), p95: pct(lat, 95), latN: lat.length,
@@ -1659,6 +1669,7 @@ function uiBuild(){
   });
   grid.addEventListener('pointerleave', function(){ tip.hidden = true; });
   $('dw-close').onclick = closeDrawer;
+  $('g-export').onclick = exportBuffer;
   document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && !e.defaultPrevented && !$('help').open && !$('drawer').hidden && !$('p-timeline').hidden) closeDrawer(); });
   $('pause').onclick = function(){ setPaused(!paused); };
   $('replay').onclick = function(){ if (playback) endPlayback(false); else startPlayback(Number($('replay-n').value) || 20); };
@@ -1784,6 +1795,8 @@ function drawTimeline(){
     var mt = el('span', 'mt');
     mt.appendChild(chip(L(calls + ' calls', '호출 ' + calls)));
     if (errs) mt.appendChild(chip(L(errs + ' failed', '실패 ' + errs), 'bad', 'alert'));
+    var waiting = t.spans.filter(function(x){ return TR.pendingAsk.has(x.id); }).length;
+    if (waiting) mt.appendChild(chip(L(waiting + ' waiting for an answer', '확인 대기 ' + waiting), 'warn', 'help'));
     mt.appendChild(chip(fmtMs(tEnd - t.at), '', 'timer'));
     if (t.ctx != null) mt.appendChild(chip(L('ctx ', '컨텍스트 ') + t.ctx + '%', '', 'ctx'));
     if (t.tokIn || t.tokOut) mt.appendChild(chip(k(t.tokIn) + '/' + k(t.tokOut), '', 'swap'));
@@ -2255,7 +2268,32 @@ function eventText(a){
   if (a.kind === 'feed.recovered') return L(cut(ev.missed, 8) + ' events were not written to the feed', cut(ev.missed, 8) + '개 이벤트가 피드에 기록되지 못했습니다');
   return cut(a.kind, 60);
 }
+// What an audit event says in a line: its own fields except the ones every line has, cut short.
+function auditText(ev){
+  var out = [];
+  Object.keys(ev).forEach(function(k2){
+    if (k2 === 'at' || k2 === 'kind' || k2 === 'session') return;
+    var v = ev[k2];
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out.push(k2 + '=' + cut(String(v), 60));
+  });
+  return cut(out.join(' '), 160);
+}
+function drawAudit(id, re){
+  var rows = TR.audit.filter(function(a){ return re.test(a.kind); }).slice(-30).reverse().map(function(a){ return { cells: [clock(a.at), a.kind, auditText(a.ev)] }; });
+  drawTable($(id), [{ label: L('time', '시각') }, { label: L('event', '이벤트') }, { label: L('detail', '내용') }], rows, null, null, null, L('nothing recorded yet', '아직 기록이 없습니다'));
+}
+// The buffer as a file: what this page holds, not the whole feed.
+function exportBuffer(){
+  try {
+    var blob = new Blob([events.map(function(e){ return JSON.stringify(e); }).join('\n') + '\n'], { type: 'application/x-ndjson' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'smartworkbench-live-' + new Date().toISOString().replace(/[:.]/g, '-') + '.jsonl';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
+  } catch (e) { pageError('export', e); }
+}
 function drawGuard(){
+  drawAudit('g-audit', /^(guard|contract|evidence|task|condition|session|desktop)\./);
   var now = nowFor() || Date.now();
   var q = $('g-queue'); q.textContent = '';
   var items = attention(TR, now);
@@ -2306,6 +2344,7 @@ function drawGuard(){
 }
 function tokText(a){ return a.tokIn || a.tokOut ? k(a.tokIn) + ' / ' + k(a.tokOut) : ''; }
 function drawAgents(){
+  drawAudit('a-audit', /^(team|codex)\./);
   var now = nowFor() || Date.now();
   var ks = kindStats(TR, now);
   drawTable($('a-kinds'), [{ label: L('kind', '종류') }, { label: L('runs', '실행'), num: true }, { label: L('avg', '평균'), num: true }, { label: 'p95', num: true }, { label: L('calls', '호출'), num: true }, { label: L('failed', '실패'), num: true }, { label: L('tokens in / out', '토큰 입력 / 출력'), num: true }],
@@ -2362,7 +2401,7 @@ function drawKpis(){
   kpiQueued = false;
   var K = kpis(TR, nowFor() || Date.now());
   $('k-calls-v').textContent = K.callsPerMin;
-  $('k-calls-s').textContent = L(K.spans + ' calls in the buffer', '버퍼 내 호출 ' + K.spans + '개');
+  $('k-calls-s').textContent = L(K.spans + ' calls in the buffer', '버퍼 내 호출 ' + K.spans + '개') + (K.rateDelta === null ? '' : ' · ' + (K.rateDelta >= 0 ? '↑' : '↓') + Math.abs(K.rateDelta) + '% ' + L('vs previous turn', '이전 턴 대비'));
   spark($('k-calls-sp'), K.callSpark);
   $('k-lat-v').textContent = K.latN ? fmtMs(K.p50) : '–';
   $('k-lat-s').textContent = L('p50 · p95 ' + (K.latN ? fmtMs(K.p95) : '–') + ' · ' + K.latN + ' calls', 'p50 · p95 ' + (K.latN ? fmtMs(K.p95) : '–') + ' · ' + K.latN + '개 호출');
@@ -2382,21 +2421,26 @@ function drawKpis(){
 setInterval(function(){ if (!replaying && !playback && !paused && !document.hidden) { queueKpi(); if (tab === 'guard') queueView(); } }, 1000);
 
 // ---- the server's own count of what it read, against what this page received ----
-var srv = null, srvBase = 0;
+var srv = null, srvBase = 0, rtt = null;
 function pollInfo(){
   if (typeof fetch !== 'function') return;
   if (hub && !curId) return;
-  var asked = curId;
-  fetch(hub ? '/info?session=' + encodeURIComponent(curId) : '/info', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(info){ if (hub && asked !== curId) return; srv = info && !info.missing ? info : null; drawSrv(); }).catch(function(){});
+  var asked = curId, sent = Date.now();
+  fetch(hub ? '/info?session=' + encodeURIComponent(curId) : '/info', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(info){ if (hub && asked !== curId) return; rtt = Date.now() - sent; srv = info && !info.missing ? info : null; drawSrv(); }).catch(function(){});
 }
 function drawSrv(){
   var box = $('srv');
   if (!srv) { box.textContent = ''; return; }
   var name = String(srv.project || '').split(/[\\/]/).filter(Boolean).pop() || '';
-  box.textContent = cut(name, 24);
+  box.textContent = cut(name, 24) + (srv.git && srv.git.branch ? ' : ' + srv.git.branch : '');
+  $('ft-git').textContent = srv.git ? srv.git.branch + (srv.git.head ? ' @' + srv.git.head : '') : '';
   box.title = L('project ', '프로젝트 ') + srv.project + '\n' + L('feed ', '피드 ') + srv.feed + '\n' + L('server started ', '서버 시작 ') + clock(srv.startedAt) + ' (pid ' + srv.pid + ')\n' + L('lines read ', '읽은 줄 ') + srv.linesRead + ' · ' + L('page events ', '화면 이벤트 ') + S.events;
   var expected = Math.min(srv.linesRead - srvBase, 2000), got = events.length;
   var bad = !paused && !playback && expected - got > 5;
+  var lost = Math.max(0, expected - got);
+  $('ft-drop').textContent = L(lost + ' dropped', '유실 ' + lost);
+  $('ft-buf').textContent = L('buffer ', '버퍼 ') + got + '/2000';
+  $('ft-rtt').textContent = rtt === null ? '' : L('server ', '서버 ') + rtt + 'ms';
   var w = $('srv-warn');
   w.hidden = !bad;
   w.title = L('The server has read more lines than this page received. Reload the page; if it stays, something between the browser and the server (a reverse proxy) is holding the event stream back: see the README on proxy_buffering.', '서버가 읽은 줄보다 이 화면이 받은 줄이 적습니다. 페이지를 새로고침하세요. 계속되면 브라우저와 서버 사이의 리버스 프록시가 이벤트 스트림을 붙잡고 있는 것입니다. README의 proxy_buffering 항목을 보세요.');

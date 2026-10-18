@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 
 import { runHub } from './live-hub.mjs'
 import { runJoin } from './live-join.mjs'
+import { gitOf } from './live-git.mjs'
 import { claimFeed, feedOf, noteOf, releaseFeed } from './live-registry.mjs'
 import { makeTail } from './live-tail.mjs'
 
@@ -104,7 +105,7 @@ const server = createServer((req, res) => {
   if (path === '/info') {
     // Where the feed is and how much this server has read: the page compares it with what it received.
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-    res.end(JSON.stringify({ project, feed, pid: process.pid, startedAt, linesRead: tail.linesRead, badLines: tail.badLines, kept: tail.recent.length, clients: clients.size, feedSize: lstatSync(feed, { throwIfNoEntry: false })?.size ?? null }))
+    res.end(JSON.stringify({ project, git: gitOf(project), feed, pid: process.pid, startedAt, linesRead: tail.linesRead, badLines: tail.badLines, kept: tail.recent.length, clients: clients.size, feedSize: lstatSync(feed, { throwIfNoEntry: false })?.size ?? null }))
     return
   }
   if (path === '/') {
