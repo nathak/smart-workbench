@@ -202,7 +202,7 @@ function ribbon(row, snap, L) {
     el('span', state === 'alive' ? '●' : state === 'quiet' ? '◐' : '◌', `dot ${state}`),
     el('span', t.goal || L.noGoal, 'r-goal'),
     el('span', `${L.ribbonDone} ${met}/${t.doneConditions.length}`, 'r-done'),
-    el('span', `${L.guard} ${String(snap.guard.profile).toUpperCase()}${snap.guard.paused ? ` · ${L.paused}` : ''}`, snap.guard.paused ? 'r-guard warn' : 'r-guard'),
+    el('span', `${L.guard} ${snap.guard.profile ? String(snap.guard.profile).toUpperCase() : '-'}${snap.guard.paused ? ` · ${L.paused}` : ''}`, snap.guard.paused ? 'r-guard warn' : 'r-guard'),
   )
 
   return box
