@@ -1683,7 +1683,7 @@ async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number
   const FROM = 'The desktop app asks: '
   if (isPolicyEditOp(one)) return applyPolicyEdit($, one, expiresAt, gen, batch)
   if (needsAnswer(wb, one) && !(one.op === 'set_profile' && one.profile === 'off') && one.op !== 'codex') {
-    const what = one.op === 'set_profile' ? `lower the guard from ${wb.execution.profile} to ${one.profile}` : one.op === 'pause' ? 'resume risky calls' : 'turn team mode on (Codex is on, so its reviews will then run without asking)'
+    const what = one.op === 'proposal_decide' ? 'approve a proposed change to the locked contract' : one.op === 'set_profile' ? `lower the guard from ${wb.execution.profile} to ${one.profile}` : one.op === 'pause' ? 'resume risky calls' : 'turn team mode on (Codex is on, so its reviews will then run without asking)'
     const waited = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - (await $.clock.now())) : 10 * 60 * 1000
     const answer = await Promise.race([
       $.ui.ask(`${FROM}${what}. Allow it?`, { header: 'Desktop app', options: ['Allow', 'Decline'] }).catch(() => 'Decline'),
@@ -1710,6 +1710,11 @@ async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number
     }
     case 'set_profile':
       return (await chooseGuard($, one.profile, FROM)) ? { status: 'applied' } : { status: 'declined' }
+    case 'proposal_decide': {
+      if (!(await read($, wbAtom)).proposals?.some(item => item.id === one.id && item.status === 'open')) return { status: 'rejected', reason: 'no such proposal' }
+      await settleProposal($, one.id, one.accept)
+      return { status: 'applied' }
+    }
     case 'pause':
       // The target state, not a flip: the person may have changed it in the panel while the question waited.
       await mutate($, current => (current.execution.isPaused === one.on ? current : model.togglePause(current)))

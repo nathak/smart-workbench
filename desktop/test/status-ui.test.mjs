@@ -142,15 +142,22 @@ test('while an answer is pending the tabs stay usable and the change buttons res
   assert.ok(buttons(main).filter(node => node.textContent === 'Add').every(node => node.disabled))
 })
 
-test('a proposal from Claude is shown with where to decide it, and the app offers no approve or reject', async () => {
+test('a proposal from Claude can be approved or rejected from the app, by its id, and an ended session offers neither', async () => {
   const data = overview(FILE)
-  data.snaps.s1.proposals = [{ change: 'add_constraint', text: 'keep logs', reason: 'audit' }]
-  const { main } = load(data)
+  data.snaps.s1.proposals = [{ id: 'pr-abc123', change: 'add_constraint', text: 'keep logs', reason: 'audit' }]
+  const { main, sent } = load(data)
   await settle()
   const texts = [...main.walk()].map(node => node.textContent)
   assert.ok(texts.some(text => text.includes('keep logs')))
   assert.ok(texts.includes(strings('en').ui.proposalNote))
-  assert.ok(!buttons(main).some(node => /approve|reject|accept|deny/i.test(node.textContent)))
+  await buttons(main).find(node => node.textContent === 'Approve').listeners.click()
+  assert.deepEqual(plain(sent.at(-1)), [{ op: 'proposal_decide', id: 'pr-abc123', accept: true }])
+  await buttons(main).find(node => node.textContent === 'Reject').listeners.click()
+  assert.deepEqual(plain(sent.at(-1)), [{ op: 'proposal_decide', id: 'pr-abc123', accept: false }])
+
+  const ended = load({ ...data, rows: [{ id: 's1', name: 'p', alive: false, quiet: false }] })
+  await settle()
+  assert.ok(!buttons(ended.main).some(node => node.textContent === 'Approve' || node.textContent === 'Reject'))
 })
 
 test('the ribbon counts the verified done conditions', async () => {

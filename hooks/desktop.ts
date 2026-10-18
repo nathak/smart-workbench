@@ -117,9 +117,10 @@ export type SettingOp =
   | { op: 'team_role'; role: 'lead' | 'explorer' | 'advisor'; model?: string; effort?: string }
   | { op: 'set_profile'; profile: 'off' | 'permissive' | 'balanced' | 'strict' }
   | { op: 'pause'; on: boolean }
+  | { op: 'proposal_decide'; id: string; accept: boolean }
   | PolicyEditOp
 
-export const isSettingOp = (one: { op: string }): one is SettingOp => isPolicyEditOp(one) || one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause'
+export const isSettingOp = (one: { op: string }): one is SettingOp => isPolicyEditOp(one) || one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause' || one.op === 'proposal_decide'
 
 const PROFILE_RANK = { off: 0, permissive: 1, balanced: 2, strict: 3 } as const
 
@@ -139,6 +140,8 @@ export function lowersGuard(wb: Workbench, one: SettingOp): boolean {
  */
 export function needsAnswer(wb: Workbench, one: SettingOp): boolean {
   if (isPolicyEditOp(one)) return false
+  // Approving a change to a locked contract goes past the lock: the person confirms it in the session as well.
+  if (one.op === 'proposal_decide') return one.accept && wb.task.locked
   if (lowersGuard(wb, one)) return true
   if (one.op === 'codex') return one.enabled && !codexOf(wb.team).enabled
   if (one.op === 'team_enabled') return one.enabled && wb.team?.enabled !== true && codexOf(wb.team).enabled

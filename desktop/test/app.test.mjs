@@ -297,7 +297,7 @@ test('the app never writes the guard file itself, and its guard file texts come 
   }
   assert.deepEqual(Object.keys(en.ruleHints), Object.keys(ko.ruleHints))
   // A missing tab name throws in the card and leaves only the session's name on screen.
-  for (const key of ['tabs', 'tabsLabel', 'proposalNote', 'ribbonDone']) assert.ok(en[key] && ko[key] && JSON.stringify(en[key]) !== JSON.stringify(ko[key]), key)
+  for (const key of ['tabs', 'tabsLabel', 'proposalNote', 'ribbonDone', 'approve', 'rejectProposal']) assert.ok(en[key] && ko[key] && JSON.stringify(en[key]) !== JSON.stringify(ko[key]), key)
   assert.deepEqual(Object.keys(en.tabs), Object.keys(ko.tabs))
   for (const reason of ['policy file is broken', 'invalid', 'unknown rule']) assert.ok(en.reasons[reason] && ko.reasons[reason], reason)
 })

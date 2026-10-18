@@ -2591,3 +2591,48 @@ test('the live feed carries the contract state and each evidence result, masked 
   expect(text).not.toContain('abcdef123456')
   for (const line of lines.filter(one => one.kind === 'wb')) expect(JSON.stringify(line).length).toBeLessThan(2500)
 })
+
+test('the app decides a proposal by its id: a reject needs no question, an approval of a change to a locked contract waits for the person in the session, and an unknown or settled id is refused', async ($, on) => {
+  const { seen, deliver, asked, workbench } = await deskWorld($, on, 'Allow')
+  await deliver({ commands: [{ id: 'k1', ops: [{ op: 'lock' }] }] }, 3)
+  expect(workbench().task.locked).toBe(true)
+  await $.tool.call({ tool: PROPOSE, change: 'add_done_condition', text: 'Typecheck passes', reason: 'Types changed.' })
+  await $.tool.call({ tool: PROPOSE, change: 'add_non_goal', text: 'No refactor', reason: 'Scope.' })
+  const [first, second] = (workbench().proposals ?? []).map(one => one.id)
+  expect(first && second).toBeTruthy()
+
+  seen.length = 0
+  await deliver({ commands: [{ id: 'd1', ops: [{ op: 'proposal_decide', id: second, accept: false }] }] }, 6)
+  expect(asked).toEqual([])
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'd1', status: 'applied' })])
+  expect(workbench().proposals?.find(one => one.id === second)?.status).toBe('rejected')
+  expect(workbench().task.nonGoals).toEqual([])
+
+  seen.length = 0
+  await deliver({ commands: [{ id: 'd2', ops: [{ op: 'proposal_decide', id: first, accept: true }] }] }, 9)
+  expect(asked).toHaveLength(1)
+  expect(asked[0]).toContain('Allow')
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'd2', status: 'applied' })])
+  expect(workbench().task.doneConditions.map(one => one.text)).toContain('Typecheck passes')
+  expect(workbench().task.locked).toBe(true)
+
+  seen.length = 0
+  await deliver({ commands: [{ id: 'd3', ops: [{ op: 'proposal_decide', id: first, accept: true }] }] }, 12)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'd3', status: 'rejected', reason: 'no such proposal' })])
+  seen.length = 0
+  await deliver({ commands: [{ id: 'd4', ops: [{ op: 'proposal_decide', id: 'pr-nothere', accept: false }] }] }, 15)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'd4', status: 'rejected', reason: 'no such proposal' })])
+})
+
+test('a declined confirmation leaves the proposal open and the locked contract as it was', async ($, on) => {
+  const { seen, deliver, asked, workbench } = await deskWorld($, on, 'Decline')
+  await deliver({ commands: [{ id: 'k1', ops: [{ op: 'lock' }] }] }, 3)
+  await $.tool.call({ tool: PROPOSE, change: 'add_done_condition', text: 'Typecheck passes', reason: 'Types changed.' })
+  const id = workbench().proposals?.[0]?.id ?? ''
+  seen.length = 0
+  await deliver({ commands: [{ id: 'x1', ops: [{ op: 'proposal_decide', id, accept: true }] }] }, 6)
+  expect(asked).toHaveLength(1)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'x1', status: 'declined' })])
+  expect(workbench().proposals?.[0]?.status).toBe('open')
+  expect(workbench().task.doneConditions.map(one => one.text)).not.toContain('Typecheck passes')
+})

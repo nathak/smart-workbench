@@ -257,8 +257,12 @@ function card(row, snap, L, acks, index = 0) {
     return li
   }))
   if (row.alive) intent.append(adder(`${row.id}:n`, L.nonGoalHint, L.add, text => op([{ op: 'add_non_goal', text }]), !editable || busy))
-  // A proposal is decided in the session's own panel: the app has no op for it.
-  intent.append(list(L.proposals, snap.proposals, p => el('li', `${p.change}${p.text ? `: ${p.text}` : ''} — ${p.reason}`)))
+  // A decision goes to the session like any other change; on a locked contract the session asks the person to confirm an approval.
+  intent.append(list(L.proposals, snap.proposals, p => {
+    const li = el('li', `${p.change}${p.text ? `: ${p.text}` : ''} — ${p.reason} `)
+    if (row.alive) li.append(button(L.approve, () => op([{ op: 'proposal_decide', id: p.id, accept: true }]), busy), button(L.rejectProposal, () => op([{ op: 'proposal_decide', id: p.id, accept: false }]), busy))
+    return li
+  }))
   if (snap.proposals.length) intent.append(el('div', L.proposalNote, 'empty'))
 
   evidence.append(list(L.done, t.doneConditions, d => el('li', `${L.cond[d.status] ?? d.status}: ${d.text}${d.link ? ` [${d.link}]` : ''}`, d.status)))

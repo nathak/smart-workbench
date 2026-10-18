@@ -66,6 +66,9 @@ test('a forged, edited, expired, misdirected or replayed command is not taken', 
 test('ops outside the list, too many, too long or with a bad id are refused whole', () => {
   assert.equal(checkOps([{ op: 'rm', path: '/' }]).reason, 'unknown op')
   assert.equal(checkOps([{ op: 'write_policy', text: 'x' }]).reason, 'unknown op')
+  assert.deepEqual(checkOps([{ op: 'proposal_decide', id: 'pr-abc123', accept: true, extra: 'x' }]), { ops: [{ op: 'proposal_decide', id: 'pr-abc123', accept: true }] })
+  for (const bad of [{ id: '../x', accept: true }, { id: 'pr-1', accept: 'yes' }, { id: 'pr-1' }, { accept: true }]) assert.equal(checkOps([{ op: 'proposal_decide', ...bad }]).reason, 'bad proposal_decide')
+  assert.equal(checkOps([{ op: 'proposal_decide', id: 'pr-1', accept: true }, { op: 'lock' }]).reason, 'a setting goes alone')
   assert.equal(checkOps([]).reason, 'bad ops')
   assert.equal(checkOps(Array.from({ length: 21 }, () => ({ op: 'lock' }))).reason, 'bad ops')
   assert.match(checkOps([{ op: 'add_constraint', text: 'x'.repeat(1001) }]).reason, /bad text/)

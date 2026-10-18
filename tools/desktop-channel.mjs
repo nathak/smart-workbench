@@ -38,7 +38,7 @@ const TEXT_OPS = new Set(['set_goal', 'add_constraint', 'add_done_condition', 'a
 const REMOVE_OPS = new Set(['remove_constraint', 'remove_done_condition'])
 const BARE_OPS = new Set(['lock', 'unlock'])
 // Settings of the session, not of the contract: one per command, so its answer says what happened to it.
-export const SETTING_OPS = new Set(['team_enabled', 'team_role', 'codex', 'set_profile', 'pause', 'policy_add_rule', 'policy_remove_rule', 'policy_set_profile'])
+export const SETTING_OPS = new Set(['proposal_decide', 'team_enabled', 'team_role', 'codex', 'set_profile', 'pause', 'policy_add_rule', 'policy_remove_rule', 'policy_set_profile'])
 const HASH_RE = /^[0-9a-f]{64}$/
 const RULE_FIELD_MAX = 300
 const RULE_REASON_MAX = 200
@@ -89,6 +89,10 @@ export function checkOps(ops) {
       if (model !== undefined && (typeof model !== 'string' || !MODEL_RE.test(model))) return { reason: 'bad team_role' }
       if (effort !== undefined && !EFFORT_NAMES.has(effort)) return { reason: 'bad team_role' }
       clean.push({ op, role: one.role, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) })
+    } else if (op === 'proposal_decide') {
+      // The id of a proposal Claude made; an unknown or already decided one is refused by the session, not here.
+      if (typeof one.id !== 'string' || !ITEM_ID_RE.test(one.id) || typeof one.accept !== 'boolean') return { reason: 'bad proposal_decide' }
+      clean.push({ op, id: one.id, accept: one.accept })
     } else if (op === 'set_profile') {
       if (!PROFILES.has(one.profile)) return { reason: 'bad set_profile' }
       clean.push({ op, profile: one.profile })
