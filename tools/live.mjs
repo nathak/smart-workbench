@@ -35,7 +35,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 if (args.includes('--hub')) {
   // --keep: the hub never ends for lack of sessions (the desktop app supervises it).
-  runHub({ port, keep: args.includes('--keep'), watchParent: args.includes('--watch-parent') })
+  runHub({ port, keep: args.includes('--keep'), watchParent: args.includes('--watch-parent'), approve: args.includes('--approve') })
 } else if (args.includes('--join')) {
   if (args.includes('--per-session') && !/^[A-Za-z0-9_-]{1,64}$/.test(sessionAt >= 0 ? (args[sessionAt + 1] ?? '') : '')) {
     console.error('--per-session needs a valid --session id')

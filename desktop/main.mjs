@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { beat, clear, desktopHome, ensureHome, ensureKey, readAck, sendCommand, tidy } from './channel.mjs'
 import { followHub } from './events.mjs'
 import { DEFAULT_PORT, superviseHub } from './hub.mjs'
+import { writePair } from '../tools/desktop-channel.mjs'
+import { randomBytes } from 'node:crypto'
 import { pickLang, strings } from './i18n.mjs'
 import { makeNotices } from './notices.mjs'
 import { loadPrefs, savePrefs } from './prefs.mjs'
@@ -68,7 +70,20 @@ function show() {
     if (!url.startsWith(`${origin}/`) && url !== origin) event.preventDefault()
   }
   for (const name of ['will-navigate', 'will-redirect', 'will-frame-navigate']) win.webContents.on(name, guard)
-  const load = () => void win.loadURL(`${origin}/`).catch(() => {})
+  // The app's own window is paired with the hub by a one-time code in the address (its hash is left in the app's folder for a minute), so this window,
+  // and no other page, may answer a guard question. The page trades the code for a token and removes it from the address at once.
+  const load = () => {
+    let code = ''
+    try {
+      if (home) {
+        code = randomBytes(16).toString('hex')
+        writePair(home, code)
+      }
+    } catch {
+      code = ''
+    }
+    void win.loadURL(`${origin}/${code ? `#pair=${code}` : ''}`).catch(() => {})
+  }
   // The hub may not be up yet when the window opens: try again a little later instead of staying on an error page.
   win.webContents.on('did-fail-load', () => setTimeout(() => !win.isDestroyed() && load(), 3000))
   load()

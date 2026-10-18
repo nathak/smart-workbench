@@ -102,7 +102,7 @@ test('the hub is started when none answers, once, with --keep, and is not starte
   const hub = superviseHub({ port: 4999, tools: '/t', spawnImpl: (...a) => (calls.push(a), fake), probeImpl: async () => undefined, everyMs: 60000 })
   await new Promise(r => setTimeout(r, 30))
   assert.equal(calls.length, 1)
-  assert.ok(calls[0][1].includes('--keep') && calls[0][1].includes('--hub') && calls[0][1].includes('4999'))
+  assert.ok(calls[0][1].includes('--keep') && calls[0][1].includes('--hub') && calls[0][1].includes('--approve') && calls[0][1].includes('4999'))
   assert.equal(calls[0][2].env.ELECTRON_RUN_AS_NODE, '1')
   hub.stop()
   assert.equal(fake.killed, true)

@@ -4,7 +4,7 @@
 //   node desktop-channel.mjs ack <commandId>       writes the result (JSON on stdin) where the app reads it
 // The app writes a command file into <home>/inbox/<sessionId>/, signed with the key in <home>/key. A command is taken only if it is a
 // small plain file of ours, signed, not expired, for this session, and not seen before (the ack file is created exclusively).
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -228,6 +228,66 @@ export function take(home, sessionId, now = Date.now()) {
   }
   out.commands.sort((a, b) => a.createdAt - b.createdAt)
   return out
+}
+
+/**
+ * Writes one signed command for a session, for the hub when it answers a question for the live page. The same checks as the app's own writer;
+ * the key is read the way `take` reads it, so a key that is not ours or is open to others is not used.
+ */
+export function writeCommand(home, sessionId, ops, now = Date.now(), ttlMs = 120 * 1000) {
+  if (typeof sessionId !== 'string' || !ID_RE.test(sessionId)) return { ok: false, reason: 'bad session' }
+  const checked = checkOps(ops)
+  if (checked.reason) return { ok: false, reason: checked.reason }
+  let key
+  try {
+    if (!ownDir(home)) return { ok: false, reason: 'no key' }
+    key = readOwn(join(home, 'key'), 64)
+    if (key.length !== 32) return { ok: false, reason: 'no key' }
+    const id = randomBytes(12).toString('base64url')
+    const body = { v: 1, id, createdAt: now, expiresAt: now + ttlMs, target: { kind: 'session', sessionId }, ops: checked.ops }
+    const inbox = join(home, 'inbox', sessionId)
+    mkdirSync(inbox, { recursive: true, mode: 0o700 })
+    writeAtomic(join(inbox, `${id}.json`), JSON.stringify({ ...body, mac: sign(key, body) }))
+    return { ok: true, id }
+  } catch {
+    return { ok: false, reason: 'cannot write' }
+  }
+}
+
+/** The result the plugin left for a command, or undefined while it waits. */
+export function readAnswer(home, id) {
+  try {
+    if (!ID_RE.test(id)) return undefined
+    const raw = JSON.parse(readOwn(join(home, 'ack', `${id}.json`), 1024).toString('utf8'))
+    return ['applied', 'rejected', 'declined'].includes(raw.status) ? { status: raw.status, reason: typeof raw.reason === 'string' ? raw.reason : undefined } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const PAIR_FILE = 'web-pair.json'
+const PAIR_TTL_MS = 60 * 1000
+const hashOf = code => createHash('sha256').update(code).digest('hex')
+
+/** The app leaves a one-time code (its hash only) for the page it opens itself; the hub trades it for a token. */
+export function writePair(home, code, now = Date.now()) {
+  writeAtomic(join(home, PAIR_FILE), JSON.stringify({ hash: hashOf(code), exp: now + PAIR_TTL_MS }))
+}
+
+/** True once for the code the app left, within a minute. The file is removed on any try, right or wrong. */
+export function takePair(home, code, now = Date.now()) {
+  if (typeof code !== 'string' || !/^[0-9a-f]{32}$/.test(code)) return false
+  const file = join(home, PAIR_FILE)
+  let found
+  try {
+    if (!ownDir(home)) return false
+    found = JSON.parse(readOwn(file, 512).toString('utf8'))
+  } catch {
+    return false
+  }
+  removeQuietly(file)
+  if (typeof found?.hash !== 'string' || !/^[0-9a-f]{64}$/.test(found.hash) || !Number.isFinite(found.exp) || found.exp < now) return false
+  return timingSafeEqual(Buffer.from(hashOf(code), 'hex'), Buffer.from(found.hash, 'hex'))
 }
 
 function removeQuietly(file) {

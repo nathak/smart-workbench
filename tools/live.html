@@ -657,7 +657,7 @@ var STATUS = Object.assign(Object.create(null), { ok: 'ok', error: 'error', bloc
 function newTrace(){
   return { turns: [], spans: new Map(), byAgent: new Map(), pendingAsk: new Map(), attention: [], agentTok: Object.create(null),
     tok: Object.create(null), ctx: null, ctxHist: [], sessions: Object.create(null), missed: 0, loopPasses: 0, loopActive: false, activeMs: 0,
-    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0, audit: [], wb: null, evid: [] };
+    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0, audit: [], wb: null, evid: [], asks: new Map() };
 }
 function turnOf(tr, at, extra){
   var t = { n: tr.turns.length, at: at, end: null, aborted: false, text: '', origin: 'user', loop: false, spans: [], marks: [], warn: [], ctx: null, tokIn: 0, tokOut: 0, models: Object.create(null), early: !!(extra && extra.early) };
@@ -739,12 +739,25 @@ function ingest(tr, ev){
       sp.end = at; sp.outcome = ev.outcome || 'ok'; sp.ms = typeof ev.ms === 'number' ? ev.ms : null;
       sp.output = typeof ev.output === 'string' ? ev.output : (typeof ev.toolOut === 'string' ? ev.toolOut : ''); sp.workflowBg = ev.workflowBg === true; sp.endEv = ev;
       tr.pendingAsk.delete(id);
+      tr.asks.forEach(function(a, k){ if (a.callId === id) tr.asks.delete(k); });
       if (ev.agentRun) {
         sp.agentRun = clean(ev.agentRun, 40);
         tr.runOf.set(sp.agentRun, sp.id);
         (tr.byAgent.get(sp.agentRun) || []).forEach(function(c){ c.parent = sp.id; c.est = false; });
       }
       if (statusOf(sp) === 'error' || sp.outcome === 'blocked' || sp.outcome === 'declined') { tr.failAt.push(at); tr.failTotal++; }
+      break;
+    case 'ask.open':
+      // A guard question the session is waiting on; the app and this page may answer it once while it is open.
+      if (ev.id == null) break;
+      tr.asks.set(clean(ev.id, 40), { id: clean(ev.id, 40), callId: clean(ev.callId, 60), until: Number(ev.until) || 0, refused: '', msg: '', busy: false });
+      if (tr.asks.size > 20) tr.asks.delete(tr.asks.keys().next().value);
+      break;
+    case 'ask.close':
+      tr.asks.delete(clean(ev.id, 40));
+      break;
+    case 'ask.remote':
+      if (tr.asks.has(clean(ev.id, 40))) tr.asks.get(clean(ev.id, 40)).refused = clean(ev.refused, 60);
       break;
     case 'wb':
       // A feed line is not trusted to be well formed: every field the views read is given a fixed shape here.
@@ -1056,6 +1069,14 @@ function guardStats(tr){
   });
   return cats;
 }
+// The open question of a call, if the feed announced one.
+function askOf(tr, callId){
+  var found = null;
+  tr.asks.forEach(function(a){ if (a.callId === callId) found = a; });
+  return found;
+}
+var ASK_WHY = { 'paused': ['the guard is paused', '가드가 일시정지 상태입니다'], 'terminal only': ['this kind is answered in the terminal only', '이 종류는 터미널에서만 답할 수 있습니다'], 'a command ran meanwhile': ['a command ran since it was asked', '질문 이후 다른 명령이 실행되었습니다'], 'a background command was started': ['a background command was started lately', '최근 백그라운드 명령이 시작되었습니다'], 'expired': ['the time for answering here ran out', '여기서 답할 수 있는 시간이 지났습니다'] };
+function askWhy(key){ return ASK_WHY[key] ? L(ASK_WHY[key][0], ASK_WHY[key][1]) : key; }
 // Things that want a person: asks waiting longest first, then the notes the plugin raised, newest first.
 function attention(tr, now){
   var out = [];
@@ -2446,7 +2467,18 @@ function drawGuard(){
     var box = el('div', 'qitem' + (it.type === 'ask' ? '' : it.kind === 'codex.write-check' || it.kind === 'feed.recovered' ? ' bad' : ' hold'));
     if (it.type === 'ask') {
       box.appendChild(el('span', 'dec asking', '? ' + L('waiting ' + fmtMs(it.age), fmtMs(it.age) + ' 대기 중')));
-      box.appendChild(el('span', 'grow', it.sp.tool + ' ' + cut(it.sp.summary, 120) + ' · ' + it.sp.category + '/' + it.sp.risk + ' · ' + L('answer in the terminal', '터미널에서 답하세요')));
+      var rec = askOf(TR, it.sp.id), live = rec && !rec.refused && (rec.until === 0 || Date.now() < rec.until);
+      var can = !!(live && srv && srv.approve === true && TOKEN);
+      var why = rec && rec.refused ? ' (' + askWhy(rec.refused) + ')' : rec && rec.until && Date.now() >= rec.until ? ' (' + askWhy('expired') + ')' : srv && srv.approve === true && !TOKEN ? ' (' + L('open this page from the desktop app to answer here', '여기서 답하려면 데스크톱 앱에서 이 화면을 여세요') + ')' : '';
+      box.appendChild(el('span', 'grow', it.sp.tool + ' ' + cut(it.sp.summary, 120) + ' · ' + it.sp.category + '/' + it.sp.risk + (can ? '' : ' · ' + L('answer in the terminal', '터미널에서 답하세요') + why)));
+      if (can) {
+        [[true, L('Allow once', '이번만 허용')], [false, L('Block', '차단')]].forEach(function(p){
+          var ab = el('button', null, p[1]); ab.disabled = rec.busy; ab.dataset.fk = 'ask-' + rec.id + '-' + p[0];
+          ab.onclick = function(){ answerAsk(rec, p[0]); };
+          box.appendChild(ab);
+        });
+      }
+      if (rec && rec.msg) box.appendChild(el('span', 'muted', rec.msg));
       var go = el('button', null, L('go to call', '호출로 이동')); go.onclick = function(){ gotoCall(selKey('call', it.sp.id)); };
       box.appendChild(go);
     } else {
@@ -2817,6 +2849,34 @@ window.addEventListener('hashchange', function(){ var w = parseHash(location.has
 if (typeof fetch === 'function') {
   fetch('/info', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(info){ hub = !!(info && info.hub === 'smartworkbench'); }).catch(function(){}).then(openStream);
 } else openStream();
+// Answering a guard question from this page needs a token: the desktop app opens its own window with a one-time code in the address, which is
+// traded for the token here and removed from the address at once. A page opened any other way only shows the question.
+var TOKEN = '';
+try { TOKEN = sessionStorage.getItem('swb-token') || ''; } catch (e) {}
+(function(){
+  var m = /[#&]pair=([0-9a-f]{32})(?:&|$)/.exec(location.hash);
+  if (!m || typeof fetch !== 'function') return;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  fetch('/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: m[1] }) })
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(j){ if (j && typeof j.token === 'string') { TOKEN = j.token; try { sessionStorage.setItem('swb-token', TOKEN); } catch (e) {} render(); } })
+    .catch(function(){});
+})();
+function answerAsk(rec, allow){
+  if (rec.busy || typeof fetch !== 'function') return;
+  rec.busy = true; rec.msg = ''; render();
+  fetch('/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: hub ? curId : '', id: rec.id, allow: allow, token: TOKEN }) })
+    .then(function(r){ if (r.status === 403) { TOKEN = ''; try { sessionStorage.removeItem('swb-token'); } catch (e) {} } return r.json().catch(function(){ return null; }); })
+    .then(function(j){
+      rec.busy = false;
+      if (j && j.status === 'applied') rec.msg = L('answered', '답했습니다');
+      else if (j && j.status === 'rejected') { rec.refused = String(j.reason || ''); rec.msg = ''; }
+      else if (j && j.status === 'waiting') rec.msg = L('sent; waiting for the session', '보냈습니다. 세션의 응답을 기다리는 중');
+      else rec.msg = L('could not answer here', '여기서 답하지 못했습니다');
+      render();
+    })
+    .catch(function(){ rec.busy = false; rec.msg = L('could not answer here', '여기서 답하지 못했습니다'); render(); });
+}
 pollInfo();
 flowBuild();
 uiBuild();

@@ -6,6 +6,9 @@ import { get, request as httpRequest } from 'node:http'
 import { hostname, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { randomBytes } from 'node:crypto'
+
+import { ack, take, writePair } from './desktop-channel.mjs'
 
 const server = join(dirname(fileURLToPath(import.meta.url)), 'live.mjs')
 const dir = mkdtempSync(join(tmpdir(), 'swb-live-'))
@@ -226,6 +229,84 @@ try {
   kept.kill('SIGTERM')
   await sleep(300)
   rmSync(home, { recursive: true, force: true })
+}
+// ---- answering a guard question from the page: only a hub started with --approve, only a page the app paired, and every answer is a signed command ----
+{
+  const home = mkdtempSync(join(tmpdir(), 'swb-ask-'))
+  const base = join(home, 'reg')
+  const desk = join(home, 'desk')
+  mkdirSync(base, { mode: 0o700 })
+  mkdirSync(desk, { mode: 0o700 })
+  writeFileSync(join(desk, 'key'), randomBytes(32), { mode: 0o600 })
+  const env = { ...process.env, SWB_LIVE_HOME: base, SWB_DESKTOP_HOME: desk, SWB_LIVE_IDLE_MS: '30000', SWB_LIVE_STALE_MS: '4000', SWB_LIVE_BEAT_MS: '300' }
+  const at = port + 40
+  const plainAt = port + 41
+  const project = mkdtempSync(join(tmpdir(), 'swb-ask-p-'))
+  const post = (target, path, body, { origin = `http://127.0.0.1:${target}`, type = 'application/json' } = {}) =>
+    new Promise(done => {
+      const headers = { host: `127.0.0.1:${target}`, 'content-type': type, ...(origin ? { origin } : {}) }
+      const req = httpRequest({ host: '127.0.0.1', port: target, path, method: 'POST', headers }, res => {
+        let text = ''
+        res.on('data', chunk => (text += chunk))
+        res.on('end', () => done({ status: res.statusCode, body: text }))
+      })
+      req.on('error', () => done({ status: 0, body: '' }))
+      req.end(typeof body === 'string' ? body : JSON.stringify(body))
+    })
+  const infoOf = target =>
+    new Promise(done => {
+      const req = httpRequest({ host: '127.0.0.1', port: target, path: '/info', headers: { host: `127.0.0.1:${target}` } }, res => {
+        let text = ''
+        res.on('data', chunk => (text += chunk))
+        res.on('end', () => done(res.statusCode === 200 ? JSON.parse(text) : {}))
+      })
+      req.on('error', () => done({}))
+      req.end()
+    })
+  const hub = spawn('node', [server, '--hub', '--keep', '--approve', '--port', String(at)], { stdio: 'ignore', env })
+  const plain = spawn('node', [server, '--hub', '--keep', '--port', String(plainAt)], { stdio: 'ignore', env })
+  const joiner = (() => {
+    const child = spawn('node', [server, project, '--join', '--session', 'a', '--port', String(at)], { stdio: 'ignore', env })
+    return child
+  })()
+  try {
+    await sleep(2500)
+    check((await infoOf(at)).approve === true && (await infoOf(plainAt)).approve === false, 'only a hub started with --approve says it takes answers')
+    check((await post(plainAt, '/ask', {})).status === 405 && (await post(plainAt, '/pair', {})).status === 405, 'a hub without --approve answers GET only')
+    const ask = (body, options) => post(at, '/ask', { session: 'a', id: 'a-1', allow: true, ...body }, options)
+    check((await ask({ token: 'nope' })).status === 403 && (await ask({})).status === 403, 'an answer without a token the app gave is refused')
+    check((await post(at, '/pair', { code: '0'.repeat(32) })).status === 403, 'a pairing with no code left by the app is refused')
+    const code = randomBytes(16).toString('hex')
+    writePair(desk, code)
+    check((await post(at, '/pair', { code: '1'.repeat(32) })).status === 403 && (await post(at, '/pair', { code })).status === 403, 'a wrong code uses up the one left by the app')
+    writePair(desk, code)
+    const paired = await post(at, '/pair', { code })
+    const token = JSON.parse(paired.body || '{}').token
+    check(paired.status === 200 && typeof token === 'string' && token.length > 20, 'the right code is traded for a token')
+    check((await post(at, '/pair', { code })).status === 403, 'a code works once')
+    check((await ask({ token }, { origin: '' })).status === 403 && (await ask({ token }, { origin: 'http://evil.test' })).status === 403, 'an answer with a good token but not from the hub\'s own origin is refused')
+    check((await ask({ token }, { type: 'text/plain' })).status === 403, 'an answer that is not JSON is refused')
+    check(!JSON.stringify(await infoOf(at)).includes(token), 'the hub\'s info does not carry the token')
+    check((await ask({ token, session: 'nobody' })).status === 404, 'an answer for a session the hub does not list is refused')
+    check((await ask({ token, id: '../x' })).status === 400, 'an answer with a bad id is refused')
+    // A good answer becomes a signed command for that session, and the page is told how the session ended it.
+    const pending = ask({ token })
+    let taken
+    for (let i = 0; i < 30 && !taken?.commands.length; i++) {
+      await sleep(100)
+      taken = take(desk, 'a')
+    }
+    const command = taken?.commands[0]
+    check(command?.ops.length === 1 && JSON.stringify(command.ops[0]) === JSON.stringify({ op: 'ask_answer', id: 'a-1', allow: true, by: 'web' }), 'a good answer is a signed command the channel takes')
+    check(command && command.expiresAt - Date.now() <= 125 * 1000, 'the command expires within two minutes')
+    if (command) ack(desk, command.id, { status: 'rejected', reason: 'settled' })
+    const done = await pending
+    check(done.status === 200 && JSON.parse(done.body).reason === 'settled', 'the page is told the session\'s answer')
+  } finally {
+    for (const one of [hub, plain, joiner]) one.kill('SIGTERM')
+    await sleep(300)
+    rmSync(home, { recursive: true, force: true })
+  }
 }
 // ---- the shared hub: several sessions, one port ----
 {
@@ -623,6 +704,16 @@ const trD = feedOf([
   { kind: 'feed.recovered', missed: 4 }, { kind: 'team.final-check-required' },
 ])
 check(M.decisionOf(trD.spans.get('p1')) === 'declined', 'an ask a person answered no is declined')
+const trAsk = feedOf([
+  { kind: 'tool.start', id: 'k1', tool: 'Bash', policy: 'ask' }, { kind: 'ask.open', id: 'a-1', callId: 'k1', until: 5000 },
+  { kind: 'ask.open', callId: 'k2' }, { kind: 'ask.remote', id: 'a-1', refused: 'paused' }, { kind: 'ask.remote', id: 'nope', refused: 'x' },
+])
+check(trAsk.asks.size === 1 && trAsk.asks.get('a-1').callId === 'k1' && trAsk.asks.get('a-1').refused === 'paused', 'an open question is kept with its call and why it cannot be answered here; a line without an id or for an unknown one is ignored')
+M.ingest(trAsk, { at: 9000, kind: 'ask.close', id: 'a-1', by: 'app', allow: true })
+check(trAsk.asks.size === 0, 'a closed question is dropped')
+M.ingest(trAsk, { at: 9100, kind: 'ask.open', id: 'a-2', callId: 'k1', until: 1 })
+M.ingest(trAsk, { at: 9200, kind: 'tool.end', id: 'k1', outcome: 'declined' })
+check(trAsk.asks.size === 0, 'a question ends with its call')
 const gr = M.guardRows(trD, 9999)
 check(M.groupRows(gr.filter(r => r.decision === 'block')).length === 1 && M.groupRows(gr.filter(r => r.decision === 'block'))[0].n === 2, 'blocks of the same tool and reason are one line counted twice')
 check(M.sortRows(gr, 'risk', -1)[0].risk === 'high' && M.sortRows(gr, 'at', -1)[0].key === 'call:p5' && M.sortRows(gr, 'at', 1)[0].key === 'call:p1', 'rows sort by risk rank and by time in either direction')

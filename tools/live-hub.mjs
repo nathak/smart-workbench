@@ -1,11 +1,14 @@
 // The hub: one server on one port that shows every registered session as its own tab.
 // It is a process of its own (started detached by the first session) and ends when no session is left.
 import { createServer } from 'node:http'
+import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { readAnswer, takePair, writeCommand } from './desktop-channel.mjs'
+import { desktopHome } from './desktop-state.mjs'
 import { gitOf } from './live-git.mjs'
 import { ID_PATTERN, ensureRegistry, feedOf, registryDir, scan, trustedHosts } from './live-registry.mjs'
 import { makeTail } from './live-tail.mjs'
@@ -17,7 +20,7 @@ export const HUB_VERSION = 2
 // The page is one file with inline script and style and talks only to this server; anything else it is tricked into loading is refused.
 const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
-export function runHub({ port, keep = false, watchParent = false }) {
+export function runHub({ port, keep = false, watchParent = false, approve = false }) {
   const STALE_MS = Number(process.env.SWB_LIVE_STALE_MS) || 20000
   const IDLE_MS = Number(process.env.SWB_LIVE_IDLE_MS) || 30000
   const MAX_SESSIONS = Number(process.env.SWB_LIVE_MAX_SESSIONS) || 16
@@ -37,6 +40,71 @@ export function runHub({ port, keep = false, watchParent = false }) {
 
   const TRUSTED = trustedHosts()
   const HOSTS = new Set([`127.0.0.1:${port}`, `localhost:${port}`, ...TRUSTED.flatMap(name => [name, `${name}:80`, `${name}:443`])])
+
+  // Answering a guard question from the page: only for the hub the desktop app starts for its own window, and never when the page is reached by a name
+  // other than the loopback (a proxy, a shared host). The page is paired by the app (a one-time code in the address of the app's own window).
+  const CAN_ANSWER = approve && TRUSTED.length === 0
+  const TOKEN_MS = 8 * 3600 * 1000
+  const tokens = new Map()
+  const OWN_ORIGINS = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`])
+  const readBody = (req, max = 2048) =>
+    new Promise((resolve, reject) => {
+      let size = 0
+      const chunks = []
+      req.on('data', chunk => {
+        size += chunk.length
+        if (size > max) {
+          reject(new Error('too big'))
+          req.destroy()
+          return
+        }
+        chunks.push(chunk)
+      })
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+      req.on('error', reject)
+    })
+  const json = (res, status, body) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify(body))
+  }
+  const tokenOk = value => {
+    const until = typeof value === 'string' ? tokens.get(value) : undefined
+    return until !== undefined && until > Date.now()
+  }
+
+  async function post(req, res, path) {
+    const origin = req.headers.origin
+    const site = req.headers['sec-fetch-site']
+    if (!OWN_ORIGINS.has(origin ?? '') || (site !== undefined && site !== 'same-origin') || !/^application\/json(?:;|$)/i.test(req.headers['content-type'] ?? '')) return json(res, 403, { error: 'forbidden' })
+    let body
+    try {
+      body = JSON.parse(await readBody(req))
+    } catch {
+      return json(res, 400, { error: 'bad body' })
+    }
+    if (body === null || typeof body !== 'object') return json(res, 400, { error: 'bad body' })
+    const home = desktopHome()
+    if (path === '/pair') {
+      if (!takePair(home, body.code)) return json(res, 403, { error: 'forbidden' })
+      for (const [token, until] of tokens) if (until <= Date.now()) tokens.delete(token)
+      if (tokens.size >= 4) tokens.delete(tokens.keys().next().value)
+      const token = randomBytes(24).toString('base64url')
+      tokens.set(token, Date.now() + TOKEN_MS)
+      return json(res, 200, { token })
+    }
+    if (!tokenOk(body.token)) return json(res, 403, { error: 'forbidden' })
+    const one = typeof body.session === 'string' && ID_PATTERN.test(body.session) ? sessions.get(body.session) : undefined
+    if (!one?.alive) return json(res, 404, { error: 'no such session' })
+    const sent = writeCommand(home, body.session, [{ op: 'ask_answer', id: body.id, allow: body.allow, by: 'web' }], Date.now(), 120 * 1000)
+    if (!sent.ok) return json(res, 400, { error: sent.reason })
+    // The session polls every couple of seconds; the page is told how it ended.
+    for (let wait = 0; wait < 16; wait++) {
+      const result = readAnswer(home, sent.id)
+      if (result) return json(res, 200, result)
+      await new Promise(done => setTimeout(done, 500))
+    }
+    return json(res, 202, { status: 'waiting' })
+  }
 
   /** @type {Map<string, any>} */
   const sessions = new Map()
@@ -146,6 +214,10 @@ export function runHub({ port, keep = false, watchParent = false }) {
       res.writeHead(403).end()
       return
     }
+    if (req.method === 'POST' && CAN_ANSWER && (req.url === '/pair' || req.url === '/ask')) {
+      post(req, res, req.url).catch(() => res.headersSent || json(res, 500, { error: 'failed' }))
+      return
+    }
     if (req.method !== 'GET') {
       res.writeHead(405, { allow: 'GET' }).end()
       return
@@ -203,10 +275,10 @@ export function runHub({ port, keep = false, watchParent = false }) {
           res.end(JSON.stringify({ missing: true }))
           return
         }
-        res.end(JSON.stringify({ project: own.reg.project, git: gitOf(own.reg.project), feed: feedOf(own.reg.project, own.reg.feedId), pid: process.pid, startedAt, linesRead: own.tail.linesRead, badLines: own.tail.badLines, kept: own.tail.recent.length, clients: own.clients.size }))
+        res.end(JSON.stringify({ project: own.reg.project, git: gitOf(own.reg.project), feed: feedOf(own.reg.project, own.reg.feedId), pid: process.pid, startedAt, linesRead: own.tail.linesRead, badLines: own.tail.badLines, kept: own.tail.recent.length, clients: own.clients.size, approve: CAN_ANSWER }))
         return
       }
-      res.end(JSON.stringify({ hub: 'smartworkbench', v: HUB_VERSION, pid: process.pid, port, startedAt, registry: registryDir(port), host: hostname(), hosts: TRUSTED, sessions: sessions.size, clients: everyone.size }))
+      res.end(JSON.stringify({ hub: 'smartworkbench', v: HUB_VERSION, pid: process.pid, port, startedAt, registry: registryDir(port), host: hostname(), hosts: TRUSTED, sessions: sessions.size, clients: everyone.size, approve: CAN_ANSWER }))
       return
     }
     if (url.pathname === '/') {

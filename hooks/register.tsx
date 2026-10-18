@@ -1650,6 +1650,10 @@ const BACKGROUND_WINDOW_MS = 60 * 60 * 1000
 let runCount = 0
 let lastBackgroundAt = 0
 
+// A command that may leave a process behind (a trailing &, nohup, setsid, a terminal multiplexer, a scheduler): that process could write an answer later.
+const DETACH = /(?:^|[^&|>])&(?![&>])|\b(?:nohup|setsid|disown|daemonize|coproc|screen|tmux|crontab|systemd-run|start-process)\b|(?:^|[;|&]\s*)at\s/i
+const mayDetach = (command: string): boolean => DETACH.test(command)
+
 // Why a question cannot be answered from outside, or undefined when it can.
 function remoteRefusal(ask: PendingAsk, wb: Workbench, now: number): string | undefined {
   if (wb.execution.isPaused) return 'paused'
@@ -3445,7 +3449,7 @@ export const register: Register = on => {
     // Anything that could write a command file counts, for the questions that wait for an answer from outside.
     if (e.tool === 'Bash' || e.tool.startsWith('mcp__')) {
       runCount++
-      if (e.tool === 'Bash' && (e as unknown as { run_in_background?: unknown }).run_in_background === true) lastBackgroundAt = await $.clock.now()
+      if (e.tool === 'Bash' && ((e as unknown as { run_in_background?: unknown }).run_in_background === true || mayDetach(e.command))) lastBackgroundAt = await $.clock.now()
     }
     // Allow still goes through Claude Code's own permission check beneath.
     const ran = await next(e)

@@ -69,7 +69,7 @@ export function superviseHub({ port = DEFAULT_PORT, tools = pickTools(), spawnIm
     if (child && child.exitCode === null && !child.killed) return set('starting')
     if (!tools) return set('no-tools')
     set('starting')
-    child = spawnImpl(process.execPath, [join(tools, 'live.mjs'), '--hub', '--keep', '--watch-parent', '--port', String(port)], {
+    child = spawnImpl(process.execPath, [join(tools, 'live.mjs'), '--hub', '--keep', '--watch-parent', '--approve', '--port', String(port)], {
       stdio: 'ignore',
       windowsHide: true,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },

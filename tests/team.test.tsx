@@ -2605,12 +2605,13 @@ test('an evidence command is masked before it is cut, so a secret across the cut
 })
 
 // A guard question held open, so the app can answer it before the session does.
-async function heldAsk($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], command = 'git push origin main') {
+async function heldAsk($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], command = 'git push origin main', before?: string) {
   let release: (text: string) => void = () => undefined
   const held = new Promise<string>(done => (release = done))
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   const ran: string[] = []
   const made = await deskWorld($, on, undefined, { ...DESK_FILES, ...FEED_FILES }, undefined, undefined, { ask: () => held, commands: FEED_RUNS, ran })
+  if (before) await $.tool.call({ tool: 'Bash', command: before })
   const call = $.tool.call({ tool: 'Bash', command })
   await waitFor(() => feedLines(made.seen).some(one => one.kind === 'ask.open'))
   const open = feedLines(made.seen).find(one => one.kind === 'ask.open') as { id: string } | undefined
@@ -2663,6 +2664,15 @@ test('an answer from outside is refused after two minutes', async ($, on) => {
   await new Promise(done => setTimeout(done, 50))
   await deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id, allow: true, by: 'app' }] }] }, 170)
   expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'rejected', reason: 'expired' })])
+  release('Block')
+  await call
+})
+
+test('a command that may leave a process behind keeps the questions that follow from being answered from outside', async ($, on) => {
+  const { seen, deliver, release, call, id } = await heldAsk($, on, 'git push origin main', 'node watch.js &')
+  expect(id).not.toBe('')
+  await deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id, allow: true, by: 'web' }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'rejected', reason: 'a background command was started' })])
   release('Block')
   await call
 })
