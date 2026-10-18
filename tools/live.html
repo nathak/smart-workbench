@@ -259,6 +259,14 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 .topbar button:hover,.statusstrip button:hover,.tlbar button:hover,#tools button:hover,#dw-close:hover,#help-close:hover{color:var(--focus);border-color:var(--focus)}
 :focus-visible{outline:1px solid var(--focus);outline-offset:1px;box-shadow:0 0 8px var(--ring)}
 @keyframes in{from{opacity:0}to{opacity:1}}
+/* wide pages: the flow is a pipeline of four columns; narrower pages keep the stacked layout. The media query is repeated as PIPE in the script. */
+@media (min-width:1200px){
+  .grid{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:"u l g w" "p o d e" ". x . .";gap:36px 40px;align-items:stretch}
+  .side,.tree,.rows{display:contents}
+  .link{display:none}
+  #b-user{grid-area:u}#b-lead{grid-area:l}#b-guard{grid-area:g}#b-worker{grid-area:w}
+  #b-loop{grid-area:p}#b-opus{grid-area:o}#b-sub{grid-area:d}#b-explorer{grid-area:e}#b-codex{grid-area:x}
+}
 @media (max-width:820px){#drawer{left:8px;right:8px;top:auto;bottom:8px;width:auto;max-width:none;max-height:55vh}.grid{grid-template-columns:1fr}.rows{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.tile,.pill{transition:none}.wf i.running{background:var(--warn)}#flow .pk.wait{animation:none}body.ready .box,body.ready .fill{transition:none}}
 </style>
@@ -923,6 +931,7 @@ var EDGES = { 'u-l': ['u', 'l', 'v'], 'l-g': ['l', 'g', 'v'], 'g-d': ['g', 'd', 
 var CLS = Object.assign(Object.create(null), { allow: 'allow', ask: 'ask', block: 'block', hold: 'hold', loop: 'loop', info: 'info' });
 var MAX_LIVE = 16, MAX_QUEUE = 50, MAX_PACKETS = 300, HOP_MS = 450, MAX_PROMPTS = 100, MAX_INFLIGHT = 200;
 var NS = 'http://www.w3.org/2000/svg';
+var PIPE = '(min-width:1200px)';
 var motion = true, speed = 1, packetSeq = 0;
 var E, P, PR, R, live, queue, parked, edgeEl = {}, countEl = {}, boxes = {};
 
@@ -1016,6 +1025,15 @@ function rectOf(n){
 function pathFor(id){
   var d = EDGES[id], a = rectOf(d[0]), b = rectOf(d[1]), shape = d[2];
   var ya = a.top + a.h * (d[3] == null ? 0.5 : d[3]), yb = b.top + b.h * (d[4] == null ? 0.5 : d[4]), off = d[5] || 0, gx;
+  // wide pages lay the boxes out as a pipeline; every link then runs from the side or the edge of the box that faces the other one
+  if (window.matchMedia && matchMedia(PIPE).matches) {
+    var xm2, ym2;
+    if (a.right <= b.left + 1) { xm2 = (a.right + b.left) / 2; return 'M' + a.right + ' ' + ya + 'C' + xm2 + ' ' + ya + ' ' + xm2 + ' ' + yb + ' ' + b.left + ' ' + yb; }
+    if (b.right <= a.left + 1) { xm2 = (a.left + b.right) / 2; return 'M' + a.left + ' ' + ya + 'C' + xm2 + ' ' + ya + ' ' + xm2 + ' ' + yb + ' ' + b.right + ' ' + yb; }
+    if (a.bottom <= b.top + 1) { ym2 = (a.bottom + b.top) / 2; return 'M' + a.cx + ' ' + a.bottom + 'C' + a.cx + ' ' + ym2 + ' ' + b.cx + ' ' + ym2 + ' ' + b.cx + ' ' + b.top; }
+    ym2 = (a.top + b.bottom) / 2;
+    return 'M' + a.cx + ' ' + a.top + 'C' + a.cx + ' ' + ym2 + ' ' + b.cx + ' ' + ym2 + ' ' + b.cx + ' ' + b.bottom;
+  }
   if (shape === 'v') {
     var ym = (a.bottom + b.top) / 2;
     return 'M' + a.cx + ' ' + a.bottom + 'C' + a.cx + ' ' + ym + ' ' + b.cx + ' ' + ym + ' ' + b.cx + ' ' + b.top;
