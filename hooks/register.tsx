@@ -1642,22 +1642,26 @@ async function deskFresh($: $): ReturnType<typeof desktopState> {
 // The answer arrives as a signed command, but a file can be written by anything that runs as the person, the model's Bash included. So a remote answer
 // is taken only if nothing could have written one: no Bash or MCP call ran since the question opened, none was started in the background lately,
 // and the question is not one of the always-asked kinds. The question in the session has no such limit.
-type PendingAsk = { id: string; callId: string; tool: string; category: string; reason: string; summary: string; openedAt: number; remoteUntil: number; runsAtOpen: number; settle: (answer: { allow: boolean; by: 'app' | 'web' }) => void }
+type PendingAsk = { id: string; callId: string; tool: string; category: string; reason: string; summary: string; openedAt: number; remoteUntil: number; runsAtOpen: number; busyAtOpen: boolean; settle: (answer: { allow: boolean; by: 'app' | 'web' }) => void }
 const pendingAsks = new Map<string, PendingAsk>()
 const settledAsks: string[] = []
 const REMOTE_ASK_MS = 120_000
 const BACKGROUND_WINDOW_MS = 60 * 60 * 1000
 let runCount = 0
+// Calls of this session that are running now; a question opened while one runs cannot be answered from outside.
+let inFlight = 0
 let lastBackgroundAt = 0
 
-// A command that may leave a process behind (a trailing &, nohup, setsid, a terminal multiplexer, a scheduler): that process could write an answer later.
-const DETACH = /(?:^|[^&|>])&(?![&>])|\b(?:nohup|setsid|disown|daemonize|coproc|screen|tmux|crontab|systemd-run|start-process)\b|(?:^|[;|&]\s*)at\s/i
-const mayDetach = (command: string): boolean => DETACH.test(command)
+// A command is taken to be able to leave a process behind unless it is a plain, short inspection: no shell operators or substitutions, and a command known
+// to finish and do nothing else. Anything else (a script, an interpreter, a build tool, a trailing &) may write an answer later.
+const SHORT_SAFE = /^\s*(?:ls|pwd|cat|head|tail|wc|echo|printf|stat|file|which|date|whoami|tree|diff|grep|rg|find|git\s+(?:status|diff|log|show|branch|rev-parse|ls-files|remote|add|commit|stash|checkout|switch|fetch|pull|push|merge|rebase|tag|blame|config\s+--get))\b[^;&|`$()<>\n]*$/
+const mayDetach = (command: string): boolean => !SHORT_SAFE.test(command) || /\s-exec\b|\s--exec\b|\s-delete\b/.test(command)
 
 // Why a question cannot be answered from outside, or undefined when it can.
 function remoteRefusal(ask: PendingAsk, wb: Workbench, now: number): string | undefined {
   if (wb.execution.isPaused) return 'paused'
   if (ALWAYS_ASK.has(ask.category)) return 'terminal only'
+  if (ask.busyAtOpen) return 'a command was running'
   if (runCount !== ask.runsAtOpen) return 'a command ran meanwhile'
   if (lastBackgroundAt !== 0 && now - lastBackgroundAt < BACKGROUND_WINDOW_MS) return 'a background command was started'
 
@@ -1681,6 +1685,8 @@ async function answerAsk($: $, one: { id: string; allow: boolean; by: 'app' | 'w
     await emit($, 'ask.remote', { id: ask.id, refused: why })
     return { status: 'rejected', reason: why }
   }
+  // The checks above waited; the session, the app or the page may have answered meanwhile.
+  if (pendingAsks.get(one.id) !== ask) return { status: 'rejected', reason: 'settled' }
   pendingAsks.delete(ask.id)
   ask.settle({ allow: one.allow, by: one.by })
 
@@ -3391,9 +3397,9 @@ export const register: Register = on => {
       await notifyAsk($, verdict.reason, e.tool)
       const askedAt = await $.clock.now()
       const askId = `a-${call.id.slice(0, 20)}-${askedAt.toString(36)}`.slice(0, 40)
-      const summary = model.cut(call.summary, 120)
+      const summary = model.cut(redact(scanned(call.summary)), 120)
       const remote = new Promise<{ allow: boolean; by: 'app' | 'web' }>(resolve => {
-        pendingAsks.set(askId, { id: askId, callId: call.id, tool: e.tool, category: verdict.category, reason: verdict.reason, summary, openedAt: askedAt, remoteUntil: askedAt + REMOTE_ASK_MS, runsAtOpen: runCount, settle: resolve })
+        pendingAsks.set(askId, { id: askId, callId: call.id, tool: e.tool, category: verdict.category, reason: verdict.reason, summary, openedAt: askedAt, remoteUntil: askedAt + REMOTE_ASK_MS, runsAtOpen: runCount, busyAtOpen: inFlight > 0, settle: resolve })
       })
       await emit($, 'ask.open', { id: askId, callId: call.id, tool: e.tool, reason: verdict.reason, summary, until: askedAt + REMOTE_ASK_MS })
       scheduleSnapshot($)
@@ -3446,13 +3452,19 @@ export const register: Register = on => {
     const isBackgroundImage = isImage && /\s--background\b/.test(e.command)
     const imageBefore = isImage && !isBackgroundImage ? await treeState($) : undefined
 
-    // Anything that could write a command file counts, for the questions that wait for an answer from outside.
-    if (e.tool === 'Bash' || e.tool.startsWith('mcp__')) {
+    // Anything that could write a command file counts, for the questions that wait for an answer from outside: a command or an MCP tool (which may leave a
+    // process behind, so for an hour no answer from outside is taken), a file write (a watcher may run the new code), and Codex run in the background.
+    if (e.tool === 'Bash' || e.tool.startsWith('mcp__') || EDIT_TOOL_NAMES.has(e.tool)) {
       runCount++
-      if (e.tool === 'Bash' && ((e as unknown as { run_in_background?: unknown }).run_in_background === true || mayDetach(e.command))) lastBackgroundAt = await $.clock.now()
+      const isOwnTool = e.tool.startsWith('mcp__smartworkbench__')
+      const isBackground = e.tool === 'Bash' ? (e as unknown as { run_in_background?: unknown }).run_in_background === true || mayDetach(e.command) || codexRun?.background === true : e.tool.startsWith('mcp__') && !isOwnTool
+      if (isBackground) lastBackgroundAt = await $.clock.now()
     }
+    inFlight++
     // Allow still goes through Claude Code's own permission check beneath.
-    const ran = await next(e)
+    const ran = await next(e).finally(() => {
+      inFlight--
+    })
     try {
     const endedAt = await $.clock.now()
     if (isImage && ran.deny === undefined) {

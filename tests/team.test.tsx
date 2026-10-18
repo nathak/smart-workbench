@@ -2677,6 +2677,22 @@ test('a command that may leave a process behind keeps the questions that follow 
   await call
 })
 
+test('a command that is not a plain inspection (a script, a build) keeps answers from outside away, a plain one does not', async ($, on) => {
+  const script = await heldAsk($, on, 'git push origin main', 'bash w.sh')
+  await script.deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id: script.id, allow: true, by: 'app' }] }] }, 3)
+  expect(ackOf(script.seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'rejected', reason: 'a background command was started' })])
+  script.release('Block')
+  await script.call
+})
+
+test('a plain inspection before the question leaves the answer from outside possible', async ($, on) => {
+  const plain = await heldAsk($, on, 'git push origin main', 'git status')
+  await plain.deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id: plain.id, allow: true, by: 'app' }] }] }, 3)
+  expect(ackOf(plain.seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'applied' })])
+  await plain.call
+  plain.release('Block')
+})
+
 test('a question about the guard itself is answered in the session only', async ($, on) => {
   const { seen, deliver, release, call, id } = await heldAsk($, on, 'echo x >> .claude/smartworkbench.json')
   expect(id).not.toBe('')
