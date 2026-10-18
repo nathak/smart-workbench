@@ -34,7 +34,9 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 var(--sans);font-variant-numeric:tabular-nums}
-.page{max-width:1240px;margin:0 auto;padding:0 var(--sp-5) var(--sp-6)}
+.page{display:grid;grid-template-columns:200px minmax(0,1fr);grid-template-areas:"top top" "nav main" "foot foot";min-height:100vh;align-content:start}
+.topbar{grid-area:top}.sidenav{grid-area:nav}.maincol{grid-area:main}.footer{grid-area:foot}
+.maincol{min-width:0;padding:0 var(--sp-5) var(--sp-5)}
 .mono,.tm,pre,dl.detail dd,.tag,.kv span:last-child{font-family:var(--mono)}
 
 /* timeline */
@@ -127,7 +129,7 @@ kbd{font-family:var(--mono);font-size:var(--fs-xs);border:1px solid var(--border
 .tile.ok .k-v{color:var(--ok)}
 .tile .cbar{margin-top:2px}
 /* status bar and tabs */
-.topbar{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;padding:var(--sp-3) 0;background:var(--bg);border-bottom:1px solid var(--border);font:var(--fs-sm)/1.4 var(--mono)}
+.topbar{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;padding:var(--sp-3) var(--sp-5);background:var(--bg);border-bottom:1px solid var(--border);font:var(--fs-sm)/1.4 var(--mono)}
 .topbar .brand{color:var(--focus);font-weight:700;font-size:var(--fs-md);letter-spacing:-.01em}
 .topbar .grow{margin-left:auto;display:flex;gap:var(--sp-3);align-items:center}
 .conn{font-weight:600;font-family:var(--mono)}.conn.ok{color:var(--ok)}.conn.warn{color:var(--warn)}.conn.bad{color:var(--bad)}
@@ -147,7 +149,26 @@ nav.stabs .sb{display:inline-block;margin-left:var(--sp-2);padding:0 6px;border-
 nav.stabs .sb.ask{background:var(--warn);color:var(--bg)}
 nav.stabs .sb.ask::before{content:"? "}
 .tabpanel[hidden]{display:none}
-.footer{margin-top:var(--sp-5);color:var(--fg-muted);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.footer{position:sticky;bottom:0;z-index:20;display:flex;flex-wrap:wrap;gap:var(--sp-2) 0;padding:var(--sp-2) var(--sp-5);background:var(--surface);border-top:1px solid var(--border);color:var(--fg-muted);font:var(--fs-xs)/1.5 var(--mono);overflow-wrap:anywhere}
+.mchip{padding:0 var(--sp-3);border:1px solid currentColor;border-radius:var(--r);font-size:var(--fs-xs)}
+.mchip.sonnet{color:var(--sonnet)}.mchip.opus{color:var(--opus)}.mchip.haiku{color:var(--haiku)}
+.sidenav{position:sticky;top:44px;align-self:start;max-height:calc(100vh - 44px);overflow:auto;background:var(--surface);border-right:1px solid var(--border);padding:var(--sp-4) 0;height:calc(100vh - 44px)}
+.sidenav h2{margin:0 var(--sp-5) var(--sp-3);font:600 var(--fs-xs)/1.4 var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--fg-muted)}
+.sidenav nav.tabs{flex-direction:column;border-bottom:0;margin:0;overflow:visible}
+.sidenav nav.tabs button{text-align:left;width:100%;border-bottom:0;border-left:2px solid transparent;padding:var(--sp-3) var(--sp-5);text-transform:none;font-size:var(--fs-md);letter-spacing:0}
+.sidenav nav.tabs button:hover{background:var(--surface-2);border-left-color:var(--border-strong)}
+.sidenav nav.tabs button[aria-selected=true]{background:var(--surface-2);border-left-color:var(--focus)}
+.statusstrip{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-4);align-items:center;margin:var(--sp-4) 0 0;padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-radius:var(--r);font:var(--fs-sm)/1.4 var(--mono)}
+.statusstrip .grow{margin-left:auto;display:flex;gap:var(--sp-3);align-items:center}
+.statusstrip #tl-q{flex:1 1 220px}
+@media(max-width:1099px){.page{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "nav" "main" "foot"}
+  .sidenav{position:static;height:auto;max-height:none;border-right:0;border-bottom:1px solid var(--border);padding:0}
+  .sidenav h2{display:none}
+  .sidenav nav.tabs{flex-direction:row;overflow-x:auto}
+  .sidenav nav.tabs button{width:auto;border-left:0;border-bottom:2px solid transparent;text-transform:uppercase;font-size:var(--fs-sm);letter-spacing:.06em}
+  .sidenav nav.tabs button:hover{border-bottom-color:var(--border-strong)}
+  .sidenav nav.tabs button[aria-selected=true]{border-bottom-color:var(--focus)}}
+@media(max-width:560px){.mchip{display:none}}
 .footer .r{margin-right:var(--sp-5)}
 
 .head{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-5);align-items:baseline;margin-bottom:var(--sp-2);font-size:var(--fs-md)}
@@ -233,7 +254,7 @@ dl.detail{margin:0;padding:4px 6px 8px;font-size:var(--fs-sm);display:grid;grid-
 dl.detail dt{color:var(--fg-muted)}dl.detail dd{margin:0;overflow-wrap:anywhere}
 button{font:var(--fs-sm)/1.4 var(--mono);background:transparent;color:var(--fg-muted);border:1px solid var(--border-strong);border-radius:var(--r);padding:2px 10px;cursor:pointer;min-height:24px}
 button:hover{color:var(--fg);background:var(--surface-2)}
-.topbar button:hover,.tlbar button:hover,#tools button:hover,#dw-close:hover,#help-close:hover{color:var(--focus);border-color:var(--focus)}
+.topbar button:hover,.statusstrip button:hover,.tlbar button:hover,#tools button:hover,#dw-close:hover,#help-close:hover{color:var(--focus);border-color:var(--focus)}
 :focus-visible{outline:1px solid var(--focus);outline-offset:1px;box-shadow:0 0 8px var(--ring)}
 @keyframes in{from{opacity:0}to{opacity:1}}
 @media (max-width:820px){#drawer{left:8px;right:8px;top:auto;bottom:8px;width:auto;max-width:none;max-height:55vh}.grid{grid-template-columns:1fr}.rows{grid-template-columns:1fr}}
@@ -244,22 +265,41 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 <div class="page">
   <header class="topbar" id="topbar">
     <span class="brand">SmartWorkbench · Live</span>
-    <span class="conn warn" id="state"></span>
-    <span class="muted" id="last"></span>
-    <span class="badge hold" id="b-paused" hidden></span>
+    <span class="mchip sonnet">◆ Sonnet · <span data-i="lg-lead"></span></span>
+    <span class="mchip opus">◆ Opus · <span data-i="lg-advisor"></span></span>
+    <span class="mchip haiku">◆ Haiku · <span data-i="lg-sub"></span></span>
     <span class="muted mono" id="sess"></span>
     <span class="muted mono" id="srv"></span>
-    <span id="notices"></span>
-    <span class="badge warn" id="srv-warn" hidden role="status"></span>
-    <span class="badge bad" id="errs" hidden role="status"></span>
     <span class="grow">
-      <span class="muted mono" id="title"></span>
-      <button id="helpb" aria-label="help" aria-haspopup="dialog">?</button>
       <button id="theme"></button>
-      <button id="lang"></button>
       <button id="clear" data-i="clear"></button>
     </span>
   </header>
+  <aside class="sidenav">
+    <h2 data-i="nav-h"></h2>
+    <nav class="tabs" role="tablist" id="tabs" aria-label="views">
+      <button role="tab" id="tab-timeline" aria-controls="p-timeline" data-tab="timeline"></button>
+      <button role="tab" id="tab-guard" aria-controls="p-guard" data-tab="guard"></button>
+      <button role="tab" id="tab-agents" aria-controls="p-agents" data-tab="agents"></button>
+      <button role="tab" id="tab-flow" aria-controls="p-flow" data-tab="flow"></button>
+    </nav>
+  </aside>
+  <div class="maincol">
+  <nav class="tabs stabs" role="tablist" id="stabs" aria-label="sessions" hidden></nav>
+  <div class="statusstrip" id="strip">
+    <span class="conn warn" id="state"></span>
+    <span class="muted" id="last"></span>
+    <span class="badge hold" id="b-paused" hidden></span>
+    <span id="notices"></span>
+    <span class="badge warn" id="srv-warn" hidden role="status"></span>
+    <span class="badge bad" id="errs" hidden role="status"></span>
+    <input id="tl-q" type="search" autocomplete="off" spellcheck="false" aria-label="search">
+    <span class="muted mono" id="tl-hits"></span>
+    <button id="tl-prev" aria-label="previous match">‹</button><button id="tl-next" aria-label="next match">›</button>
+    <button id="pause"></button>
+    <button id="replay"></button><select id="replay-n" aria-label="replay"><option>20</option><option>50</option><option>200</option></select>
+    <span class="grow"><button id="lang"></button><button id="helpb" aria-label="help" aria-haspopup="dialog">?</button></span>
+  </div>
   <section class="kpis" id="kpis" aria-label="metrics">
     <button class="tile" id="k-calls"><span class="k-l" data-i="k-calls"></span><span class="k-v" id="k-calls-v">0</span><span class="k-s" id="k-calls-s"></span><svg class="spark" id="k-calls-sp" viewBox="0 0 64 22" aria-hidden="true"></svg></button>
     <button class="tile" id="k-lat"><span class="k-l" data-i="k-lat"></span><span class="k-v" id="k-lat-v">–</span><span class="k-s" id="k-lat-s"></span></button>
@@ -268,21 +308,11 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <button class="tile" id="ctx"><span class="k-l" data-i="k-ctx"></span><span class="k-v" id="ctx-t">–</span><span class="cbar"><i id="ctx-f"></i></span><span class="k-s" id="k-ctx-s"></span><span class="k-s" id="ctx-spark"></span></button>
     <button class="tile" id="k-tok"><span class="k-l" data-i="k-tok"></span><span class="k-v" id="k-tok-v">–</span><span class="k-s" id="k-tok-s"></span></button>
   </section>
-  <nav class="tabs stabs" role="tablist" id="stabs" aria-label="sessions" hidden></nav>
-  <nav class="tabs" role="tablist" id="tabs" aria-label="views">
-    <button role="tab" id="tab-timeline" aria-controls="p-timeline" data-tab="timeline"></button>
-    <button role="tab" id="tab-guard" aria-controls="p-guard" data-tab="guard"></button>
-    <button role="tab" id="tab-agents" aria-controls="p-agents" data-tab="agents"></button>
-    <button role="tab" id="tab-flow" aria-controls="p-flow" data-tab="flow"></button>
-  </nav>
 
   <main>
   <div class="tabpanel" id="p-timeline" role="tabpanel" aria-labelledby="tab-timeline">
     <svg class="mini" id="mini" viewBox="0 0 1000 48" preserveAspectRatio="none" role="img" aria-label="overview"></svg>
     <div class="tlbar">
-      <input id="tl-q" type="search" autocomplete="off" spellcheck="false" aria-label="search">
-      <span class="muted mono" id="tl-hits"></span>
-      <button id="tl-prev" aria-label="previous match">‹</button><button id="tl-next" aria-label="next match">›</button>
       <button id="tl-follow" aria-pressed="true"></button>
       <button id="tl-fail" aria-pressed="false"></button>
       <button id="tl-crit" aria-pressed="false"></button>
@@ -304,8 +334,6 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     </div>
 
     <div class="tools" id="tools">
-      <button id="pause"></button>
-      <button id="replay"></button><select id="replay-n" aria-label="replay"><option>20</option><option>50</option><option>200</option></select>
       <button id="speed"></button><button id="motion"></button>
       <button id="chip-allow">allow</button><button id="chip-ask">ask</button><button id="chip-block">block</button><button id="chip-hold">hold</button><button id="chip-loop">loop</button>
       <button id="focus" hidden></button>
@@ -396,6 +424,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <div class="sect"><h2 data-i="a-codex"></h2><div class="tblwrap"><table class="tbl" id="a-codex"></table></div></div>
   </div>
   </main>
+  </div>
 
   <aside id="drawer" role="dialog" aria-modal="false" aria-labelledby="dw-title" hidden>
     <button id="dw-close" aria-label="close">✕</button>
@@ -414,7 +443,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <p class="muted" data-i="h-note"></p>
     <button id="help-close" data-i="h-close"></button>
   </dialog>
-  <div class="footer"><span class="r" id="count">0 events</span><span class="r" id="tok"></span></div>
+  <footer class="footer"><span class="r mono" id="title"></span><span class="r" id="count">0 events</span><span class="r" id="tok"></span></footer>
 </div>
 <script>
 var loadedAt = Date.now();
@@ -453,13 +482,14 @@ var DICT = {
   'w-sub': ['Sonnet · edits + tests', 'Sonnet · 편집 + 테스트'], 'w-edit-l': ['edits', '편집'], 'w-sh-l': ['shell', '셸'],
   'e-sub': ['Haiku · read code + docs', 'Haiku · 코드·문서 읽기'], 'e-read-l': ['reads', '읽기'], 'e-run-l': ['running', '실행 중'],
   'p-sub': ['repeats a task', '회차 반복'], 'p-pass-l': ['pass', '회차'], 'p-turn-l': ['turns', '턴'],
-  'tab-timeline': ['Timeline', '타임라인'],
+  'nav-h': ['Workbench sectors', '워크벤치 영역'],
+  'tab-timeline': ['Live flow & timeline', '실시간 흐름·타임라인'],
   's-aborted': ['aborted', '중단됨'], 's-ok': ['ok', '완료'], 's-error': ['error', '오류'], 's-blocked': ['blocked', '차단'], 's-declined': ['declined', '거절'], 's-running': ['running', '실행 중'], 's-bg': ['started', '시작됨'], 's-ask': ['asking', '확인 중'],
   'tl-follow-on': ['↓ following', '↓ 따라가는 중'], 'tl-follow-off': ['↓ follow', '↓ 따라가기'], 'tl-fail-l': ['failures only', '실패만'], 'tl-expand': ['expand all', '모두 펼치기'], 'tl-collapse': ['collapse all', '모두 접기'],
   'tl-q-ph': ['search · tool:Bash -policy:allow "npm test" ms:>500 is:fail', '검색 · tool:Bash -policy:allow "npm test" ms:>500 is:fail'], 'tl-crit-l': ['◆ critical path', '◆ 임계 경로'], 'tl-zoom-l': ['reset zoom', '확대 해제'],
   'h-title': ['Keyboard and search', '키보드와 검색'], 'h-keys': ['Keys', '단축키'], 'h-query': ['Search words (Timeline)', '검색어 (타임라인)'], 'h-off': ['Turn off single-key shortcuts', '한 글자 단축키 끄기'], 'h-close': ['Close', '닫기'],
   'h-note': ['Shortcuts do nothing while you type in a field or hold Ctrl, Alt or ⌘.', '입력창에 글을 쓰는 중이거나 Ctrl·Alt·⌘를 누른 동안에는 단축키가 동작하지 않습니다.'],
-  'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Guard', '가드'], 'tab-agents': ['Agents', '에이전트'],
+  'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Run & guard', '실행·가드'], 'tab-agents': ['Team mode', '팀 모드'],
   'g-queue': ['Needs attention', '확인이 필요한 것'], 'g-cats': ['Decisions by category', '범주별 판정'], 'g-table': ['Decisions', '판정 목록'],
   'a-kinds': ['By kind of agent', '에이전트 종류별'], 'a-runs': ['Agent runs', '에이전트 실행'], 'a-wf': ['Workflows', '워크플로'], 'a-codex': ['Codex runs', 'Codex 실행'],
   'st-live': ['● live', '● 연결됨'], 'st-reconnect': ['◌ reconnecting', '◌ 다시 연결 중'], 'st-down': ['✕ disconnected', '✕ 끊김'], 'st-wait': ['◌ connecting', '◌ 연결 중'],
@@ -2004,7 +2034,7 @@ function timelineBuild(){
   };
   $('tl-crit').onclick = function(){ tlq.crit = !tlq.crit; queueTl(); };
   $('tl-q').placeholder = T('tl-q-ph');
-  $('tl-q').addEventListener('input', function(){ setQuery($('tl-q').value); });
+  $('tl-q').addEventListener('input', function(){ if (tab !== 'timeline') showTab('timeline'); setQuery($('tl-q').value); });
   $('tl-q').addEventListener('keydown', function(e){
     if (e.key === 'Enter') { e.preventDefault(); jumpHit(e.shiftKey ? -1 : 1); }
     else if (e.key === 'Escape') { e.preventDefault(); if ($('tl-q').value) setQuery(''); else $('tl-q').blur(); }
