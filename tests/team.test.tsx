@@ -2592,6 +2592,18 @@ test('the live feed carries the contract state and each evidence result, masked 
   for (const line of lines.filter(one => one.kind === 'wb')) expect(JSON.stringify(line).length).toBeLessThan(2500)
 })
 
+test('an evidence command is masked before it is cut, so a secret across the cut leaves no fragment', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
+  await $.session.start(start)
+  const command = `npm test -- ${'a'.repeat(95)} API_KEY=sk9876543210fedcba`
+  await $.tool.call({ tool: 'Bash', command })
+  const evidence = feedLines(writes).filter(one => one.kind === 'evidence')
+  expect(evidence.length).toBeGreaterThan(0)
+  expect(JSON.stringify(evidence)).not.toContain('sk98')
+  expect(JSON.stringify(evidence)).not.toContain('API_KEY=s')
+})
+
 test('the app decides a proposal by its id: a reject needs no question, an approval of a change to a locked contract waits for the person in the session, and an unknown or settled id is refused', async ($, on) => {
   const { seen, deliver, asked, workbench } = await deskWorld($, on, 'Allow')
   await deliver({ commands: [{ id: 'k1', ops: [{ op: 'lock' }] }] }, 3)

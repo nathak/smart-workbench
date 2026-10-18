@@ -747,7 +747,15 @@ function ingest(tr, ev){
       if (statusOf(sp) === 'error' || sp.outcome === 'blocked' || sp.outcome === 'declined') { tr.failAt.push(at); tr.failTotal++; }
       break;
     case 'wb':
-      tr.wb = ev;
+      // A feed line is not trusted to be well formed: every field the views read is given a fixed shape here.
+      tr.wb = Object.assign({}, ev, {
+        goal: clean(ev.goal, 200),
+        status: clean(ev.status, 20),
+        profile: /^(off|permissive|balanced|strict)$/.test(String(ev.profile)) ? String(ev.profile) : 'balanced',
+        met: Number(ev.met) || 0,
+        total: Number(ev.total) || 0,
+        conds: Array.isArray(ev.conds) ? ev.conds.slice(0, 10).filter(function(c){ return c && typeof c === 'object'; }).map(function(c){ return Object.assign({}, c, { id: clean(c.id, 20), t: clean(c.t, 120), s: clean(c.s, 12), link: c.link ? clean(c.link, 20) : null }); }) : [],
+      });
       break;
     case 'evidence':
       tr.evid.push({ at: at, id: clean(ev.id, 60), kind: clean(ev.ekind, 20), command: clean(ev.command, 120), ok: ev.ok === true ? true : ev.ok === false ? false : null });

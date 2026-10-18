@@ -357,20 +357,21 @@ async function emitState($: $): Promise<void> {
     const state = feedStateOf(await read($, wbAtom), await read($, liveAtom))
     const text = JSON.stringify(state)
     if (text === stateLast) return
-    stateLast = text
-    await emit($, 'wb', state)
+    // Remembered only once the line is written: state computed while no live view runs is still owed to the next one.
+    if (await emit($, 'wb', state)) stateLast = text
   } catch {
     // The feed is optional.
   }
 }
 
-async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
+// True when the line reached the feed.
+async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<boolean> {
   // The prompt's full text is recorded where it is received; every other event is the feed's event.
-  if (ledger && !FEED_ONLY.has(kind)) await record($, kind, detail)
+  if (ledger && !FEED_ONLY.has(kind)) await record($, kind, detail).catch(() => undefined)
   try {
     const { feed: path, note } = await liveFiles($)
     // The feed is written only while a live server owns it: its process note must be beside it, so a feed file that was committed to the repository is never appended to.
-    if (!(await $.fs.exists(path)) || !(await $.fs.exists(note))) return
+    if (!(await $.fs.exists(path)) || !(await $.fs.exists(note))) return false
     const session = (await read($, liveAtom)).sessionId
     // Every text the feed carries is masked here, so a command summary or a URL cannot carry a secret around the prompt masking.
     const masked = Object.fromEntries(Object.entries(detail).map(([key, value]) => [key, typeof value === 'string' ? redact(scanned(value)) : value]))
@@ -388,7 +389,7 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
         isFeedNoted = true
         $.ui.toast(`SmartWorkbench: the live feed cannot be written (${why}); the live view will miss events.`)
       }
-      return
+      return false
     }
     if (feedMissed > 0) {
       const missed = feedMissed
@@ -399,8 +400,10 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
         await setLive($, current => ({ ...current, feedError: undefined })).catch(() => undefined)
       }
     }
+    return true
   } catch {
     // The feed is optional.
+    return false
   }
 }
 
@@ -1122,8 +1125,13 @@ async function propose($: $, input: Record<string, unknown>): Promise<{ result: 
 
 async function settleProposal($: $, id: string, approve: boolean): Promise<void> {
   const before = (await read($, wbAtom)).proposals?.find(one => one.id === id)
-  await mutate($, wb => model.decideProposal(wb, id, approve))
-  if (before) {
+  // Decided inside the update, so a decision made meanwhile (the panel, the app) is not audited twice.
+  let isDecided = false
+  await mutate($, wb => {
+    isDecided = (wb.proposals ?? []).some(one => one.id === id && one.status === 'open')
+    return model.decideProposal(wb, id, approve)
+  })
+  if (before && isDecided) {
     await audit($, approve ? 'contract.proposal-approved' : 'contract.proposal-rejected', { change: before.change, text: before.text ?? before.target ?? '' })
   }
 }
@@ -1683,7 +1691,7 @@ async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number
   const FROM = 'The desktop app asks: '
   if (isPolicyEditOp(one)) return applyPolicyEdit($, one, expiresAt, gen, batch)
   if (needsAnswer(wb, one) && !(one.op === 'set_profile' && one.profile === 'off') && one.op !== 'codex') {
-    const what = one.op === 'proposal_decide' ? 'approve a proposed change to the locked contract' : one.op === 'set_profile' ? `lower the guard from ${wb.execution.profile} to ${one.profile}` : one.op === 'pause' ? 'resume risky calls' : 'turn team mode on (Codex is on, so its reviews will then run without asking)'
+    const what = one.op === 'proposal_decide' ? `approve a proposed change to the locked contract${(() => { const found = wb.proposals.find(p => p.id === one.id); return found ? `: ${model.cut(redact(scanned(found.text ?? found.change)), 120)}` : '' })()}` : one.op === 'set_profile' ? `lower the guard from ${wb.execution.profile} to ${one.profile}` : one.op === 'pause' ? 'resume risky calls' : 'turn team mode on (Codex is on, so its reviews will then run without asking)'
     const waited = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - (await $.clock.now())) : 10 * 60 * 1000
     const answer = await Promise.race([
       $.ui.ask(`${FROM}${what}. Allow it?`, { header: 'Desktop app', options: ['Allow', 'Decline'] }).catch(() => 'Decline'),
@@ -2016,6 +2024,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
     }
     liveServer.stop()
     liveServer = undefined
+    stateLast = ''
     await setLive($, live => ({ ...live, livePrompts: undefined }))
     // Ending a child is a signal on Linux and macOS, where the server removes its own files; on Windows it is a hard kill and nothing runs.
     // Once the process is gone, the files it would have removed are removed here.
@@ -2051,6 +2060,7 @@ async function liveCommand($: $, rest: string): Promise<{ text: string }> {
 
   feedMissed = 0
   isFeedNoted = false
+  stateLast = ''
   await setLive($, live => ({ ...live, livePrompts: noPrompts ? false : undefined, feedError: undefined }))
   // All sessions on a port share one hub and are its tabs; with no port given, a port that something else holds is skipped.
   const { sessionId, scope } = await read($, liveAtom)
@@ -3401,7 +3411,7 @@ export const register: Register = on => {
       return path && isOk && (inRepo !== undefined || !EDIT_TOOL_NAMES.has(e.tool)) ? model.observe(updated, e.tool, path, endedAt) : updated
     })
 
-    for (const record of fresh) await emit($, 'evidence', { id: record.id, ekind: record.kind, command: model.cut(record.command, 120), ok: record.ok })
+    for (const record of fresh) await emit($, 'evidence', { id: record.id, ekind: record.kind, command: model.cut(redact(scanned(record.command)), 120), ok: record.ok })
     if (fresh.length > 0) await emitState($)
 
     if (isTeam && isOk && e.agentId === undefined && inRepo !== undefined && model.isEditTool(e.tool)) {
