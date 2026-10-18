@@ -25,6 +25,9 @@ class Node {
   replaceChildren() {
     this.children = []
   }
+  setAttribute(name, value) {
+    this.attrs = { ...this.attrs, [name]: String(value) }
+  }
   addEventListener(name, fn) {
     this.listeners[name] = fn
   }

@@ -161,7 +161,54 @@ function roleRow(session, role, snap, L, op, disabled) {
   return row
 }
 
-function card(row, snap, L, acks) {
+const TABS = ['intent', 'evidence', 'team', 'guard']
+// The tab each session shows; a redraw only reads it back, so a click needs no redraw (focus and half-typed text stay).
+const tabs = new Map()
+
+function tabBar(id, index, L, panels) {
+  const bar = el('div', undefined, 'tabs')
+  bar.setAttribute('role', 'tablist')
+  bar.setAttribute('aria-label', L.tabsLabel)
+  const buttons = {}
+  const show = name => {
+    tabs.set(id, name)
+    for (const tab of TABS) {
+      panels[tab].hidden = tab !== name
+      buttons[tab].setAttribute('aria-selected', String(tab === name))
+    }
+  }
+  for (const tab of TABS) {
+    const b = button(L.tabs[tab], () => show(tab))
+    b.className = 'tab'
+    b.setAttribute('role', 'tab')
+    b.setAttribute('aria-controls', `p-${index}-${tab}`)
+    panels[tab].id = `p-${index}-${tab}`
+    panels[tab].setAttribute('role', 'tabpanel')
+    buttons[tab] = b
+    bar.append(b)
+  }
+  show(TABS.includes(tabs.get(id)) ? tabs.get(id) : 'intent')
+
+  return bar
+}
+
+// One line of what matters at a glance: state, goal, done conditions met, guard profile.
+function ribbon(row, snap, L) {
+  const t = snap.task
+  const met = t.doneConditions.filter(d => d.status === 'verified').length
+  const state = row.quiet ? 'quiet' : row.alive ? 'alive' : 'ended'
+  const box = el('div', undefined, 'ribbon')
+  box.append(
+    el('span', state === 'alive' ? '●' : state === 'quiet' ? '◐' : '◌', `dot ${state}`),
+    el('span', t.goal || L.noGoal, 'r-goal'),
+    el('span', `${L.ribbonDone} ${met}/${t.doneConditions.length}`, 'r-done'),
+    el('span', `${L.guard} ${String(snap.guard.profile).toUpperCase()}${snap.guard.paused ? ` · ${L.paused}` : ''}`, snap.guard.paused ? 'r-guard warn' : 'r-guard'),
+  )
+
+  return box
+}
+
+function card(row, snap, L, acks, index = 0) {
   const s = el('section')
   s.append(el('h2', row.name || row.id))
   const state = row.quiet ? L.quiet : row.alive ? L.alive : L.ended
@@ -176,54 +223,73 @@ function card(row, snap, L, acks) {
   // While an earlier change waits for its answer the buttons rest: a second click on a stale view would act on it twice.
   const busy = pending.length > 0
   const op = ops => send(row.id, ops, L, note)
-  s.append(el('div', `${state} · ${L.rev} ${snap.rev} · ${L.scope[snap.scope] ?? snap.scope} · ${L.status[t.status] ?? t.status}${t.locked ? ` · ${L.locked}` : ''}`, 'meta'))
+  const panels = Object.fromEntries(TABS.map(tab => [tab, el('div', undefined, 'panel')]))
+  const intent = panels.intent
+  const evidence = panels.evidence
+  const team = panels.team
+  const guard = panels.guard
+
+  s.append(ribbon(row, snap, L), el('div', `${state} · ${L.rev} ${snap.rev} · ${L.scope[snap.scope] ?? snap.scope} · ${L.status[t.status] ?? t.status}${t.locked ? ` · ${L.locked}` : ''}`, 'meta'))
   if (row.alive) {
     s.append(button(t.locked ? L.unlock : L.lock, () => op([{ op: t.locked ? 'unlock' : 'lock' }]), busy))
     if (t.locked) s.append(el('div', L.lockedNote, 'empty'))
   }
-  s.append(el('div', t.goal || L.noGoal, t.goal ? 'goal' : 'empty'))
-  if (row.alive) s.append(adder(`${row.id}:goal`, L.goalHint, L.set, text => op([{ op: 'set_goal', text }]), !editable || busy, 500))
+  s.append(tabBar(row.id, index, L, panels), ...TABS.map(tab => panels[tab]))
+
+  intent.append(el('div', t.goal || L.noGoal, t.goal ? 'goal' : 'empty'))
+  if (row.alive) intent.append(adder(`${row.id}:goal`, L.goalHint, L.set, text => op([{ op: 'set_goal', text }]), !editable || busy, 500))
   const small = (text, ops) => button(text, () => op(ops), !editable || busy)
-  s.append(list(L.constraints, t.constraints, c => {
+  intent.append(list(L.constraints, t.constraints, c => {
     const li = el('li', `${c.priority === 'hard' ? '' : `(${L.soft}) `}${c.text}${c.isActive ? '' : ` (${L.off})`} `)
     if (row.alive) li.append(small(c.isActive ? L.off : L.on, [{ op: 'set_active', id: c.id, isActive: !c.isActive }]), small(c.priority === 'hard' ? L.soft : L.hard, [{ op: 'set_priority', id: c.id, priority: c.priority === 'hard' ? 'soft' : 'hard' }]), small(L.remove, [{ op: 'remove_constraint', id: c.id, text: c.text }]))
     return li
   }))
-  if (row.alive) s.append(adder(`${row.id}:c`, L.constraintHint, L.add, text => op([{ op: 'add_constraint', text }]), !editable || busy))
-  s.append(list(L.done, t.doneConditions, d => {
+  if (row.alive) intent.append(adder(`${row.id}:c`, L.constraintHint, L.add, text => op([{ op: 'add_constraint', text }]), !editable || busy))
+  intent.append(list(L.done, t.doneConditions, d => {
     const li = el('li', `${L.cond[d.status] ?? d.status}: ${d.text}${d.link ? ` [${d.link}]` : ''} `, d.status)
     if (row.alive) li.append(small(L.remove, [{ op: 'remove_done_condition', id: d.id, text: d.text }]))
     return li
   }))
-  if (row.alive) s.append(adder(`${row.id}:d`, L.doneHint, L.add, text => op([{ op: 'add_done_condition', text }]), !editable || busy))
-  s.append(list(L.nonGoals, t.nonGoals, (n, i) => {
+  if (row.alive) intent.append(adder(`${row.id}:d`, L.doneHint, L.add, text => op([{ op: 'add_done_condition', text }]), !editable || busy))
+  intent.append(list(L.nonGoals, t.nonGoals, (n, i) => {
     const li = el('li', `${n} `)
     if (row.alive) li.append(small(L.remove, [{ op: 'remove_non_goal', index: i, text: n }]))
     return li
   }))
-  if (row.alive) s.append(adder(`${row.id}:n`, L.nonGoalHint, L.add, text => op([{ op: 'add_non_goal', text }]), !editable || busy))
-  s.append(note)
-  const mine = (acks ?? []).filter(a => a.session === row.id).slice(-5)
-  if (mine.length) s.append(list(L.sentTitle, mine, a => el('li', `${a.label} — ${a.ack ? (L[a.ack.status] ?? a.ack.status) + (a.ack.reason ? ` (${L.reasons[a.ack.reason] ?? a.ack.reason})` : '') : Date.now() - a.at > 10 * 60 * 1000 ? L.noAnswer : L.waiting}`)))
-  s.append(el('h3', L.team), el('div', `${snap.team.enabled ? L.on : L.off}${snap.team.codex ? ` · Codex (${snap.team.codexReview ? 'review' : '-'}${snap.team.codexRescue ? ', rescue' : ''})` : ''}`))
+  if (row.alive) intent.append(adder(`${row.id}:n`, L.nonGoalHint, L.add, text => op([{ op: 'add_non_goal', text }]), !editable || busy))
+  // A proposal is decided in the session's own panel: the app has no op for it.
+  intent.append(list(L.proposals, snap.proposals, p => el('li', `${p.change}${p.text ? `: ${p.text}` : ''} — ${p.reason}`)))
+  if (snap.proposals.length) intent.append(el('div', L.proposalNote, 'empty'))
+
+  evidence.append(list(L.done, t.doneConditions, d => el('li', `${L.cond[d.status] ?? d.status}: ${d.text}${d.link ? ` [${d.link}]` : ''}`, d.status)))
+  evidence.append(list(L.evidence, snap.evidence, e => el('li', `${e.kind}: ${e.ok === true ? L.pass : e.ok === false ? L.fail : L.running}`, e.ok === true ? 'verified' : e.ok === false ? 'failed' : 'pending')))
+
+  team.append(el('h3', L.team), el('div', `${snap.team.enabled ? L.on : L.off}${snap.team.codex ? ` · Codex (${snap.team.codexReview ? 'review' : '-'}${snap.team.codexRescue ? ', rescue' : ''})` : ''}`))
   if (row.alive) {
     const bar = el('div', undefined, 'bar')
     bar.append(button(snap.team.enabled ? L.teamOff : L.teamOn, () => op([{ op: 'team_enabled', enabled: !snap.team.enabled }]), busy))
     bar.append(button(snap.team.codex ? L.codexOff : L.codexOn, () => op([{ op: 'codex', enabled: !snap.team.codex }]), busy || (!snap.team.codex && snap.codexFound === false)))
-    s.append(bar)
-    for (const role of ['lead', 'explorer', 'advisor']) s.append(roleRow(row.id, role, snap, L, op, busy))
-  } else s.append(el('div', ['lead', 'explorer', 'advisor'].map(r => `${r}=${snap.team.roles[r] ?? '-'}`).join(' ')))
-  s.append(el('h3', L.guard), el('div', `${snap.guard.profile}${snap.guard.paused ? ` · ${L.paused}` : ''}${snap.guard.fileProfile ? ` · ${L.fileProfile} ${snap.guard.fileProfile}` : ''} · ${L.rules} ${snap.guard.rules}`))
+    team.append(bar)
+    for (const role of ['lead', 'explorer', 'advisor']) team.append(roleRow(row.id, role, snap, L, op, busy))
+  } else team.append(el('div', ['lead', 'explorer', 'advisor'].map(r => `${r}=${snap.team.roles[r] ?? '-'}`).join(' ')))
+
+  guard.append(el('h3', L.guard), el('div', `${snap.guard.profile}${snap.guard.paused ? ` · ${L.paused}` : ''}${snap.guard.fileProfile ? ` · ${L.fileProfile} ${snap.guard.fileProfile}` : ''} · ${L.rules} ${snap.guard.rules}`))
   if (row.alive) {
     const bar = el('div', undefined, 'bar')
     for (const profile of ['off', 'permissive', 'balanced', 'strict']) bar.append(button(profile, () => op([{ op: 'set_profile', profile }]), busy || snap.guard.profile === profile))
     bar.append(button(snap.guard.paused ? L.resume : L.pause, () => op([{ op: 'pause', on: !snap.guard.paused }]), busy))
-    s.append(bar, el('div', L.guardNote, 'empty'))
+    guard.append(bar, el('div', L.guardNote, 'empty'))
   }
-  if (snap.guard.file) s.append(guardFile(row, snap.guard.file, L, op, busy))
-  else if (row.alive) s.append(guardFileNew(row.id, L, op, busy))
-  s.append(list(L.evidence, snap.evidence, e => el('li', `${e.kind}: ${e.ok === true ? L.pass : e.ok === false ? L.fail : L.running}`, e.ok === true ? 'verified' : e.ok === false ? 'failed' : 'pending')))
-  s.append(list(L.proposals, snap.proposals, p => el('li', `${p.change}${p.text ? `: ${p.text}` : ''} — ${p.reason}`)))
+  if (snap.guard.file) guard.append(guardFile(row, snap.guard.file, L, op, busy))
+  else if (row.alive) guard.append(guardFileNew(row.id, L, op, busy))
+
+  // The answers to what was sent stay in view whichever tab the change came from.
+  const foot = el('div', undefined, 'foot')
+  foot.append(note)
+  const mine = (acks ?? []).filter(a => a.session === row.id).slice(-5)
+  if (mine.length) foot.append(list(L.sentTitle, mine, a => el('li', `${a.label} — ${a.ack ? (L[a.ack.status] ?? a.ack.status) + (a.ack.reason ? ` (${L.reasons[a.ack.reason] ?? a.ack.reason})` : '') : Date.now() - a.at > 10 * 60 * 1000 ? L.noAnswer : L.waiting}`)))
+  s.append(foot)
+
   return s
 }
 
@@ -244,9 +310,9 @@ async function refresh(force) {
   const main = document.getElementById('list')
   main.replaceChildren()
   if (!data.rows.length) main.append(el('div', L.none, 'empty'))
-  for (const row of data.rows) {
+  for (const [index, row] of data.rows.entries()) {
     try {
-      main.append(card(row, Object.hasOwn(data.snaps, row.id) ? data.snaps[row.id] : undefined, L, data.acks))
+      main.append(card(row, Object.hasOwn(data.snaps, row.id) ? data.snaps[row.id] : undefined, L, data.acks, index))
     } catch {
       main.append(el('div', row.name || row.id, 'empty'))
     }
