@@ -63,6 +63,40 @@ export function snapshotOf(wb: Workbench, live: Live, at: number) {
   }
 }
 
+const FEED_CONDITIONS = 10
+const FEED_TEXT = 120
+
+/**
+ * The contract and guard state as one live-feed line: what the live view shows in its header chips and its intent and evidence views.
+ * Counts and short texts only (the goal up to 200 characters, each condition up to 120). The conditions are nested, and the feed masks
+ * only top-level text, so each one is masked here.
+ */
+export function feedStateOf(wb: Workbench, live: Live) {
+  const evidence: readonly EvidenceRecord[] = wb.evidence
+  const lastEdit = Math.max(0, ...Object.values(wb.changed.edits ?? {}))
+  const conds = wb.task.doneConditions.map(one => ({ id: one.id, t: redact(one.text).slice(0, FEED_TEXT), link: one.link ?? null, s: statusOf(one, evidence, lastEdit || undefined) }))
+
+  return {
+    goal: redact(wb.task.goal).slice(0, 200),
+    status: wb.task.status,
+    locked: wb.task.locked,
+    met: conds.filter(one => one.s === 'verified').length,
+    total: conds.length,
+    conds: conds.slice(0, FEED_CONDITIONS),
+    constraints: wb.task.constraints.filter(one => one.isActive).length,
+    nonGoals: wb.task.nonGoals.length,
+    proposals: (wb.proposals ?? []).filter(one => one.status === 'open').length,
+    profile: wb.execution.profile,
+    paused: wb.execution.isPaused,
+    rules: live.policy?.rules.length ?? 0,
+    pins: wb.context.pins.length,
+    files: wb.changed.files.length,
+    added: wb.changed.added,
+    removed: wb.changed.removed,
+    team: wb.team?.enabled === true,
+  }
+}
+
 /** The snapshot as text, or undefined when it cannot be made to fit the limit. */
 export function snapshotText(wb: Workbench, live: Live, at: number): string | undefined {
   const snap = snapshotOf(wb, live, at)

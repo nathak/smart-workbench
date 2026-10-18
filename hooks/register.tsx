@@ -7,7 +7,7 @@ import * as crew from './crew'
 import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
 import { editPolicy, isPolicyEditOp, type PolicyEditOp } from './policy-edit'
-import { applyOps, isSettingOp, needsAnswer, snapshotText, type DeskOp, type SettingOp } from './desktop'
+import { applyOps, feedStateOf, isSettingOp, needsAnswer, snapshotText, type DeskOp, type SettingOp } from './desktop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -347,9 +347,26 @@ async function agentOutput($: $, result: unknown): Promise<Record<string, unknow
   return typeof id === 'string' ? { agentRun: id } : {}
 }
 
+// Recorded where they happen (the prompt) or only for the live view (the state line and the evidence results), never in the ledger.
+const FEED_ONLY = new Set(['prompt', 'wb', 'evidence'])
+let stateLast = ''
+
+// The contract and guard state for the live view's header and its intent and evidence views; a line only when something changed.
+async function emitState($: $): Promise<void> {
+  try {
+    const state = feedStateOf(await read($, wbAtom), await read($, liveAtom))
+    const text = JSON.stringify(state)
+    if (text === stateLast) return
+    stateLast = text
+    await emit($, 'wb', state)
+  } catch {
+    // The feed is optional.
+  }
+}
+
 async function emit($: $, kind: string, detail: Record<string, unknown> = {}): Promise<void> {
   // The prompt's full text is recorded where it is received; every other event is the feed's event.
-  if (ledger && kind !== 'prompt') await record($, kind, detail)
+  if (ledger && !FEED_ONLY.has(kind)) await record($, kind, detail)
   try {
     const { feed: path, note } = await liveFiles($)
     // The feed is written only while a live server owns it: its process note must be beside it, so a feed file that was committed to the repository is never appended to.
@@ -391,6 +408,7 @@ async function emit($: $, kind: string, detail: Record<string, unknown> = {}): P
 // failed write can never let a guarded call through.
 async function audit($: $, event: string, detail: Record<string, unknown> = {}): Promise<void> {
   await emit($, event, detail)
+  if (/^(task|contract|condition|guard\.(profile|pause|session)|team\.(on|off))/.test(event)) await emitState($)
   try {
     const live = await read($, liveAtom)
     const config = live.policy?.audit
@@ -3360,6 +3378,7 @@ export const register: Register = on => {
     const bashResult = e.tool === 'Bash' && !ran.isError ? (ran.result as { interrupted?: boolean; backgroundTaskId?: string } | undefined) : undefined
     const isUnsettled = bashResult?.interrupted === true || bashResult?.backgroundTaskId !== undefined
 
+    const fresh: EvidenceRecord[] = []
     await mutate($, current => {
       let updated = model.recordCall(current, { ...call, outcome, durationMs: endedAt - startedAt })
 
@@ -3369,12 +3388,16 @@ export const register: Register = on => {
           const ok = isUnsettled ? null : checkOutcome(e.command, kind, isOk)
           const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt }
           updated = model.addEvidence(updated, record)
+          fresh.push(record)
         })
       }
 
       // A file outside the project is neither pinned nor counted as the task's change: it must not trigger the final check or stale a passing test.
       return path && isOk && (inRepo !== undefined || !EDIT_TOOL_NAMES.has(e.tool)) ? model.observe(updated, e.tool, path, endedAt) : updated
     })
+
+    for (const record of fresh) await emit($, 'evidence', { id: record.id, ekind: record.kind, command: model.cut(record.command, 120), ok: record.ok })
+    if (fresh.length > 0) await emitState($)
 
     if (isTeam && isOk && e.agentId === undefined && inRepo !== undefined && model.isEditTool(e.tool)) {
       const lines = crew.editSize(e.tool, e as unknown as Record<string, unknown>).lines
@@ -3468,6 +3491,7 @@ export const register: Register = on => {
     if (ledger) await noteCommits($, 'turn')
     const ctx = await refreshUsage($).catch(() => ({}))
     await emit($, 'turn', { aborted: e.isAborted === true, ...ctx, ...usageOf(e.usage) })
+    await emitState($)
 
     // The loop's first pass: a command cannot submit a prompt, the end of its turn can.
     // Not awaited: submit returns when the pass's turn ends, and this hook must not wait for a whole loop.

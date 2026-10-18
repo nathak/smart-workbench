@@ -2564,3 +2564,30 @@ test('a lead model the host\'s model setting refuses is answered as rejected, no
   await deliver({ commands: [{ id: 'm2', ops: [{ op: 'team_role', role: 'lead', model: 'opus' }] }] }, 6)
   expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'm2', status: 'rejected', reason: 'model refused' })])
 })
+
+test('the live feed carries the contract state and each evidence result, masked and capped, in lines of their own', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
+  await $.session.start(start)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  await ui.input({ key: 'goal', text: 'Port the cache API_KEY=abc123secret' })
+  for (let i = 0; i < 12; i++) await ui.input({ key: 'add-condition', text: i === 0 ? 'Tests pass token=abcdef123456' : `Condition ${i}` })
+  await ui.unmount()
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+
+  const lines = feedLines(writes)
+  const evidence = lines.filter(one => one.kind === 'evidence')
+  expect(evidence).toHaveLength(1)
+  expect(evidence[0]).toMatchObject({ ekind: 'test', command: 'npm test', ok: true })
+
+  const state = lines.filter(one => one.kind === 'wb').at(-1) as { goal: string; total: number; conds: Array<{ t: string; s: string }>; profile: string }
+  expect(state.total).toBe(12)
+  expect(state.conds).toHaveLength(10)
+  expect(state.conds[0]?.s).toBe('verified')
+  expect(state.profile).toBeDefined()
+  const text = JSON.stringify(lines.filter(one => one.kind === 'wb' || one.kind === 'evidence'))
+  expect(text).not.toContain('abc123secret')
+  expect(text).not.toContain('abcdef123456')
+  for (const line of lines.filter(one => one.kind === 'wb')) expect(JSON.stringify(line).length).toBeLessThan(2500)
+})
