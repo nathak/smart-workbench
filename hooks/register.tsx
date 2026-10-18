@@ -1654,8 +1654,8 @@ let lastBackgroundAt = 0
 
 // A command is taken to be able to leave a process behind unless it is a plain, short inspection: no shell operators or substitutions, and a command known
 // to finish and do nothing else. Anything else (a script, an interpreter, a build tool, a trailing &) may write an answer later.
-const SHORT_SAFE = /^\s*(?:ls|pwd|cat|head|tail|wc|echo|printf|stat|file|which|date|whoami|tree|diff|grep|rg|find|git\s+(?:status|diff|log|show|branch|rev-parse|ls-files|remote|add|commit|stash|checkout|switch|fetch|pull|push|merge|rebase|tag|blame|config\s+--get))\b[^;&|`$()<>\n]*$/
-const mayDetach = (command: string): boolean => !SHORT_SAFE.test(command) || /\s-exec\b|\s--exec\b|\s-delete\b/.test(command)
+const SHORT_SAFE = /^\s*(?:ls|pwd|cat|head|tail|wc|stat|file|which|date|whoami|echo|printf|git\s+(?:status|rev-parse|ls-files))\b[^;&|`$()<>\n]*$/
+const mayDetach = (command: string): boolean => !SHORT_SAFE.test(command)
 
 // Why a question cannot be answered from outside, or undefined when it can.
 function remoteRefusal(ask: PendingAsk, wb: Workbench, now: number): string | undefined {
