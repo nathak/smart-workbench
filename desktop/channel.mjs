@@ -55,11 +55,11 @@ const COMMAND_TTL_MS = 10 * 60 * 1000
  * Writes one signed command for a session into its inbox. The ops are checked here with the same rules the plugin applies,
  * and the file is written whole (temporary file, then rename) so the plugin never reads half of it.
  */
-export function sendCommand(home, key, sessionId, ops, now = Date.now(), id = randomBytes(12).toString('base64url')) {
+export function sendCommand(home, key, sessionId, ops, now = Date.now(), id = randomBytes(12).toString('base64url'), ttlMs = COMMAND_TTL_MS) {
   if (typeof sessionId !== 'string' || !ID_RE.test(sessionId)) return { ok: false, reason: 'bad session' }
   const checked = checkOps(ops)
   if (checked.reason) return { ok: false, reason: checked.reason }
-  const body = { v: 1, id, createdAt: now, expiresAt: now + COMMAND_TTL_MS, target: { kind: 'session', sessionId }, ops: checked.ops }
+  const body = { v: 1, id, createdAt: now, expiresAt: now + ttlMs, target: { kind: 'session', sessionId }, ops: checked.ops }
   const command = { ...body, mac: sign(key, body) }
   const dir = join(home, 'inbox', sessionId)
   mkdirSync(join(home, 'inbox'), { recursive: true, mode: 0o700 })

@@ -21,6 +21,7 @@ function shaped(snap) {
     guard: obj(snap.guard),
     evidence: list(snap.evidence),
     proposals: list(snap.proposals),
+    asks: list(snap.asks),
   }
 }
 

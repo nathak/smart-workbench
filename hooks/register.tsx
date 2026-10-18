@@ -7,7 +7,7 @@ import * as crew from './crew'
 import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
 import { editPolicy, isPolicyEditOp, type PolicyEditOp } from './policy-edit'
-import { applyOps, feedStateOf, isSettingOp, needsAnswer, snapshotText, type DeskOp, type SettingOp } from './desktop'
+import { applyOps, feedStateOf, isSettingOp, needsAnswer, snapshotText, type AskView, type DeskOp, type SettingOp } from './desktop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -17,7 +17,7 @@ import * as model from './model'
 import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
-import { classify, decide, effectiveProfile, redact, sessionScope, summarize } from './risk'
+import { ALWAYS_ASK, classify, decide, effectiveProfile, redact, sessionScope, summarize } from './risk'
 import { workflowOf } from './workflow'
 
 type $ = EngineInterface
@@ -1637,6 +1637,52 @@ async function deskFresh($: $): ReturnType<typeof desktopState> {
   return state
 }
 
+// ---- questions that the app or the live page may answer too
+// A guard question is asked in the session; while it waits, the app (and the live page, through the app's hub) may answer it once, as Allow once or Block.
+// The answer arrives as a signed command, but a file can be written by anything that runs as the person, the model's Bash included. So a remote answer
+// is taken only if nothing could have written one: no Bash or MCP call ran since the question opened, none was started in the background lately,
+// and the question is not one of the always-asked kinds. The question in the session has no such limit.
+type PendingAsk = { id: string; callId: string; tool: string; category: string; reason: string; summary: string; openedAt: number; remoteUntil: number; runsAtOpen: number; settle: (answer: { allow: boolean; by: 'app' | 'web' }) => void }
+const pendingAsks = new Map<string, PendingAsk>()
+const settledAsks: string[] = []
+const REMOTE_ASK_MS = 120_000
+const BACKGROUND_WINDOW_MS = 60 * 60 * 1000
+let runCount = 0
+let lastBackgroundAt = 0
+
+// Why a question cannot be answered from outside, or undefined when it can.
+function remoteRefusal(ask: PendingAsk, wb: Workbench, now: number): string | undefined {
+  if (wb.execution.isPaused) return 'paused'
+  if (ALWAYS_ASK.has(ask.category)) return 'terminal only'
+  if (runCount !== ask.runsAtOpen) return 'a command ran meanwhile'
+  if (lastBackgroundAt !== 0 && now - lastBackgroundAt < BACKGROUND_WINDOW_MS) return 'a background command was started'
+
+  return undefined
+}
+
+async function asksView($: $): Promise<AskView[]> {
+  const now = await $.clock.now()
+  const wb = await read($, wbAtom)
+
+  return [...pendingAsks.values()].map(one => ({ id: one.id, tool: one.tool, reason: one.reason, summary: one.summary, remoteUntil: one.remoteUntil, remote: now > one.remoteUntil ? 'expired' : (remoteRefusal(one, wb, now) ?? true) }))
+}
+
+async function answerAsk($: $, one: { id: string; allow: boolean; by: 'app' | 'web' }): Promise<{ status: 'applied' | 'rejected'; reason?: string }> {
+  const ask = pendingAsks.get(one.id)
+  if (!ask) return { status: 'rejected', reason: settledAsks.includes(one.id) ? 'settled' : 'no such ask' }
+  const now = await $.clock.now()
+  if (now > ask.remoteUntil) return { status: 'rejected', reason: 'expired' }
+  const why = remoteRefusal(ask, await read($, wbAtom), now)
+  if (why) {
+    await emit($, 'ask.remote', { id: ask.id, refused: why })
+    return { status: 'rejected', reason: why }
+  }
+  pendingAsks.delete(ask.id)
+  ask.settle({ allow: one.allow, by: one.by })
+
+  return { status: 'applied' }
+}
+
 function scheduleSnapshot($: $): void {
   if (snapshotPending) {
     snapshotDirty = true
@@ -1653,7 +1699,7 @@ function scheduleSnapshot($: $): void {
       const live = await read($, liveAtom)
       if (!live.sessionId) return
       const at = await $.clock.now()
-      const text = snapshotText(await read($, wbAtom), live, at)
+      const text = snapshotText(await read($, wbAtom), live, at, await asksView($))
       // Nothing changed since the last one: no process is started for it.
       const same = text?.replace(/"at":\d+/, '')
       if (text && same !== snapshotLast) {
@@ -1689,6 +1735,7 @@ let inboxBusy = false
 async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number, batch: { asked: boolean } = { asked: false }): Promise<{ status: 'applied' | 'rejected' | 'declined'; reason?: string }> {
   const wb = await read($, wbAtom)
   const FROM = 'The desktop app asks: '
+  if (one.op === 'ask_answer') return answerAsk($, one)
   if (isPolicyEditOp(one)) return applyPolicyEdit($, one, expiresAt, gen, batch)
   if (needsAnswer(wb, one) && !(one.op === 'set_profile' && one.profile === 'off') && one.op !== 'codex') {
     const what = one.op === 'proposal_decide' ? `approve a proposed change to the locked contract${(() => { const found = wb.proposals.find(p => p.id === one.id); return found ? `: ${model.cut(redact(scanned(found.text ?? found.change)), 120)}` : '' })()}` : one.op === 'set_profile' ? `lower the guard from ${wb.execution.profile} to ${one.profile}` : one.op === 'pause' ? 'resume risky calls' : 'turn team mode on (Codex is on, so its reviews will then run without asking)'
@@ -1788,7 +1835,9 @@ async function applyPolicyEdit($: $, one: PolicyEditOp, expiresAt: number, gen: 
 }
 
 async function pollInbox($: $): Promise<void> {
-  if (inboxBusy) return
+  // While a command waits for the person's answer the inbox is busy; an answer to a guard question must still get through, so it is read then too.
+  const wasBusy = inboxBusy
+  if (wasBusy && pendingAsks.size === 0) return
   inboxBusy = true
   const gen = inboxGen
   const batch = { asked: false }
@@ -1802,10 +1851,16 @@ async function pollInbox($: $): Promise<void> {
     if (taken.exitCode !== 0) return
     const found = JSON.parse(taken.stdout) as { commands?: Array<{ id: string; expiresAt: number; ops: Array<DeskOp | SettingOp> }>; rejected?: Array<{ id: string; reason: string }> }
     for (const one of found.rejected ?? []) await ackDesktop($, one.id, { status: 'rejected', reason: one.reason })
-    for (const command of found.commands ?? []) {
+    // Answers to questions go first: they are the ones that wait for someone.
+    const commands = [...(found.commands ?? [])].sort((a, b) => Number(b.ops[0]?.op === 'ask_answer') - Number(a.ops[0]?.op === 'ask_answer'))
+    for (const command of commands) {
       // The command was taken (its file is gone): whatever happens now, the app gets an answer.
       try {
         const first = command.ops[0]
+        if (wasBusy && first?.op !== 'ask_answer') {
+          await ackDesktop($, command.id, { status: 'rejected', reason: 'busy' })
+          continue
+        }
         if (first && isSettingOp(first)) {
           // One question per batch: a pile of them would only teach the person to click through.
           // (An edit of the guard file decides this itself, once it has read the file.)
@@ -1820,7 +1875,7 @@ async function pollInbox($: $): Promise<void> {
           await ackDesktop($, command.id, done)
           if (done.status === 'declined') await audit($, 'desktop.declined', { id: command.id, ops: first.op })
           // (A guard file edit has its own toast and audit entry.)
-          if (done.status === 'applied' && !isPolicyEditOp(first)) {
+          if (done.status === 'applied' && !isPolicyEditOp(first) && first.op !== 'ask_answer') {
             $.ui.toast(`SmartWorkbench: the desktop app changed a setting (${first.op})`)
             await audit($, 'desktop.apply', { id: command.id, ops: first.op })
           }
@@ -1846,7 +1901,7 @@ async function pollInbox($: $): Promise<void> {
       }
     }
   } finally {
-    if (gen === inboxGen) inboxBusy = false
+    if (gen === inboxGen && !wasBusy) inboxBusy = false
   }
 }
 
@@ -1854,6 +1909,7 @@ async function pollInbox($: $): Promise<void> {
 function startInbox($: $): void {
   const gen = ++inboxGen
   inboxBusy = false
+  pendingAsks.clear()
   void (async () => {
     for (let tick = 1; ; tick += 1) {
       try {
@@ -1864,7 +1920,8 @@ function startInbox($: $): void {
       if (gen !== inboxGen) return
       // About every ten seconds the guard file is looked at too, so a rule added by another session or the app reaches a session that is working.
       if (tick % 5 === 0) await loadPolicy($, { onlyIfChanged: true }).catch(() => undefined)
-      if (isAskable) await pollInbox($).catch(() => undefined)
+      // Not awaited: a command waiting for the person's answer would hold the loop, and an answer to a guard question has to get through meanwhile.
+      if (isAskable) void pollInbox($).catch(() => undefined)
     }
   })()
 }
@@ -3328,15 +3385,38 @@ export const register: Register = on => {
       const hint = scope ? ` ("Allow for session" stops asking for \`${model.cut(scope.label, 60)}\` until this session ends.)` : ''
       // The question is on screen in this window; a notification reaches the person who is looking at another one. It carries the tool and the reason, never the command.
       await notifyAsk($, verdict.reason, e.tool)
-      const answer = await $.ui
-        .ask(`SmartWorkbench: ${verdict.reason}. Allow ${e.tool}: ${call.summary.slice(0, 80)}?${hint}`, { header: 'Guard', options })
+      const askedAt = await $.clock.now()
+      const askId = `a-${call.id.slice(0, 20)}-${askedAt.toString(36)}`.slice(0, 40)
+      const summary = model.cut(call.summary, 120)
+      const remote = new Promise<{ allow: boolean; by: 'app' | 'web' }>(resolve => {
+        pendingAsks.set(askId, { id: askId, callId: call.id, tool: e.tool, category: verdict.category, reason: verdict.reason, summary, openedAt: askedAt, remoteUntil: askedAt + REMOTE_ASK_MS, runsAtOpen: runCount, settle: resolve })
+      })
+      await emit($, 'ask.open', { id: askId, callId: call.id, tool: e.tool, reason: verdict.reason, summary, until: askedAt + REMOTE_ASK_MS })
+      scheduleSnapshot($)
+      const terminal = $.ui
+        .ask(`SmartWorkbench: ${verdict.reason}. Allow ${e.tool}: ${call.summary.slice(0, 80)}?${hint} (The desktop app or the live page can answer once too; the first answer counts.)`, { header: 'Guard', options })
         .catch(() => 'Block')
+      const first = await Promise.race([terminal.then(text => ({ text })), remote.then(r => ({ remote: r }))])
+      const wasRemote = 'remote' in first
+      pendingAsks.delete(askId)
+      settledAsks.push(askId)
+      if (settledAsks.length > 50) settledAsks.shift()
+      const answer: string = 'text' in first ? first.text : first.remote.allow ? 'Allow' : 'Block'
+      await emit($, 'ask.close', { id: askId, by: wasRemote ? first.remote.by : 'terminal', allow: answer !== 'Block' })
+      scheduleSnapshot($)
+      if (wasRemote) {
+        // The session's own question cannot be taken back: whatever it is answered with later is not applied.
+        void terminal.then(async () => {
+          $.ui.toast('SmartWorkbench: that question was already answered from the desktop app or the live page; the answer given here was not applied.')
+          await audit($, 'guard.ask-late', { id: call.id, tool: e.tool }).catch(() => undefined)
+        })
+      }
 
       if (answer !== 'Allow' && answer !== 'Allow for session') {
         const durationMs = (await $.clock.now()) - startedAt
         await mutate($, current => model.recordCall(current, { ...call, outcome: 'declined', durationMs }))
         await badge($, { ...call, outcome: 'declined' })
-        await audit($, 'guard.ask', { id: call.id, tool: e.tool, input: call.summary, reason: verdict.reason, answer: 'declined' })
+        await audit($, 'guard.ask', { id: call.id, tool: e.tool, input: call.summary, reason: verdict.reason, answer: 'declined', ...(wasRemote ? { by: first.remote.by } : {}) })
         await emit($, 'tool.end', { id: call.id, outcome: 'declined', ms: durationMs })
 
         return { deny: `The user declined this ${e.tool} call in SmartWorkbench (${verdict.reason}).` }
@@ -3351,6 +3431,7 @@ export const register: Register = on => {
         input: call.summary,
         reason: verdict.reason,
         answer: answer === 'Allow' ? 'allowed' : 'allowed-session',
+        ...(wasRemote ? { by: first.remote.by } : {}),
         ...(answer === 'Allow' || !scope ? {} : { scope: scope.label }),
       })
     }
@@ -3361,6 +3442,11 @@ export const register: Register = on => {
     const isBackgroundImage = isImage && /\s--background\b/.test(e.command)
     const imageBefore = isImage && !isBackgroundImage ? await treeState($) : undefined
 
+    // Anything that could write a command file counts, for the questions that wait for an answer from outside.
+    if (e.tool === 'Bash' || e.tool.startsWith('mcp__')) {
+      runCount++
+      if (e.tool === 'Bash' && (e as unknown as { run_in_background?: unknown }).run_in_background === true) lastBackgroundAt = await $.clock.now()
+    }
     // Allow still goes through Claude Code's own permission check beneath.
     const ran = await next(e)
     try {

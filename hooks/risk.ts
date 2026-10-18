@@ -120,8 +120,8 @@ const BASH_RULES: readonly Rule[] = [
     risk: 'high',
     policy: 'block',
     raw: true,
-    pattern: /\.claude\/smartworkbench-de|smartworkbench-desktop\/(?:key|inbox|ack|state)\b|desktop-channel\.mjs|SWB_DESKTOP_HOME/,
-    reason: "touches the desktop app's key and command inbox",
+    pattern: /\.claude\/smartworkbench-de|smartworkbench-desktop\/(?:key|inbox|ack|state|web-pair)\b|web-pair\.json|desktop-channel\.mjs|SWB_DESKTOP_HOME|(?:127\.0\.0\.1|localhost|\[::1\]):\d+\/(?:ask|pair)\b|live(?:-hub)?\.mjs[^\n]*--approve/,
+    reason: "touches the desktop app's key, command inbox, or the live page's answer endpoint",
   },
   {
     category: 'secret-output',
@@ -264,7 +264,7 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 const SECRET_PATH = /(^|\/)(\.env(?:\.(?!(?:example|sample|template|dist)$)[^/]*)?|\.envrc|\.npmrc|\.netrc|\.pgpass|\.pypirc|\.git-credentials|credentials(\.json)?|id_(?:rsa|dsa|ecdsa|ed25519)[^/]*|[^/]*\.(?:pem|pfx|p12)|\.kube\/config|\.ssh\/(?!known_hosts$|config$)[^/]+)$/i
 const GUARD_FILE = /(^|\/)\.claude\/smartworkbench\.json$/i
 // The app's folder under ~/.claude (or its parts, for a home set elsewhere). A repository that merely carries the name is not touched.
-const DESKTOP_CHANNEL = /(?:\.claude\/smartworkbench-de|smartworkbench-desktop\/(?:key|inbox|ack|state)(?:\/|$))/i
+const DESKTOP_CHANNEL = /(?:\.claude\/smartworkbench-de|smartworkbench-desktop\/(?:key|inbox|ack|state|web-pair)(?:\/|$))/i
 // A glob that reaches for secrets files (**/.env*, **/id_*, *.pem).
 const SECRET_GLOB = /(^|[/*])\.env(?!\.(?:example|sample|template|dist)\b)|\.envrc|\.npmrc|\.netrc|\.pgpass|\.pypirc|\.git-credentials|credentials|id_(?:rsa|dsa|ecdsa|ed25519|\*)|\*\.(?:pem|pfx|p12)\b|\.ssh\/\*/i
 const SEND_TOOL = /(^|_)(send|post|publish|deploy|create_pr|create_pull_request|share|comment|reply|message)/i

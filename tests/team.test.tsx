@@ -34,7 +34,7 @@ type WorldOptions = {
   commands?: Record<string, Run | Run[]>
   answer?: string
   // Answers a guard question from its option labels; the default takes the first.
-  ask?: (labels: string[]) => string
+  ask?: (labels: string[]) => string | Promise<string>
   // Collects the commands (or tool names) that actually ran.
   ran?: string[]
   // Collects every process.run call with its stdin.
@@ -130,11 +130,11 @@ function world(on: On, options: WorldOptions = {}) {
   })
   on('ui.log', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('tool.call', ($, e) => {
+  on('tool.call', async ($, e) => {
     if (e.tool === 'AskUserQuestion') {
       const question = e.questions[0]
       const labels = (question?.options ?? []).map(one => one.label)
-      const answer = options.ask ? options.ask(labels) : (options.answer ?? labels[0] ?? '')
+      const answer = options.ask ? await options.ask(labels) : (options.answer ?? labels[0] ?? '')
       return { result: { questions: e.questions, answers: { [question?.question ?? '']: answer } } }
     }
     const command = 'command' in e ? String(e.command) : String(e.tool)
@@ -2256,11 +2256,11 @@ const DESK = { v: 1, home: '/desk', port: 4317 }
 
 type Taken = { commands?: Array<{ id: string; ops: unknown[] }>; rejected?: Array<{ id: string; reason: string }> }
 
-async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], answer?: string, files: Record<string, string> = { ...DESK_FILES }, onAsk?: () => void, policyWrite?: number | 'throw') {
+async function deskWorld($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], answer?: string, files: Record<string, string> = { ...DESK_FILES }, onAsk?: () => void, policyWrite?: number | 'throw', extra: Partial<WorldOptions> = {}) {
   const seen: Array<{ argv: string[]; stdin?: string }> = []
   const toasts: string[] = []
   const asked: string[] = []
-  const options: { taken?: Taken; desktop: Record<string, unknown>; processed: typeof seen; files: Record<string, string>; toasts: string[]; policyWrite?: number | 'throw'; ask?: (labels: string[]) => string } = { desktop: DESK, processed: seen, files, toasts, policyWrite, ask: labels => (asked.push(labels.join('/')), onAsk?.(), answer ?? labels[0] ?? '') }
+  const options: WorldOptions = { ...extra, desktop: DESK, processed: seen, files, toasts, policyWrite, ask: labels => (asked.push(labels.join('/')), onAsk?.(), extra.ask ? extra.ask(labels) : (answer ?? labels[0] ?? '')) }
   const made = world(on, options)
   await $.session.start(start)
   await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
@@ -2602,6 +2602,78 @@ test('an evidence command is masked before it is cut, so a secret across the cut
   expect(evidence.length).toBeGreaterThan(0)
   expect(JSON.stringify(evidence)).not.toContain('sk98')
   expect(JSON.stringify(evidence)).not.toContain('API_KEY=s')
+})
+
+// A guard question held open, so the app can answer it before the session does.
+async function heldAsk($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], command = 'git push origin main') {
+  let release: (text: string) => void = () => undefined
+  const held = new Promise<string>(done => (release = done))
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const ran: string[] = []
+  const made = await deskWorld($, on, undefined, { ...DESK_FILES, ...FEED_FILES }, undefined, undefined, { ask: () => held, commands: FEED_RUNS, ran })
+  const call = $.tool.call({ tool: 'Bash', command })
+  await waitFor(() => feedLines(made.seen).some(one => one.kind === 'ask.open'))
+  const open = feedLines(made.seen).find(one => one.kind === 'ask.open') as { id: string } | undefined
+  void writes
+
+  return { ...made, ran, release, call, id: open?.id ?? '' }
+}
+
+test('a guard question is answered from the app: the first answer counts, and the answer the session gives later is not applied', async ($, on) => {
+  const { seen, deliver, toasts, ran, release, call, id, workbench } = await heldAsk($, on)
+  expect(id).not.toBe('')
+  await deliver({ commands: [{ id: 'q1', ops: [{ op: 'ask_answer', id, allow: true, by: 'app' }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'q1', status: 'applied' })])
+  await call
+  expect(ran).toEqual(['git push origin main'])
+  expect(feedLines(seen).find(one => one.kind === 'ask.close')).toMatchObject({ id, by: 'app', allow: true })
+  // The session's own question is answered afterwards, with a session allow: it does nothing.
+  release('Allow for session')
+  await waitFor(() => toasts.some(text => text.includes('already answered')))
+  expect(toasts.some(text => text.includes('already answered'))).toBe(true)
+  expect(workbench().execution.recentCalls.map(one => one.sessionAllowed ?? false)).toEqual([false])
+  seen.length = 0
+  await deliver({ commands: [{ id: 'q2', ops: [{ op: 'ask_answer', id, allow: true, by: 'app' }] }, { id: 'q3', ops: [{ op: 'ask_answer', id: 'a-nothing', allow: true, by: 'web' }] }] }, 6)
+  expect(ackOf(seen)).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'q2', status: 'rejected', reason: 'settled' }), expect.objectContaining({ id: 'q3', status: 'rejected', reason: 'no such ask' })]))
+})
+
+test('a guard question answered Block from the app denies the call', async ($, on) => {
+  const { seen, deliver, ran, release, call, id } = await heldAsk($, on)
+  await deliver({ commands: [{ id: 'q1', ops: [{ op: 'ask_answer', id, allow: false, by: 'web' }] }] }, 3)
+  expect(JSON.stringify(await call)).toContain('declined')
+  expect(ran).toEqual([])
+  expect(feedLines(seen).find(one => one.kind === 'ask.close')).toMatchObject({ by: 'web', allow: false })
+  release('Block')
+})
+
+test('an answer from outside is refused once a command ran, after the window, while paused, and for the always-asked kinds', async ($, on) => {
+  // A command ran while the question was open.
+  const first = await heldAsk($, on)
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  await first.deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id: first.id, allow: true, by: 'web' }] }] }, 3)
+  expect(ackOf(first.seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'rejected', reason: 'a command ran meanwhile' })])
+  first.release('Block')
+  await first.call
+})
+
+test('an answer from outside is refused after two minutes', async ($, on) => {
+  const { seen, deliver, release, call, id, clock } = await heldAsk($, on)
+  // The clock steps through its timers, so it is moved past the window before the command arrives.
+  await clock.set(Date.UTC(2026, 9, 8, 1, 2, 30))
+  await new Promise(done => setTimeout(done, 50))
+  await deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id, allow: true, by: 'app' }] }] }, 170)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'rejected', reason: 'expired' })])
+  release('Block')
+  await call
+})
+
+test('a question about the guard itself is answered in the session only', async ($, on) => {
+  const { seen, deliver, release, call, id } = await heldAsk($, on, 'echo x >> .claude/smartworkbench.json')
+  expect(id).not.toBe('')
+  await deliver({ commands: [{ id: 'r1', ops: [{ op: 'ask_answer', id, allow: true, by: 'web' }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'rejected', reason: 'terminal only' })])
+  release('Block')
+  await call
 })
 
 test('the app decides a proposal by its id: a reject needs no question, an approval of a change to a locked contract waits for the person in the session, and an unknown or settled id is refused', async ($, on) => {

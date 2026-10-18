@@ -160,6 +160,27 @@ test('a proposal from Claude can be approved or rejected from the app, by its id
   assert.ok(!buttons(ended.main).some(node => node.textContent === 'Approve' || node.textContent === 'Reject'))
 })
 
+test('a question the session waits on is answered once from the app; one the session will not take from outside only says why', async () => {
+  const data = overview(FILE)
+  data.snaps.s1.asks = [
+    { id: 'a-1', tool: 'Bash', reason: 'pushes code', summary: 'git push origin main', remoteUntil: Date.now() + 60000, remote: true },
+    { id: 'a-2', tool: 'Bash', reason: 'changes the project guard policy', summary: 'edit', remoteUntil: Date.now() + 60000, remote: 'terminal only' },
+  ]
+  const { main, sent } = load(data)
+  await settle()
+  const texts = [...main.walk()].map(node => node.textContent)
+  assert.ok(texts.some(text => text.includes('git push origin main')))
+  assert.equal(buttons(main).filter(node => node.textContent === 'Allow once').length, 1)
+  assert.ok(texts.some(text => text.includes(strings('en').ui.askWhy['terminal only'])))
+  const allow = buttons(main).find(node => node.textContent === 'Allow once')
+  await allow.listeners.click()
+  assert.deepEqual(plain(sent.at(-1)), [{ op: 'ask_answer', id: 'a-1', allow: true, by: 'app' }])
+  assert.ok(buttons(main).filter(node => node.textContent === 'Allow once' || node.textContent === 'Block').every(node => node.disabled))
+  const ended = load({ ...data, rows: [{ id: 's1', name: 'p', alive: false, quiet: false }] })
+  await settle()
+  assert.ok(!buttons(ended.main).some(node => node.textContent === 'Allow once'))
+})
+
 test('the ribbon counts the verified done conditions', async () => {
   const data = overview(FILE)
   data.snaps.s1.task.doneConditions = [{ id: 'a', text: 't', link: null, status: 'verified' }, { id: 'b', text: 'u', link: null, status: 'pending' }]

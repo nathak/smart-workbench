@@ -67,3 +67,8 @@ select option { background: var(--surface); color: var(--text); }
 .tabs .tab:hover:not(:disabled) { background: transparent; border-color: transparent; border-bottom-color: var(--primary); }
 .panel { padding-top: 6px; }
 .foot { margin-top: 8px; border-top: 1px solid var(--line); }
+
+.asks { margin: 0 0 6px; }
+.ask { margin: 0 0 4px; padding: 6px 8px; background: var(--surface); border: 1px solid var(--amber); border-radius: 4px; }
+.ask-t { font: 12px/1.5 var(--mono); color: var(--amber); }
+.ask-s { margin: 2px 0 4px; font: 12px/1.5 var(--mono); color: var(--text); overflow-wrap: anywhere; }

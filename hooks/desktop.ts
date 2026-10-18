@@ -33,7 +33,10 @@ function fileOf(live: Live) {
   }
 }
 
-export function snapshotOf(wb: Workbench, live: Live, at: number) {
+/** A question the session is asking about a guarded call, as the app shows it: `remote` is true when the app may answer, else why not. */
+export type AskView = { id: string; tool: string; reason: string; summary: string; remoteUntil: number; remote: true | string }
+
+export function snapshotOf(wb: Workbench, live: Live, at: number, asks: readonly AskView[] = []) {
   const lastEdit = Math.max(0, ...Object.values(wb.changed.edits ?? {}))
   const evidence: readonly EvidenceRecord[] = wb.evidence
   const team = wb.team
@@ -58,6 +61,7 @@ export function snapshotOf(wb: Workbench, live: Live, at: number) {
     // Which checks ran and how they ended; the command that ran is left out.
     evidence: evidence.slice(-20).map(one => ({ kind: one.kind, ok: one.ok, at: one.at })),
     proposals: (wb.proposals ?? []).filter(one => one.status === 'open').slice(0, 10).map(one => ({ id: one.id, change: one.change, text: one.text === undefined ? null : clean(one.text), reason: clean(one.reason) })),
+    asks: asks.slice(0, 5).map(one => ({ id: one.id, tool: clean(one.tool), reason: clean(one.reason), summary: clean(one.summary), remoteUntil: one.remoteUntil, remote: one.remote })),
     pins: wb.context.pins.length,
     changed: { files: wb.changed.files.length, added: wb.changed.added, removed: wb.changed.removed },
   }
@@ -98,8 +102,8 @@ export function feedStateOf(wb: Workbench, live: Live) {
 }
 
 /** The snapshot as text, or undefined when it cannot be made to fit the limit. */
-export function snapshotText(wb: Workbench, live: Live, at: number): string | undefined {
-  const snap = snapshotOf(wb, live, at)
+export function snapshotText(wb: Workbench, live: Live, at: number, asks: readonly AskView[] = []): string | undefined {
+  const snap = snapshotOf(wb, live, at, asks)
   let text = JSON.stringify(snap)
   // The guard file's rules go first when the text is too big: they are the least needed to read the contract.
   if (bytes(text) > SNAPSHOT_MAX_BYTES && snap.guard.file) text = JSON.stringify({ ...snap, guard: { ...snap.guard, file: { ...snap.guard.file, editable: false, rules: [] } } })
@@ -118,9 +122,10 @@ export type SettingOp =
   | { op: 'set_profile'; profile: 'off' | 'permissive' | 'balanced' | 'strict' }
   | { op: 'pause'; on: boolean }
   | { op: 'proposal_decide'; id: string; accept: boolean }
+  | { op: 'ask_answer'; id: string; allow: boolean; by: 'app' | 'web' }
   | PolicyEditOp
 
-export const isSettingOp = (one: { op: string }): one is SettingOp => isPolicyEditOp(one) || one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause' || one.op === 'proposal_decide'
+export const isSettingOp = (one: { op: string }): one is SettingOp => isPolicyEditOp(one) || one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause' || one.op === 'proposal_decide' || one.op === 'ask_answer'
 
 const PROFILE_RANK = { off: 0, permissive: 1, balanced: 2, strict: 3 } as const
 

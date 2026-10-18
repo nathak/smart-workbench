@@ -208,6 +208,33 @@ function ribbon(row, snap, L) {
   return box
 }
 
+// The guard questions this session is waiting on. The buttons answer once (Allow once or Block); a question the session will not take from outside says why.
+function askBox(row, snap, L, op) {
+  const open = (snap.asks ?? []).filter(a => a && typeof a.id === 'string')
+  if (!row.alive || open.length === 0) return undefined
+  const box = el('div', undefined, 'asks')
+  for (const a of open) {
+    const item = el('div', undefined, 'ask')
+    item.append(el('div', `${L.askTitle}: ${a.tool} — ${a.reason}`, 'ask-t'), el('div', String(a.summary ?? ''), 'ask-s'))
+    if (a.remote === true && Number(a.remoteUntil) > Date.now()) {
+      // One answer per question: both buttons rest once one is pressed.
+      const pair = []
+      const answer = allow => () => {
+        for (const one of pair) one.disabled = true
+        op([{ op: 'ask_answer', id: a.id, allow, by: 'app' }])
+      }
+      pair.push(button(L.askAllow, answer(true), false), button(L.askBlock, answer(false), false))
+      item.append(...pair)
+    } else {
+      const why = a.remote === true ? 'expired' : String(a.remote)
+      item.append(el('div', `${L.askTerminal}${L.askWhy[why] ? ` (${L.askWhy[why]})` : ''}`, 'empty'))
+    }
+    box.append(item)
+  }
+
+  return box
+}
+
 function card(row, snap, L, acks, index = 0) {
   const s = el('section')
   s.append(el('h2', row.name || row.id))
@@ -229,7 +256,10 @@ function card(row, snap, L, acks, index = 0) {
   const team = panels.team
   const guard = panels.guard
 
-  s.append(ribbon(row, snap, L), el('div', `${state} · ${L.rev} ${snap.rev} · ${L.scope[snap.scope] ?? snap.scope} · ${L.status[t.status] ?? t.status}${t.locked ? ` · ${L.locked}` : ''}`, 'meta'))
+  s.append(ribbon(row, snap, L))
+  const waiting = askBox(row, snap, L, op)
+  if (waiting) s.append(waiting)
+  s.append(el('div', `${state} · ${L.rev} ${snap.rev} · ${L.scope[snap.scope] ?? snap.scope} · ${L.status[t.status] ?? t.status}${t.locked ? ` · ${L.locked}` : ''}`, 'meta'))
   if (row.alive) {
     s.append(button(t.locked ? L.unlock : L.lock, () => op([{ op: t.locked ? 'unlock' : 'lock' }]), busy))
     if (t.locked) s.append(el('div', L.lockedNote, 'empty'))
