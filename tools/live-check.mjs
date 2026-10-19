@@ -632,6 +632,8 @@ const trWb = feedOf([
   { kind: 'guard.profile', profile: 'strict' }, { kind: 'wb', goal: 'g2', met: 2, total: 2, conds: [], profile: 'strict' },
 ])
 check(trWb.wb?.goal === 'g2' && trWb.wb.met === 2 && trWb.evid.length === 3 && trWb.evid[0].ok === true && trWb.evid[1].ok === false && trWb.evid[2].ok === null && trWb.evid[0].kind === 'test', 'the latest state line is kept and each evidence line is a result with a known or unknown outcome')
+const trTeam = feedOf([{ kind: 'wb', goal: 'g', roles: { lead: 5, explorer: 'x'.repeat(99), advisor: {} }, efforts: 'high', team: 'yes', codex: 1, codexReview: true, gates: { editLines: 6, editChars: -3, turnLines: 'x', repeat: 1e9 } }])
+check(trTeam.wb.roles.lead === null && trTeam.wb.roles.explorer.length === 40 && trTeam.wb.roles.advisor === null && Object.values(trTeam.wb.efforts).every(v => v === null) && trTeam.wb.team === false && trTeam.wb.codex === false && trTeam.wb.codexReview === true && trTeam.wb.codexRescue === false && trTeam.wb.gates.editLines === 6 && trTeam.wb.gates.editChars === null && trTeam.wb.gates.turnLines === null && trTeam.wb.gates.repeat === 100000, 'the team fields of a state line are given a fixed shape: short texts or null, true only for true, positive numbers or null')
 check(trWb.audit.some(a => a.kind === 'guard.profile') && !trWb.audit.some(a => a.kind === 'wb' || a.kind === 'evidence'), 'guard and team events go to the audit list; the state and evidence lines do not')
 const trRate = feedOf([
   { kind: 'prompt', text: 'a', at: 0 }, { kind: 'tool.start', id: 'r1', tool: 'Read', policy: 'allow', at: 1000 }, { kind: 'tool.start', id: 'r2', tool: 'Read', policy: 'allow', at: 2000 }, { kind: 'turn', at: 60000 },

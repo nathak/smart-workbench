@@ -645,6 +645,8 @@ function clean(text, n){
   var s = String(text == null ? '' : text).replace(/[\u0000-\u001f\u007f‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim();
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
+function roleTexts(v, n){ var o = v && typeof v === 'object' ? v : {}; var r = {}; ['lead', 'explorer', 'advisor'].forEach(function(k){ r[k] = typeof o[k] === 'string' && o[k] ? clean(o[k], n) : null; }); return r; }
+function gateLimits(v){ var o = v && typeof v === 'object' ? v : {}; var r = {}; ['editLines', 'editChars', 'turnLines', 'repeat'].forEach(function(k){ r[k] = Number.isFinite(o[k]) && o[k] > 0 ? Math.min(o[k], 100000) : null; }); return r; }
 var STATUS = Object.assign(Object.create(null), { ok: 'ok', error: 'error', blocked: 'blocked', declined: 'declined', aborted: 'aborted' });
 function newTrace(){
   return { turns: [], spans: new Map(), byAgent: new Map(), pendingAsk: new Map(), attention: [], agentTok: Object.create(null),
@@ -760,6 +762,13 @@ function ingest(tr, ev){
         met: Number(ev.met) || 0,
         total: Number(ev.total) || 0,
         conds: Array.isArray(ev.conds) ? ev.conds.slice(0, 10).filter(function(c){ return c && typeof c === 'object'; }).map(function(c){ return Object.assign({}, c, { id: clean(c.id, 20), t: clean(c.t, 120), s: clean(c.s, 12), link: c.link ? clean(c.link, 20) : null }); }) : [],
+        team: ev.team === true,
+        roles: roleTexts(ev.roles, 40),
+        efforts: roleTexts(ev.efforts, 12),
+        codex: ev.codex === true,
+        codexReview: ev.codexReview === true,
+        codexRescue: ev.codexRescue === true,
+        gates: gateLimits(ev.gates),
       });
       break;
     case 'evidence':
