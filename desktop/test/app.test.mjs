@@ -129,6 +129,7 @@ test('tools are taken from the first directory whose hub has --keep', () => {
   const list = toolCandidates({ env: {}, home, resources: undefined })
   assert.equal(list[0], '/p/1/tools')
   assert.equal(list.includes('/o/tools'), false)
+  assert.equal(toolCandidates({ env: {}, home, resources: '/r' })[0], join('/r', 'tools'))
 })
 
 test('the heartbeat is private and atomic, and the plugin reads it only while fresh', () => {

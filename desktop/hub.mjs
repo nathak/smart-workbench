@@ -8,10 +8,11 @@ import { fileURLToPath } from 'node:url'
 export const DEFAULT_PORT = 4317
 const here = dirname(fileURLToPath(import.meta.url))
 
-/** Directories that may hold tools/live.mjs, best first: an explicit one, the installed plugin, the copy bundled with the app. */
+/** Directories that may hold tools/live.mjs, best first: an explicit one, the copy bundled with the installed app (built with it, so the page and the protocol match the app), the installed plugin, the repository's. */
 export function toolCandidates({ env = process.env, home = homedir(), resources = process.resourcesPath } = {}) {
   const found = []
   if (env.SWB_TOOLS) found.push(env.SWB_TOOLS)
+  if (resources) found.push(join(resources, 'tools'))
   try {
     const list = JSON.parse(readFileSync(join(env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'plugins', 'installed_plugins.json'), 'utf8'))
     for (const [key, entries] of Object.entries(list.plugins ?? {})) {
@@ -21,7 +22,6 @@ export function toolCandidates({ env = process.env, home = homedir(), resources 
   } catch {
     // No plugin list: the bundled copy is used.
   }
-  if (resources) found.push(join(resources, 'tools'))
   found.push(join(here, '..', 'tools'))
   return found
 }
