@@ -3,6 +3,7 @@
 import type { EvidenceRecord, Live, Workbench } from '../types'
 import { statusOf } from './evidence'
 import { codexOf } from './codex'
+import { REPEAT_LIMIT, SMALL_EDIT_CHARS, SMALL_EDIT_LINES, SMALL_TURN_LINES } from './crew'
 import * as model from './model'
 import { isPolicyEditOp, type PolicyEditOp } from './policy-edit'
 import { redact } from './risk'
@@ -98,8 +99,17 @@ export function feedStateOf(wb: Workbench, live: Live) {
     added: wb.changed.added,
     removed: wb.changed.removed,
     team: wb.team?.enabled === true,
+    // The team page's cards. Nested texts are masked here, since the feed masks only top-level ones.
+    roles: { lead: roleText(wb.team?.lead?.model, 40), explorer: roleText(wb.team?.explorer?.model, 40), advisor: roleText(wb.team?.advisor?.model, 40) },
+    efforts: { lead: roleText(wb.team?.lead?.effort, 12), explorer: roleText(wb.team?.explorer?.effort, 12), advisor: roleText(wb.team?.advisor?.effort, 12) },
+    codex: wb.team?.codex?.enabled === true,
+    codexReview: wb.team?.codex?.review === true,
+    codexRescue: wb.team?.codex?.rescue === true,
+    gates: { editLines: SMALL_EDIT_LINES, editChars: SMALL_EDIT_CHARS, turnLines: SMALL_TURN_LINES, repeat: REPEAT_LIMIT },
   }
 }
+
+const roleText = (value: unknown, max: number): string | null => (typeof value === 'string' && value ? redact(value).slice(0, max) : null)
 
 /** The snapshot as text, or undefined when it cannot be made to fit the limit. */
 export function snapshotText(wb: Workbench, live: Live, at: number, asks: readonly AskView[] = []): string | undefined {
