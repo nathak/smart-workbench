@@ -12,6 +12,7 @@ files:
   - i18n.mjs
   - snapshots.mjs
   - preload.cjs
+  - window-preload.cjs
   - ui/**
   - package.json
 # The tools the app runs or imports (the hub, the channel protocol), copied from the repository at build time so they cannot drift.

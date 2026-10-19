@@ -18,6 +18,7 @@ test('the packaged app lists every module the main process loads, and the page, 
   assert.ok(seen.size >= 8)
   for (const file of seen) assert.ok(config.includes(`  - ${file}\n`), `${file} is missing from electron-builder.yml files`)
   assert.ok(config.includes('  - preload.cjs') && config.includes('  - ui/**'))
+  for (const match of readFileSync(join(root, 'main.mjs'), 'utf8').matchAll(/preload: join\(here, '([\w-]+\.cjs)'\)/g)) assert.ok(config.includes(`  - ${match[1]}\n`), `${match[1]} is missing from electron-builder.yml files`)
   assert.ok(config.includes('live*.mjs') && config.includes('live.html') && config.includes('desktop-*.mjs'))
   // The tools the app imports from the repository are the ones shipped beside it.
   assert.match(readFileSync(join(root, 'channel.mjs'), 'utf8'), /\.\.\/tools\/desktop-channel\.mjs/)

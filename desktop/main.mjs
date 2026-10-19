@@ -65,7 +65,7 @@ function show() {
     return
   }
   const origin = `http://127.0.0.1:${PORT}`
-  win = new BrowserWindow({ width: 1200, height: 800, title: 'SmartWorkbench', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+  win = new BrowserWindow({ width: 1200, height: 800, title: 'SmartWorkbench', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(here, 'window-preload.cjs') } })
   win.removeMenu()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   const guard = (event, url) => {
@@ -121,6 +121,15 @@ function showStatus() {
 // What was sent from the window and how the plugin answered: the window shows the last few per session.
 const sent = new Map()
 let key
+
+// Only the main window's own page, in its top frame, may ask for the status window, and it asks for nothing else.
+const fromMain = event => win && !win.isDestroyed() && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame && String(event.senderFrame?.url).startsWith(`http://127.0.0.1:${PORT}/`)
+
+ipcMain.handle('swb:open-status', event => {
+  if (!fromMain(event)) return false
+  showStatus()
+  return true
+})
 
 const fromStatus = event => statusWin && !statusWin.isDestroyed() && event.sender === statusWin.webContents && event.senderFrame === statusWin.webContents.mainFrame
 

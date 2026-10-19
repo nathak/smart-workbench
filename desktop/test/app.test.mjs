@@ -282,6 +282,18 @@ test('the status window page restricts what it loads, and the preload exposes th
   assert.equal([...preload.matchAll(/exposeInMainWorld\('(\w+)'/g)].length, 1)
 })
 
+test('the main window page can open the status window and nothing else: one argument-less call, checked against the window and its top frame', () => {
+  const preload = readFileSync(join(here, '..', 'window-preload.cjs'), 'utf8')
+  assert.equal([...preload.matchAll(/ipcRenderer\.\w+\('([^']+)'/g)].map(one => one[1]).join(), 'swb:open-status')
+  assert.equal([...preload.matchAll(/exposeInMainWorld\('(\w+)'/g)].map(one => one[1]).join(), 'swbApp')
+  assert.ok(/openStatus: \(\) =>/.test(preload) && !/exposeInMainWorld\([\s\S]*ipcRenderer\s*[,}]/.test(preload.replace(/ipcRenderer\.invoke/g, '')))
+  const main = readFileSync(join(here, '..', 'main.mjs'), 'utf8')
+  const handler = main.split("ipcMain.handle('swb:open-status'")[1]?.split('})')[0] ?? ''
+  assert.ok(handler.includes('fromMain(event)') && handler.includes('showStatus()'))
+  assert.ok(/const fromMain = [^\n]*win\.webContents\.mainFrame/.test(main))
+  assert.ok(!/ipcMain\.handle\('swb:(send|overview)'[^\n]*fromMain/.test(main))
+})
+
 test('the app never writes the guard file itself, and its guard file texts come in both languages', async () => {
   const { readFileSync, readdirSync } = await import('node:fs')
   const { fileURLToPath } = await import('node:url')
