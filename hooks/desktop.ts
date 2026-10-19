@@ -133,9 +133,10 @@ export type SettingOp =
   | { op: 'pause'; on: boolean }
   | { op: 'proposal_decide'; id: string; accept: boolean }
   | { op: 'ask_answer'; id: string; allow: boolean; by: 'app' | 'web' }
+  | { op: 'policy_reload' }
   | PolicyEditOp
 
-export const isSettingOp = (one: { op: string }): one is SettingOp => isPolicyEditOp(one) || one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause' || one.op === 'proposal_decide' || one.op === 'ask_answer'
+export const isSettingOp = (one: { op: string }): one is SettingOp => isPolicyEditOp(one) || one.op === 'team_enabled' || one.op === 'codex' || one.op === 'team_role' || one.op === 'set_profile' || one.op === 'pause' || one.op === 'proposal_decide' || one.op === 'ask_answer' || one.op === 'policy_reload'
 
 const PROFILE_RANK = { off: 0, permissive: 1, balanced: 2, strict: 3 } as const
 

@@ -225,3 +225,15 @@ test('guard file edits: only ask and block rules are added, every edit quotes th
   ]) assert.ok(checkOps([bad]).reason, JSON.stringify(bad))
   assert.equal(checkOps([{ op: 'policy_set_profile', base, profile: 'strict' }, { op: 'lock' }]).reason, 'a setting goes alone')
 })
+
+test('policy_reload carries nothing; a template op is cleaned or refused whole', () => {
+  assert.deepEqual(checkOps([{ op: 'policy_reload', path: '/etc/passwd' }]), { ops: [{ op: 'policy_reload' }] })
+  assert.equal(checkOps([{ op: 'policy_reload' }, { op: 'lock' }]).reason, 'a setting goes alone')
+  const template = { goal: ' g ', constraints: [{ text: 'a', priority: 'soft' }], doneConditions: [{ text: 'b', link: 'test' }], extra: 1 }
+  assert.deepEqual(checkOps([{ op: 'policy_set_template', base: null, name: 'bugfix', template }]), { ops: [{ op: 'policy_set_template', base: null, name: 'bugfix', template: { goal: 'g', constraints: [{ text: 'a', priority: 'soft' }], nonGoals: [], doneConditions: [{ text: 'b', link: 'test' }] } }] })
+  assert.deepEqual(checkOps([{ op: 'policy_set_template', base: 'a'.repeat(64), name: 'x', template: null }]), { ops: [{ op: 'policy_set_template', base: 'a'.repeat(64), name: 'x', template: null }] })
+  const many = Array.from({ length: 21 }, () => ({ text: 'a', priority: 'hard' }))
+  for (const bad of [{ name: '__proto__' }, { name: 'constructor' }, { name: 'a b' }, { name: '' }, { base: 'nope' }, { base: undefined }, { template: { constraints: [], doneConditions: [] } }, { template: { ...template, constraints: many } }, { template: { ...template, doneConditions: [{ text: 'b', link: 'rm' }] } }, { template: [] }]) {
+    assert.equal(checkOps([{ op: 'policy_set_template', base: null, name: 'ok', template, ...bad }]).reason, 'bad policy_set_template')
+  }
+})

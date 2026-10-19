@@ -226,6 +226,7 @@ nav.stabs .sb.ask::before{content:"? "}
 .tabpanel[hidden]{display:none}
 .footer{position:sticky;bottom:0;z-index:20;display:flex;flex-wrap:wrap;gap:var(--sp-2) 0;padding:var(--sp-2) var(--sp-5);background:var(--surface);border-top:1px solid var(--border);color:var(--fg-muted);font:var(--fs-xs)/1.5 var(--mono);overflow-wrap:anywhere}
 .mchip{padding:0 var(--sp-3);border:1px solid currentColor;border-radius:var(--r);font-size:var(--fs-xs)}
+.mchips{display:contents}.mchip.other{color:var(--muted)}
 .mchip.sonnet{color:var(--sonnet)}.mchip.opus{color:var(--opus)}.mchip.haiku{color:var(--haiku)}
 .sidenav{position:sticky;top:44px;align-self:start;max-height:calc(100vh - 44px);overflow:auto;background:var(--surface);border-right:1px solid var(--border);padding:var(--sp-4) 0;height:calc(100vh - 44px)}
 .sidenav h2{margin:0 var(--sp-5) var(--sp-3);font:600 var(--fs-xs)/1.4 var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--fg-muted)}
@@ -389,9 +390,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 <div class="page">
   <header class="topbar" id="topbar">
     <span class="brand">SmartWorkbench · Live</span>
-    <span class="mchip sonnet"><i class="dot"></i>Sonnet · <span data-i="lg-lead"></span></span>
-    <span class="mchip opus"><i class="dot"></i>Opus · <span data-i="lg-advisor"></span></span>
-    <span class="mchip haiku"><i class="dot"></i>Haiku · <span data-i="lg-sub"></span></span>
+    <span class="mchips" id="mchips"></span>
     <span class="wbchips" id="wbchips" hidden></span>
     <span class="muted mono" id="sess"></span>
     <span class="muted mono" id="srv"></span>
@@ -646,7 +645,7 @@ if (q) lang = q[1];
 function L(en, ko){ return lang === 'ko' ? ko : en; }
 
 var DICT = {
-  'lg-advisor': ['advisor', '조언자'], 'lg-lead': ['lead', '리드'], 'lg-sub': ['subagents', '서브에이전트'], 'lg-guard': ['guard', '가드'],
+  'lg-guard': ['guard', '가드'],
   'clear': ['clear', '비우기'],
   'o-sub': ['/advisor · reviewer (read-only)', '/advisor · 조언자 (읽기 전용)'], 'o-when': ['called when', '호출 시점'],
   'o-design-l': ['design', '설계'], 'o-plan-l': ['plan', '계획'], 'o-final-l': ['final', '종점검'],
@@ -2490,7 +2489,22 @@ function drawEvidence(){
   drawTable($('e-hist'), [{ label: L('time', '시각') }, { label: T('e-col-kind') }, { label: T('e-col-cmd') }, { label: T('e-col-result') }],
     TR.evid.slice(-10).reverse().map(function(r){ return { cells: [clock(r.at), r.kind, el('code', 'arg', r.command), okPill(r.ok)] }; }), null, null, null, T('e-none'));
 }
+function drawModelChips(){
+  var box = $('mchips'), r = TR.wb && TR.wb.roles;
+  box.textContent = '';
+  if (!r) return;
+  [['lead', L('lead', '리드')], ['advisor', L('advisor', '조언자')], ['explorer', L('explorer', '탐색')]].forEach(function(p){
+    var m = r[p[0]];
+    if (!m) return;
+    var kind = /opus/i.test(m) ? 'opus' : /sonnet/i.test(m) ? 'sonnet' : /haiku/i.test(m) ? 'haiku' : 'other';
+    var c = el('span', 'mchip ' + kind);
+    c.appendChild(el('i', 'dot'));
+    c.appendChild(document.createTextNode(p[1] + ' · ' + m));
+    box.appendChild(c);
+  });
+}
 function drawChips(){
+  drawModelChips();
   var w = TR.wb, box = $('wbchips');
   box.hidden = !w;
   if (!w) return;

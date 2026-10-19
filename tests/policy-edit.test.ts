@@ -89,3 +89,57 @@ describe('editing the guard file', () => {
     expect(editPolicy(FILE, profile(null))).toMatchObject({ summary: 'profile balanced → (none)' })
   })
 })
+
+describe('editing the templates of the guard file', () => {
+  const tpl = (name: string, template: Extract<PolicyEditOp, { op: 'policy_set_template' }>['template'], base: string | null = 'h'): PolicyEditOp => ({ op: 'policy_set_template', base, name, template })
+  const body = { goal: 'fix it', constraints: [{ text: 'no deps', priority: 'hard' as const }, { text: 'small diff', priority: 'soft' as const }], nonGoals: ['refactor'], doneConditions: [{ text: 'tests pass', link: 'test' as const }, { text: 'reviewed' }] }
+  const WITH = `${JSON.stringify({ profile: 'strict', audit: true, requireContract: true, rules: [{ tool: 'Bash', command: 'a', policy: 'block' }], templates: { old: { constraints: ['x'] } }, defaultTemplate: 'old' }, null, 2)}\n`
+  const guardOf = (text: string) => { const p = parsePolicy(text); return JSON.stringify([p.rules, p.profile, p.audit, p.requireContract]) }
+
+  test('a template is added and read back; rules, profile and audit stay as they were', () => {
+    const out = editPolicy(WITH, tpl('bugfix', body))
+    if ('reason' in out) throw new Error(out.reason)
+    const read = parsePolicy(out.text)
+    expect(read.errors).toEqual([])
+    expect(read.templates.map(one => one.name)).toEqual(['old', 'bugfix'])
+    const got = read.templates.find(one => one.name === 'bugfix')
+    expect(got?.constraints).toEqual([{ text: 'no deps', priority: 'hard' }, { text: 'small diff', priority: 'soft' }])
+    expect(got?.doneConditions).toEqual([{ text: 'tests pass', link: 'test' }, { text: 'reviewed' }])
+    expect(guardOf(out.text)).toBe(guardOf(WITH))
+    expect(out.lowers).toBe(false)
+  })
+
+  test('a hard constraint that starts like a priority prefix keeps its meaning', () => {
+    const out = editPolicy(WITH, tpl('t', { constraints: [{ text: 's: odd', priority: 'hard' }], nonGoals: [], doneConditions: [] }))
+    if ('reason' in out) throw new Error(out.reason)
+    expect(parsePolicy(out.text).templates.find(one => one.name === 't')?.constraints).toEqual([{ text: 's: odd', priority: 'hard' }])
+  })
+
+  test('a template is replaced in place and removed; the default one cannot be removed', () => {
+    const replaced = editPolicy(WITH, tpl('old', body))
+    if ('reason' in replaced) throw new Error(replaced.reason)
+    expect(parsePolicy(replaced.text).templates).toHaveLength(1)
+    expect(editPolicy(WITH, tpl('old', null))).toEqual({ reason: 'default template' })
+    expect(editPolicy(WITH, tpl('nope', null))).toEqual({ reason: 'unknown template' })
+    const added = editPolicy(WITH, tpl('b', body))
+    if ('reason' in added) throw new Error(added.reason)
+    const gone = editPolicy(added.text, tpl('b', null))
+    if ('reason' in gone) throw new Error(gone.reason)
+    expect(parsePolicy(gone.text).errors).toEqual([])
+  })
+
+  test('text that looks like a secret is refused, not changed', () => {
+    const out = editPolicy(WITH, tpl('s', { constraints: [{ text: 'use ghp_abcdefghijklmnopqrstuvwxyz0123456789 here', priority: 'hard' }], nonGoals: [], doneConditions: [] }))
+    expect(out).toEqual({ reason: 'looks like a secret' })
+  })
+
+  test('a name that is an object property is refused; a broken file is never rewritten; a missing file is made', () => {
+    expect(editPolicy(WITH, tpl('__proto__', body))).toEqual({ reason: 'invalid' })
+    expect(editPolicy('{ nope', tpl('t', body))).toEqual({ reason: 'policy file is broken' })
+    expect(editPolicy(JSON.stringify({ templates: [] }), tpl('t', body))).toEqual({ reason: 'policy file is broken' })
+    const made = editPolicy(undefined, tpl('t', body, null))
+    if ('reason' in made) throw new Error(made.reason)
+    expect(parsePolicy(made.text).templates.map(one => one.name)).toEqual(['t'])
+    expect(editPolicy(undefined, tpl('t', null, null))).toEqual({ reason: 'stale' })
+  })
+})

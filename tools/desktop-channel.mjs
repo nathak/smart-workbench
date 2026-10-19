@@ -38,7 +38,7 @@ const TEXT_OPS = new Set(['set_goal', 'add_constraint', 'add_done_condition', 'a
 const REMOVE_OPS = new Set(['remove_constraint', 'remove_done_condition'])
 const BARE_OPS = new Set(['lock', 'unlock'])
 // Settings of the session, not of the contract: one per command, so its answer says what happened to it.
-export const SETTING_OPS = new Set(['ask_answer', 'proposal_decide', 'team_enabled', 'team_role', 'codex', 'set_profile', 'pause', 'policy_add_rule', 'policy_remove_rule', 'policy_set_profile'])
+export const SETTING_OPS = new Set(['ask_answer', 'proposal_decide', 'team_enabled', 'team_role', 'codex', 'set_profile', 'pause', 'policy_add_rule', 'policy_remove_rule', 'policy_set_profile', 'policy_set_template', 'policy_reload'])
 const HASH_RE = /^[0-9a-f]{64}$/
 const RULE_FIELD_MAX = 300
 const RULE_REASON_MAX = 200
@@ -54,6 +54,37 @@ const ROLE_NAMES = new Set(['lead', 'explorer', 'advisor'])
 const EFFORT_NAMES = new Set(['default', 'low', 'medium', 'high', 'xhigh', 'max'])
 const PROFILES = new Set(['off', 'permissive', 'balanced', 'strict'])
 const MODEL_RE = /^[A-Za-z0-9._:[\]-]{1,64}$/
+
+const TEMPLATE_NAME_RE = /^[A-Za-z0-9._-]{1,40}$/
+const FORBIDDEN_NAMES = new Set(['__proto__', 'constructor', 'prototype'])
+const TEMPLATE_LIST_MAX = 20
+const LINK_KINDS = new Set(['test', 'build', 'typecheck', 'lint', 'ci'])
+const textOk = value => typeof value === 'string' && value.trim() !== '' && value.length <= TEXT_MAX
+const listOf = (value, each) => {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > TEMPLATE_LIST_MAX) return undefined
+  const out = []
+  for (const one of value) {
+    const got = each(one)
+    if (got === undefined) return undefined
+    out.push(got)
+  }
+  return out
+}
+// A template as the app may send it: plain text and a priority or a link, in short lists. Anything else makes the whole op refused.
+function cleanTemplate(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  if (raw.goal !== undefined && !textOk(raw.goal)) return undefined
+  const constraints = listOf(raw.constraints, one => (one && typeof one === 'object' && textOk(one.text) && (one.priority === 'hard' || one.priority === 'soft') ? { text: one.text.trim(), priority: one.priority } : undefined))
+  const nonGoals = listOf(raw.nonGoals, one => (textOk(one) ? one.trim() : undefined))
+  const doneConditions = listOf(raw.doneConditions, one => {
+    if (!one || typeof one !== 'object' || !textOk(one.text)) return undefined
+    if (one.link !== undefined && !LINK_KINDS.has(one.link)) return undefined
+    return { text: one.text.trim(), ...(one.link !== undefined ? { link: one.link } : {}) }
+  })
+  if (!constraints || !nonGoals || !doneConditions || constraints.length + doneConditions.length === 0) return undefined
+  return { ...(raw.goal !== undefined ? { goal: raw.goal.trim() } : {}), constraints, nonGoals, doneConditions }
+}
 
 /** The ops of a command, cleaned, or a reason it is refused. Nothing outside this list is ever applied. */
 export function checkOps(ops) {
@@ -126,6 +157,19 @@ export function checkOps(ops) {
       const base = one.base === null || (typeof one.base === 'string' && HASH_RE.test(one.base)) ? one.base : undefined
       if (base === undefined || (one.profile !== null && !['permissive', 'balanced', 'strict'].includes(one.profile))) return { reason: 'bad policy_set_profile' }
       clean.push({ op, base, profile: one.profile })
+    } else if (op === 'policy_reload') {
+      // Carries nothing: the session re-reads the file as it is on disk. It cannot change what the file says.
+      clean.push({ op })
+    } else if (op === 'policy_set_template') {
+      const base = one.base === null || (typeof one.base === 'string' && HASH_RE.test(one.base)) ? one.base : undefined
+      if (base === undefined || typeof one.name !== 'string' || !TEMPLATE_NAME_RE.test(one.name) || FORBIDDEN_NAMES.has(one.name)) return { reason: 'bad policy_set_template' }
+      if (one.template === null) {
+        clean.push({ op, base, name: one.name, template: null })
+        continue
+      }
+      const template = cleanTemplate(one.template)
+      if (!template) return { reason: 'bad policy_set_template' }
+      clean.push({ op, base, name: one.name, template })
     } else if (op === 'pause') {
       if (typeof one.on !== 'boolean') return { reason: 'bad pause' }
       clean.push({ op, on: one.on })

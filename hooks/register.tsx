@@ -1740,12 +1740,25 @@ async function ackDesktop($: $, id: string, result: { status: 'applied' | 'rejec
 
 let inboxBusy = false
 
+// "Read the guard file now": the poll that already runs every few ticks, brought forward. It changes nothing in the file and never drops
+// the rules in force (a missing or broken file keeps them), so it needs no question. At most once in five seconds.
+let lastPolicyReload = 0
+async function reloadPolicyNow($: $): Promise<{ status: 'applied' | 'rejected' | 'declined'; reason?: string }> {
+  const now = await $.clock.now()
+  if (now - lastPolicyReload < 5000) return { status: 'rejected', reason: 'too soon' }
+  lastPolicyReload = now
+  const changed = await loadPolicy($, { onlyIfChanged: true })
+  await audit($, 'desktop.policy-reload', { changed, hash: ((await read($, liveAtom)).policy?.hash ?? '').slice(0, 12) })
+  return { status: 'applied' }
+}
+
 // One setting from the app, through the same code as its command. A setting that makes the guard watch less is asked here first,
 // in the session, so a command file alone never loosens it. The question gives up when the command expires.
 async function applySetting($: $, one: SettingOp, expiresAt: number, gen: number, batch: { asked: boolean } = { asked: false }): Promise<{ status: 'applied' | 'rejected' | 'declined'; reason?: string }> {
   const wb = await read($, wbAtom)
   const FROM = 'The desktop app asks: '
   if (one.op === 'ask_answer') return answerAsk($, one)
+  if (one.op === 'policy_reload') return reloadPolicyNow($)
   if (isPolicyEditOp(one)) return applyPolicyEdit($, one, expiresAt, gen, batch)
   if (needsAnswer(wb, one) && !(one.op === 'set_profile' && one.profile === 'off') && one.op !== 'codex') {
     const what = one.op === 'proposal_decide' ? `approve a proposed change to the locked contract${(() => { const found = wb.proposals.find(p => p.id === one.id); return found ? `: ${model.cut(redact(scanned(found.text ?? found.change)), 120)}` : '' })()}` : one.op === 'set_profile' ? `lower the guard from ${wb.execution.profile} to ${one.profile}` : one.op === 'pause' ? 'resume risky calls' : 'turn team mode on (Codex is on, so its reviews will then run without asking)'
