@@ -25,9 +25,11 @@ let followed = false
 const prefsFile = join(app.getPath('userData'), 'prefs.json')
 let prefs = loadPrefs(prefsFile)
 let hubUp = false
+let hubSeen = false
 let rows = []
 let tray
 let win
+let repairWin = () => {}
 let home
 
 const notices = makeNotices({ enabled: () => ({ ask: prefs.notifyAsk, quiet: prefs.notifyQuiet, end: prefs.notifyEnd }) })
@@ -87,6 +89,8 @@ function show() {
   // The hub may not be up yet when the window opens: try again a little later instead of staying on an error page.
   win.webContents.on('did-fail-load', () => setTimeout(() => !win.isDestroyed() && load(), 3000))
   load()
+  // A hub that restarted has forgotten the token: the window loads again with a new code.
+  repairWin = () => !win.isDestroyed() && load()
   // Closing hides: the app and its notifications go on from the tray.
   win.on('close', event => {
     if (!app.isQuitting) {
@@ -228,7 +232,10 @@ app.whenReady().then(() => {
   const hub = superviseHub({
     port: PORT,
     onState: state => {
+      const back = state === 'up' && !hubUp && hubSeen
       hubUp = state === 'up'
+      if (hubUp) hubSeen = true
+      if (back) repairWin()
       refreshMenu()
     },
   })

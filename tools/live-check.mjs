@@ -637,8 +637,10 @@ const trRate = feedOf([
   { kind: 'prompt', text: 'b', at: 60000 }, { kind: 'tool.start', id: 'r3', tool: 'Read', policy: 'allow', at: 61000 }, { kind: 'tool.start', id: 'r4', tool: 'Read', policy: 'allow', at: 62000 }, { kind: 'tool.start', id: 'r5', tool: 'Read', policy: 'allow', at: 63000 }, { kind: 'turn', at: 120000 },
 ])
 check(M.kpis(trRate, 120000).rateDelta === 50 && M.kpis(feedOf([{ kind: 'prompt', text: 'a' }]), 5000).rateDelta === null, 'the rate is compared with the previous turn, and a single turn has nothing to compare with')
-const { gitOf } = await import('./live-git.mjs')
-check(gitOf('relative/path') === null && gitOf(join(tmpdir(), 'swb-no-such-dir-x')) === null && (!existsSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.git')) || typeof gitOf(join(dirname(fileURLToPath(import.meta.url)), '..'))?.branch === 'string'), 'the branch comes only for an absolute path that is a git repository')
+const { gitOf, gitRefresh } = await import('./live-git.mjs')
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+await gitRefresh(repoRoot); await gitRefresh(join(tmpdir(), 'swb-no-such-dir-x'))
+check(gitOf('relative/path') === null && gitOf(join(tmpdir(), 'swb-no-such-dir-x')) === null && (!existsSync(join(repoRoot, '.git')) || typeof gitOf(repoRoot)?.branch === 'string'), 'the branch comes only for an absolute path that is a git repository')
 const tr2 = feedOf([
   { kind: 'prompt', text: 'p' },
   { kind: 'tool.start', id: 'A', tool: 'Agent', subagent: 'x:explorer' },

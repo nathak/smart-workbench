@@ -2596,12 +2596,13 @@ test('an evidence command is masked before it is cut, so a secret across the cut
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
   await $.session.start(start)
-  const command = `npm test -- ${'a'.repeat(95)} API_KEY=sk9876543210fedcba`
+  // A bare token: a fragment of it left by the cut is too short for the masking to know it, so only masking before the cut hides it.
+  const command = `npm test -- ${'a'.repeat(98)} ghp_abcdefghijklmnopqrstuvwxyz0123456789`
   await $.tool.call({ tool: 'Bash', command })
   const evidence = feedLines(writes).filter(one => one.kind === 'evidence')
   expect(evidence.length).toBeGreaterThan(0)
-  expect(JSON.stringify(evidence)).not.toContain('sk98')
-  expect(JSON.stringify(evidence)).not.toContain('API_KEY=s')
+  expect(JSON.stringify(evidence)).not.toContain('ghp_')
+  expect(JSON.stringify(evidence)).not.toContain('abcde')
 })
 
 // A guard question held open, so the app can answer it before the session does.

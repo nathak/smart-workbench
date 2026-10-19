@@ -18,6 +18,10 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 - `/swb notify on|off`: when the guard asks for your answer, a notification goes through your terminal's notification channel (tool and reason only, never the command); on by default.
 - The live view tells a session that stopped beating but whose process still runs (asleep, stopped or busy) from one that ended: its tab says so and has no close button.
 
+### Changed
+- The live view reads the git branch in the background, so a slow repository no longer holds the server; the first answer after a start has no branch and the next poll has it.
+- The desktop app's window loads again with a new pairing code when the hub comes back after a restart, so answering a guard question from the page keeps working.
+
 ## [0.19.0] - 2026-10-16
 
 ### Added
