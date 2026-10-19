@@ -50,8 +50,6 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [0.17.0] - 2026-10-13
 
-## [0.17.0] - 2026-10-13
-
 ### Fixed
 - Project files read or written through the engine (guard file, audit log, pins, share and handoff files) and the `git`/`gh` calls are given from the project root too, since relative paths and commands follow the shell's directory.
 - Everything the mod keeps or reads by project (the live feed and its process note, the task state, the guard file, the handoff and share files, the live server's folder) used the session's current directory, which follows a shell `cd`. After a command like `cd assets/x && ...` the live feed, prompts, turns and calls were silently not written until the shell came back, and the task contract looked empty. They now use the project root.

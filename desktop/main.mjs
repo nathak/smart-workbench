@@ -87,7 +87,7 @@ function show() {
     void win.loadURL(`${origin}/${code ? `#pair=${code}` : ''}`).catch(() => {})
   }
   // The hub may not be up yet when the window opens: try again a little later instead of staying on an error page.
-  win.webContents.on('did-fail-load', () => setTimeout(() => !win.isDestroyed() && load(), 3000))
+  win.webContents.on('did-fail-load', (_event, code) => code !== -3 && setTimeout(() => !win.isDestroyed() && load(), 3000))
   load()
   // A hub that restarted has forgotten the token: the window loads again with a new code.
   repairWin = () => !win.isDestroyed() && load()

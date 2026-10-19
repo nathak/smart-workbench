@@ -640,6 +640,7 @@ check(M.kpis(trRate, 120000).rateDelta === 50 && M.kpis(feedOf([{ kind: 'prompt'
 const { gitOf, gitRefresh } = await import('./live-git.mjs')
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 await gitRefresh(repoRoot); await gitRefresh(join(tmpdir(), 'swb-no-such-dir-x'))
+{ const fresh = join(tmpdir(), 'swb-git-dedupe'); const one = gitRefresh(fresh); check(gitRefresh(fresh) === one && gitOf(fresh) === null, 'two refreshes for one project share a single run, and the answer before the first one is null'); await one }
 check(gitOf('relative/path') === null && gitOf(join(tmpdir(), 'swb-no-such-dir-x')) === null && (!existsSync(join(repoRoot, '.git')) || typeof gitOf(repoRoot)?.branch === 'string'), 'the branch comes only for an absolute path that is a git repository')
 const tr2 = feedOf([
   { kind: 'prompt', text: 'p' },
