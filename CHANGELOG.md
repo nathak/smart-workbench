@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-19
+
 ### Added
 - The status window can ask the session to re-read the guard file now (`policy_reload`: the poll that already runs, brought forward; it changes nothing and never drops the rules in force) and edit the templates of the guard file (`policy_set_template`). A template edit writes only the `templates` key; the rules, profile, audit and contract settings are checked to read the same afterwards, and text that looks like a secret is refused. The audit trail and the ledger stay read-only.
 - The top-bar model chips of the live page are drawn from the roles of the state line (role and model as set), not fixed to Sonnet, Opus and Haiku.
