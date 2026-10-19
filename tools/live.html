@@ -816,6 +816,8 @@ function ingest(tr, ev){
         met: Number(ev.met) || 0,
         total: Number(ev.total) || 0,
         conds: Array.isArray(ev.conds) ? ev.conds.slice(0, 10).filter(function(c){ return c && typeof c === 'object'; }).map(function(c){ return Object.assign({}, c, { id: clean(c.id, 20), t: clean(c.t, 120), s: clean(c.s, 12), link: c.link ? clean(c.link, 20) : null }); }) : [],
+        rules: Number(ev.rules) || 0,
+        paused: ev.paused === true,
         team: ev.team === true,
         roles: roleTexts(ev.roles, 40),
         efforts: roleTexts(ev.efforts, 12),
@@ -2558,7 +2560,7 @@ function drawGuard(){
         });
       }
       if (rec && rec.msg) aa.appendChild(el('span', 'muted', rec.msg));
-      var go = el('button', null, L('go to call', '호출로 이동')); go.onclick = function(){ gotoCall(selKey('call', it.sp.id)); };
+      var go = el('button', null, L('go to call', '호출로 이동')); go.dataset.fk = 'ask-go-' + it.sp.id; go.onclick = function(){ gotoCall(selKey('call', it.sp.id)); };
       aa.appendChild(go);
       box.appendChild(aa);
     } else {
@@ -2808,7 +2810,7 @@ function tabsBuild(){
   $('k-fail').onclick = function(){ showTab('timeline'); setQuery('is:fail'); };
   $('k-ask').onclick = function(){ showTab('guard'); };
   // Only the desktop app's own window has this call (a preload of its own); in a browser the button stays hidden.
-  if (window.swbApp && typeof window.swbApp.openStatus === 'function') { $('appstatus').hidden = false; $('appstatus').onclick = function(){ window.swbApp.openStatus(); }; }
+  if (window.swbApp && typeof window.swbApp.openStatus === 'function') { var openApp = function(){ window.swbApp.openStatus(); }; $('appstatus').hidden = false; $('appstatus').onclick = openApp; $('g-open-status').hidden = false; $('g-open-status').onclick = openApp; }
   $('theme').onclick = function(){ theme = theme === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', theme); store('swb-theme', theme); translate(); };
 }
 function translate(){
