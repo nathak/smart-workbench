@@ -188,3 +188,56 @@ test('the ribbon counts the verified done conditions', async () => {
   await settle()
   assert.ok([...main.walk()].some(node => node.textContent === 'Done 1/2'))
 })
+
+const TPL = { nameOk: true, whole: true, name: 'bugfix', goal: 'fix it', constraints: [{ text: 'no deps', priority: 'hard' }, { text: 'small', priority: 'soft' }], nonGoals: ['refactor'], doneConditions: [{ text: 'tests pass', link: 'test' }, { text: 'reviewed' }] }
+
+test('the re-read button sends a bare policy_reload, and a template is saved from its lines with the hash of the file and removed by name', async () => {
+  const { main, sent } = load(overview({ ...FILE, templates: [TPL, { ...TPL, name: 'dflt' }], defaultTemplate: 'dflt' }))
+  await settle()
+  await labelled(main, 'Re-read').listeners.click()
+  assert.deepEqual(plain(sent.at(-1)), [{ op: 'policy_reload' }])
+  const remove = buttons(main).filter(node => node.textContent.startsWith('Remove'))
+  assert.equal(remove.filter(node => node.disabled).length, 1, 'the default template cannot be removed')
+  await remove.filter(node => !node.disabled && node.textContent === 'Remove').at(-1).listeners.click()
+  assert.deepEqual(plain(sent.at(-1)), [{ op: 'policy_set_template', base: HASH, name: 'bugfix', template: null }])
+  const fields = [...main.walk()].filter(node => node.tag === 'input' || node.tag === 'textarea')
+  const byHint = hint => fields.find(node => node.placeholder?.startsWith(hint))
+  byHint('template name').value = 'feature'
+  byHint('constraints').value = 's: small diff\nno new deps\n'
+  byHint('done conditions').value = 'tests pass @test\nreviewed'
+  await labelled(main, 'Save template').listeners.click()
+  assert.deepEqual(plain(sent.at(-1)), [{ op: 'policy_set_template', base: HASH, name: 'feature', template: { constraints: [{ text: 'small diff', priority: 'soft' }, { text: 'no new deps', priority: 'hard' }], nonGoals: [], doneConditions: [{ text: 'tests pass', link: 'test' }, { text: 'reviewed' }] } }])
+})
+
+test('a template with nothing to check, or a file that cannot be edited, sends nothing', async () => {
+  const { main, sent } = load(overview({ ...FILE, templates: [] }))
+  await settle()
+  const before = sent.length
+  const fields = [...main.walk()].filter(node => node.tag === 'input' || node.tag === 'textarea')
+  fields.find(node => node.placeholder?.startsWith('template name')).value = 'x'
+  await labelled(main, 'Save template').listeners.click()
+  assert.equal(sent.length, before)
+  const off = load(overview({ ...FILE, editable: false, templates: [TPL] }))
+  await settle()
+  assert.ok(labelled(off.main, 'Save template').disabled)
+})
+
+test('Edit fills the form with the template as the file holds it, a hard text that looks like a prefix keeps its meaning, and a partial one cannot be edited', async () => {
+  const odd = { ...TPL, name: 'odd', constraints: [{ text: 's: odd', priority: 'hard' }, { text: 'soft one', priority: 'soft' }] }
+  const partial = { ...TPL, name: 'cut', whole: false }
+  const { main, sent } = load(overview({ ...FILE, templates: [odd, partial] }))
+  await settle()
+  const edits = buttons(main).filter(node => node.textContent === 'Edit')
+  assert.equal(edits.length, 2)
+  assert.equal(edits[0].disabled, false)
+  assert.equal(edits[1].disabled, true)
+  await edits[0].listeners.click()
+  await settle()
+  const fields = [...main.walk()].filter(node => node.tag === 'input' || node.tag === 'textarea')
+  const byHint = hint => fields.find(node => node.placeholder?.startsWith(hint))
+  assert.equal(byHint('template name').value, 'odd')
+  assert.equal(byHint('constraints').value, 'h: s: odd\ns: soft one')
+  assert.equal(byHint('done conditions').value, 'tests pass @test\nreviewed')
+  await labelled(main, 'Save template').listeners.click()
+  assert.deepEqual(plain(sent.at(-1))[0].template.constraints, [{ text: 's: odd', priority: 'hard' }, { text: 'soft one', priority: 'soft' }])
+})

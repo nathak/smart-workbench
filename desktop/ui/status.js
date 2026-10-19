@@ -96,6 +96,64 @@ function ruleForm(session, L, op, base, disabled) {
   return box
 }
 
+// Templates of the guard file: one line per item. A constraint that starts with "s:" is soft; a done condition may end with " @test"
+// (build, typecheck, lint, ci) to link it to that kind of evidence. Saving a template changes nothing else in the file.
+const LINKS = ['test', 'build', 'typecheck', 'lint', 'ci']
+const linesOf = text => text.split('\n').map(one => one.trim()).filter(Boolean)
+function templateFrom(fields) {
+  const constraints = linesOf(fields.constraints).map(line => (/^s\s*:/i.test(line) ? { text: line.replace(/^s\s*:\s*/i, '').trim(), priority: 'soft' } : { text: line.replace(/^h\s*:\s*/i, '').trim(), priority: 'hard' })).filter(one => one.text)
+  const doneConditions = linesOf(fields.doneConditions).map(line => {
+    const found = /^(.*\S)\s+@(\w+)$/.exec(line)
+    return found && LINKS.includes(found[2]) ? { text: found[1], link: found[2] } : { text: line }
+  })
+  const goal = fields.goal.trim()
+  return { ...(goal ? { goal } : {}), constraints, nonGoals: linesOf(fields.nonGoals), doneConditions }
+}
+const textOfTemplate = one => ({
+  goal: one.goal ?? '',
+  // A hard text that starts like a priority prefix is written with its own "h:", as the plugin writes it, so it reads back the same.
+  constraints: one.constraints.map(item => (item.priority === 'soft' ? `s: ${item.text}` : /^\s*[hs]\s*:/i.test(item.text) ? `h: ${item.text}` : item.text)).join('\n'),
+  nonGoals: one.nonGoals.join('\n'),
+  doneConditions: one.doneConditions.map(item => (item.link ? `${item.text} @${item.link}` : item.text)).join('\n'),
+})
+
+function templateEditor(session, file, L, op, disabled) {
+  const box = el('div')
+  const templates = file.templates ?? []
+  box.append(list(L.templates, templates, one => {
+    const li = el('li', `${one.name}${file.defaultTemplate === one.name ? ` (${L.tplDefault})` : ''} — ${one.constraints.length} / ${one.doneConditions.length}${one.nameOk && one.whole ? '' : ` · ${L.tplPartial}`} `)
+    li.append(button(L.tplEdit, () => {
+      for (const [key, value] of Object.entries({ name: one.name, ...textOfTemplate(one) })) drafts.set(`${session}:tpl:${key}`, value)
+      void refresh(true)
+    }, disabled || !one.nameOk || !one.whole))
+    li.append(button(L.remove, () => op([{ op: 'policy_set_template', base: file.hash, name: one.name, template: null }]), disabled || !one.nameOk || file.defaultTemplate === one.name))
+    return li
+  }))
+  const form = el('div', undefined, 'tplform')
+  const fields = {}
+  for (const [key, tag] of [['name', 'input'], ['goal', 'input'], ['constraints', 'textarea'], ['nonGoals', 'textarea'], ['doneConditions', 'textarea']]) {
+    const input = el(tag)
+    if (tag === 'input') input.type = 'text'
+    else input.rows = 3
+    input.placeholder = L.tplHints[key]
+    input.maxLength = key === 'name' ? 40 : 4000
+    input.disabled = disabled
+    const draft = `${session}:tpl:${key}`
+    input.value = drafts.get(draft) ?? ''
+    input.addEventListener('input', () => drafts.set(draft, input.value))
+    fields[key] = input
+    form.append(input)
+  }
+  form.append(button(L.tplSave, async () => {
+    const name = fields.name.value.trim()
+    const template = templateFrom({ goal: fields.goal.value, constraints: fields.constraints.value, nonGoals: fields.nonGoals.value, doneConditions: fields.doneConditions.value })
+    if (!name || template.constraints.length + template.doneConditions.length === 0) return
+    if (await op([{ op: 'policy_set_template', base: file.hash, name, template }])) for (const key of Object.keys(fields)) drafts.delete(`${session}:tpl:${key}`)
+  }, disabled))
+  box.append(form, el('div', L.tplNote, 'empty'))
+  return box
+}
+
 function guardFile(row, file, L, op, busy) {
   const box = el('div')
   box.append(el('h3', L.guardFile), el('div', `${file.profile ? `${L.fileProfile} ${file.profile}` : L.noFileProfile}${file.errors ? ` · ⚠ ${file.errors}` : ''}`))
@@ -105,6 +163,7 @@ function guardFile(row, file, L, op, busy) {
   const rank = name => ['permissive', 'balanced', 'strict'].indexOf(name)
   for (const profile of ['permissive', 'balanced', 'strict']) bar.append(button(rank(profile) < rank(file.profile) ? `${profile} (${L.asksInSession})` : profile, () => op([{ op: 'policy_set_profile', base: file.hash, profile }]), off || file.profile === profile))
   if (file.profile) bar.append(button(`${L.clearProfile} (${L.asksInSession})`, () => op([{ op: 'policy_set_profile', base: file.hash, profile: null }]), off))
+  bar.append(button(L.reloadFile, () => op([{ op: 'policy_reload' }]), busy))
   box.append(bar)
   box.append(list(L.fileRules, file.rules, rule => {
     const text = RULE_KEYS.filter(key => rule[key]).map(key => `${key}=${rule[key]}`).join(' ')
@@ -112,7 +171,7 @@ function guardFile(row, file, L, op, busy) {
     li.append(button(rule.policy === 'allow' ? L.remove : `${L.remove} (${L.asksInSession})`, () => op([{ op: 'policy_remove_rule', base: file.hash, index: rule.i, policy: rule.policy }]), off))
     return li
   }))
-  box.append(ruleForm(row.id, L, op, file.hash, off), el('div', L.policyNote, 'empty'))
+  box.append(ruleForm(row.id, L, op, file.hash, off), el('div', L.policyNote, 'empty'), templateEditor(row.id, file, L, op, off))
   return box
 }
 

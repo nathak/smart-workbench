@@ -133,6 +133,12 @@ describe('editing the templates of the guard file', () => {
     expect(out).toEqual({ reason: 'looks like a secret' })
   })
 
+  test('a secret in the name or in a text with quotes is refused', () => {
+    const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789'
+    expect(editPolicy(WITH, tpl(token.slice(0, 40), body))).toEqual({ reason: 'looks like a secret' })
+    expect(editPolicy(WITH, tpl('q', { ...body, constraints: [{ text: 'password="hunter2hunter2" now', priority: 'hard' }] }))).toEqual({ reason: 'looks like a secret' })
+  })
+
   test('a name that is an object property is refused; a broken file is never rewritten; a missing file is made', () => {
     expect(editPolicy(WITH, tpl('__proto__', body))).toEqual({ reason: 'invalid' })
     expect(editPolicy('{ nope', tpl('t', body))).toEqual({ reason: 'policy file is broken' })

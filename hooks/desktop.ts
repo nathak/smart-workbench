@@ -12,6 +12,8 @@ export const SNAPSHOT_VERSION = 1
 export const SNAPSHOT_MAX_BYTES = 64 * 1024
 const TEXT_MAX = 600
 const LIST_MAX = 40
+const TEMPLATES_SHOWN = 20
+const TEMPLATE_LIST = 20
 
 const bytes = (text: string): number => new TextEncoder().encode(text).length
 const clean = (text: string): string => redact(text).slice(0, TEXT_MAX)
@@ -24,12 +26,27 @@ function fileOf(live: Live) {
   const policy = live.policy
   if (!policy) return null
   const cut = (text: string | undefined): string | null => (text === undefined ? null : redact(text).slice(0, 200))
+  const kept = (text: string | undefined): boolean => text === undefined || (text.length <= 200 && redact(text) === text)
+  const whole = (one: (typeof policy.templates)[number]): boolean =>
+    kept(one.goal) && one.constraints.length <= TEMPLATE_LIST && one.nonGoals.length <= TEMPLATE_LIST && one.doneConditions.length <= TEMPLATE_LIST &&
+    one.constraints.every(item => kept(item.text)) && one.nonGoals.every(item => kept(item)) && one.doneConditions.every(item => kept(item.text))
 
   return {
     hash: policy.hash ?? null,
     profile: policy.profile ?? null,
     editable: policy.hash !== undefined && policy.ruleAt !== undefined && !policy.errors.some(one => one.startsWith('not valid JSON') || one.startsWith('expected an object') || one.startsWith('rules must')),
     errors: policy.errors.length,
+    defaultTemplate: policy.defaultTemplate ?? null,
+    templates: policy.templates.slice(0, TEMPLATES_SHOWN).map(one => ({
+      name: redact(one.name).slice(0, 40),
+      // The name and every text as the file holds them (nothing cut, masked or left out): only then can the app write the template back.
+      nameOk: /^[A-Za-z0-9._-]{1,40}$/.test(one.name) && redact(one.name) === one.name,
+      whole: whole(one),
+      goal: cut(one.goal),
+      constraints: one.constraints.slice(0, TEMPLATE_LIST).map(item => ({ text: cut(item.text) ?? '', priority: item.priority })),
+      nonGoals: one.nonGoals.slice(0, TEMPLATE_LIST).map(item => cut(item) ?? ''),
+      doneConditions: one.doneConditions.slice(0, TEMPLATE_LIST).map(item => ({ text: cut(item.text) ?? '', ...(item.link ? { link: item.link } : {}) })),
+    })),
     rules: policy.rules.slice(0, LIST_MAX).map((one, at) => ({ i: policy.ruleAt?.[at] ?? at, policy: one.policy, tool: cut(one.tool), command: cut(one.command), path: cut(one.path), reason: cut(one.reason) })),
   }
 }
@@ -116,10 +133,10 @@ export function snapshotText(wb: Workbench, live: Live, at: number, asks: readon
   const snap = snapshotOf(wb, live, at, asks)
   let text = JSON.stringify(snap)
   // The guard file's rules go first when the text is too big: they are the least needed to read the contract.
-  if (bytes(text) > SNAPSHOT_MAX_BYTES && snap.guard.file) text = JSON.stringify({ ...snap, guard: { ...snap.guard, file: { ...snap.guard.file, editable: false, rules: [] } } })
-  if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], guard: { ...snap.guard, file: snap.guard.file && { ...snap.guard.file, editable: false, rules: [] } }, task: { ...snap.task, constraints: snap.task.constraints.slice(0, 10), doneConditions: snap.task.doneConditions.slice(0, 10), nonGoals: [] } })
+  if (bytes(text) > SNAPSHOT_MAX_BYTES && snap.guard.file) text = JSON.stringify({ ...snap, guard: { ...snap.guard, file: { ...snap.guard.file, editable: false, rules: [], templates: [] } } })
+  if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], guard: { ...snap.guard, file: snap.guard.file && { ...snap.guard.file, editable: false, rules: [], templates: [] } }, task: { ...snap.task, constraints: snap.task.constraints.slice(0, 10), doneConditions: snap.task.doneConditions.slice(0, 10), nonGoals: [] } })
 
-  if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], guard: { ...snap.guard, file: snap.guard.file && { ...snap.guard.file, editable: false, rules: [] } }, task: { ...snap.task, goal: snap.task.goal.slice(0, 200), constraints: [], doneConditions: snap.task.doneConditions.slice(0, 5).map(one => ({ ...one, text: one.text.slice(0, 100) })), nonGoals: [] } })
+  if (bytes(text) > SNAPSHOT_MAX_BYTES) text = JSON.stringify({ ...snap, evidence: [], proposals: [], guard: { ...snap.guard, file: snap.guard.file && { ...snap.guard.file, editable: false, rules: [], templates: [] } }, task: { ...snap.task, goal: snap.task.goal.slice(0, 200), constraints: [], doneConditions: snap.task.doneConditions.slice(0, 5).map(one => ({ ...one, text: one.text.slice(0, 100) })), nonGoals: [] } })
 
   return bytes(text) > SNAPSHOT_MAX_BYTES ? undefined : text
 }

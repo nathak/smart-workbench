@@ -74,3 +74,5 @@ select option { background: var(--surface); color: var(--text); }
 .ask button:first-of-type { border-color: var(--primary); color: var(--primary); }
 .ask-t { font: 12px/1.5 var(--mono); color: var(--amber); }
 .ask-s { margin: 2px 0 4px; font: 12px/1.5 var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.tplform { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; }
+.tplform input, .tplform textarea { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }

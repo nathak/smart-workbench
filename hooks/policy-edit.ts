@@ -99,8 +99,10 @@ export function editPolicy(original: string | undefined, op: PolicyEditOp): Poli
         nonGoals: op.template.nonGoals,
         doneConditions: op.template.doneConditions.map(one => (one.link ? { text: one.text, link: one.link } : one.text)),
       }
-      // A shared file is read by the team: text that looks like a secret is refused, not quietly changed.
-      if (redact(JSON.stringify(written)) !== JSON.stringify(written)) return { reason: 'looks like a secret' }
+      // A shared file is read by the team: text that looks like a secret is refused, not quietly changed. Each text is checked as it is
+      // (escaping inside a JSON string could hide a pattern), and so is the name.
+      const texts = [op.name, op.template.goal ?? '', ...op.template.constraints.map(one => one.text), ...op.template.nonGoals, ...op.template.doneConditions.map(one => one.text)]
+      if (texts.some(text => redact(text) !== text)) return { reason: 'looks like a secret' }
       templates[op.name] = written
       summary = `save template ${op.name}`
     }

@@ -2408,6 +2408,37 @@ test('the app adds an ask or block rule to the guard file without a question, an
   expect(JSON.stringify(blocked)).toContain('releases are manual')
 })
 
+test('the app saves a template of the guard file without a question and leaves the rules as they were; a secret in it is refused', async ($, on) => {
+  const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
+  const { seen, deliver, asked } = await deskWorld($, on, 'Allow', files)
+  const template = { goal: 'fix it', constraints: [{ text: 'no deps', priority: 'hard' }], nonGoals: [], doneConditions: [{ text: 'tests pass', link: 'test' }] }
+  await deliver({ commands: [{ id: 't1', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_set_template', base: await sha256(POLICY_FILE), name: 'bugfix', template }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 't1', status: 'applied' })])
+  expect(asked).toEqual([])
+  expect(after(files).templates.bugfix.constraints).toEqual(['no deps'])
+  expect(after(files).rules).toEqual(JSON.parse(POLICY_FILE).rules)
+  expect(after(files).profile).toBe('balanced')
+  seen.length = 0
+  const written = files[POLICY_AT]
+  await deliver({ commands: [{ id: 't2', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_set_template', base: await sha256(written ?? ''), name: 'leak', template: { ...template, goal: 'use ghp_abcdefghijklmnopqrstuvwxyz0123456789' } }] }] }, 6)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 't2', status: 'rejected', reason: 'looks like a secret' })])
+  expect(files[POLICY_AT]).toBe(written)
+})
+
+test('the app can ask the session to re-read the guard file now, and the changed rules are in force at once', async ($, on) => {
+  const files: Record<string, string> = { ...DESK_FILES, [POLICY_AT]: JSON.stringify({ ...JSON.parse(POLICY_FILE), audit: true }) }
+  const { seen, deliver, file } = await deskWorld($, on, 'Allow', files)
+  files[POLICY_AT] = (files[POLICY_AT] ?? '').replace('CI only', 'changed on disk')
+  await deliver({ commands: [{ id: 'r1', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_reload' }] }] }, 3)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'r1', status: 'applied' })])
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: 'terraform apply' }))).toContain('changed on disk')
+  // A second ask right away is turned away, not run again.
+  seen.length = 0
+  await deliver({ commands: [{ id: 'r2', expiresAt: Date.UTC(2026, 9, 8, 2, 0, 0), ops: [{ op: 'policy_reload' }] }] }, 5)
+  expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'r2', status: 'rejected', reason: 'too soon' })])
+  expect(file('.claude/smartworkbench-audit.jsonl') ?? '').toContain('desktop.policy-reload')
+})
+
 test('an edit made from an old view of the guard file changes nothing', async ($, on) => {
   const files = { ...DESK_FILES, [POLICY_AT]: POLICY_FILE }
   const { seen, deliver } = await deskWorld($, on, 'Allow', files)
