@@ -565,6 +565,7 @@ const dupes = ids.filter((id, i) => ids.indexOf(id) !== i)
 check(dupes.length === 0, `no id appears twice${dupes.length ? ' (' + [...new Set(dupes)].join(', ') + ')' : ''}`)
 check(!/\bsrc=|href="https?:|@import|url\(/.test(page), 'the page loads nothing from outside')
 check(!/\son[a-z]+=/.test(page.slice(0, page.indexOf('<script>'))), 'no inline event handler attributes')
+check(/<button id="appstatus" hidden>/.test(page) && /typeof window\.swbApp\.openStatus === 'function'\) \{ \$\('appstatus'\)\.hidden = false/.test(page) && (page.match(/swbApp\.openStatus\(/g) ?? []).length === 1, 'the status button is hidden unless the desktop app window offers the call, and the page calls only that one function')
 check(page.includes('role="tablist"') && page.includes('role="tab"') && page.includes('role="tabpanel"'), 'the views are tabs with tab and tabpanel roles')
 
 const tokens = theme => {

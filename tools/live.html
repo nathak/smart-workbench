@@ -371,6 +371,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <span class="muted mono" id="sess"></span>
     <span class="muted mono" id="srv"></span>
     <span class="grow">
+      <button id="appstatus" hidden></button>
       <button id="theme"></button>
       <button id="clear" data-i="clear"></button>
     </span>
@@ -626,7 +627,7 @@ var DICT = {
   'tl-q-ph': ['search · tool:Bash -policy:allow "npm test" ms:>500 is:fail', '검색 · tool:Bash -policy:allow "npm test" ms:>500 is:fail'], 'tl-crit-l': ['◆ critical path', '◆ 임계 경로'], 'tl-zoom-l': ['reset zoom', '확대 해제'],
   'h-title': ['Keyboard and search', '키보드와 검색'], 'h-keys': ['Keys', '단축키'], 'h-query': ['Search words (Timeline)', '검색어 (타임라인)'], 'h-off': ['Turn off single-key shortcuts', '한 글자 단축키 끄기'], 'h-close': ['Close', '닫기'],
   'h-note': ['Shortcuts do nothing while you type in a field or hold Ctrl, Alt or ⌘.', '입력창에 글을 쓰는 중이거나 Ctrl·Alt·⌘를 누른 동안에는 단축키가 동작하지 않습니다.'],
-  'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Run & guard', '실행·가드'], 'tab-agents': ['Team mode', '팀 모드'],
+  'app-status': ['Status & settings', '상태·설정'], 'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Run & guard', '실행·가드'], 'tab-agents': ['Team mode', '팀 모드'],
   'g-queue': ['Needs attention', '확인이 필요한 것'], 'g-cats': ['Decisions by category', '범주별 판정'], 'g-table': ['Decisions', '판정 목록'],
   'a-kinds': ['By kind of agent', '에이전트 종류별'], 'a-runs': ['Agent runs', '에이전트 실행'], 'a-wf': ['Workflows', '워크플로'], 'a-codex': ['Codex runs', 'Codex 실행'],
   'st-live': ['● live', '● 연결됨'], 'st-reconnect': ['◌ reconnecting', '◌ 다시 연결 중'], 'st-down': ['✕ disconnected', '✕ 끊김'], 'st-wait': ['◌ connecting', '◌ 연결 중'],
@@ -2667,6 +2668,8 @@ function tabsBuild(){
   ['k-calls', 'k-lat', 'ctx', 'k-tok'].forEach(function(id){ $(id).onclick = function(){ showTab('timeline'); }; });
   $('k-fail').onclick = function(){ showTab('timeline'); setQuery('is:fail'); };
   $('k-ask').onclick = function(){ showTab('guard'); };
+  // Only the desktop app's own window has this call (a preload of its own); in a browser the button stays hidden.
+  if (window.swbApp && typeof window.swbApp.openStatus === 'function') { $('appstatus').hidden = false; $('appstatus').onclick = function(){ window.swbApp.openStatus(); }; }
   $('theme').onclick = function(){ theme = theme === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', theme); store('swb-theme', theme); translate(); };
 }
 function translate(){
@@ -2676,6 +2679,7 @@ function translate(){
   lbl($('lang'), 'globe', lang === 'ko' ? 'EN' : '한국어');
   $('lang').title = lang === 'ko' ? 'Switch to English' : '한글로 보기';
   $('title').textContent = location.host;
+  lbl($('appstatus'), 'gauge', T('app-status'));
   lbl($('theme'), theme === 'dark' ? 'sun' : 'moon', theme === 'dark' ? T('th-light') : T('th-dark'));
   $('theme').title = L('switch theme', '테마 바꾸기');
   $('lang').setAttribute('aria-describedby', 'title');
