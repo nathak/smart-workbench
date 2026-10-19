@@ -19,6 +19,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 - The live view tells a session that stopped beating but whose process still runs (asleep, stopped or busy) from one that ended: its tab says so and has no close button.
 
 ### Changed
+- The live page's Run & guard and Team mode views follow the Stitch screens: a header card, four tiles, a question card with the tool, summary, category, risk and reason, the audit trail beside the decisions, and role cards (model, effort, runs, calls) with the safety gates and their limits. The state line of the feed also carries the role models, efforts, Codex switches and gate limits.
+- The live page shows a Status & settings button in the desktop app's own window; it opens the status window through a preload that offers that one call.
 - The live view reads the git branch in the background, so a slow repository no longer holds the server; the first answer after a start has no branch and the next poll has it.
 - The desktop app's window loads again with a new pairing code when the hub comes back after a restart, so answering a guard question from the page keeps working.
 
