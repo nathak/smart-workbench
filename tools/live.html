@@ -153,6 +153,25 @@ button .ic{margin-right:6px}
 .seg-i{display:inline-flex;gap:6px;align-items:center;padding:var(--sp-2) var(--sp-4);border:1px solid var(--border-strong);border-radius:var(--r);font:600 var(--fs-xs)/1.4 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--fg-muted)}
 .seg-i .ic{width:14px;height:14px;margin:0}
 .seg-i.on{color:var(--focus);border-color:var(--focus);background:var(--surface-2);box-shadow:inset 0 -2px 0 var(--focus)}
+.phead{display:flex;flex-wrap:wrap;gap:var(--sp-3) var(--sp-5);align-items:center;padding:var(--sp-4);margin-bottom:var(--sp-3);background:var(--surface);border:1px solid var(--border);border-top:2px solid var(--focus);border-radius:var(--r)}
+.phead-t{display:flex;gap:var(--sp-2);align-items:center;margin:0;font:700 var(--fs-lg)/1.3 var(--mono);text-transform:uppercase;letter-spacing:.04em}.phead-t .ic{color:var(--focus);margin:0}
+.phead .seg{margin:0}.phead-meta{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;margin-left:auto}
+.phead-sub{flex-basis:100%;margin:0;color:var(--fg-muted);font-size:var(--fs-sm)}
+.ptiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp-3);margin-bottom:var(--sp-4)}
+.tile.static{cursor:default}.tile.static:hover{border-color:var(--border);background:var(--surface)}
+.tile.static.bad:hover{border-color:var(--bad)}.tile.static.warn:hover{border-color:var(--warn)}
+.pgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-4);align-items:start}
+@media (min-width:1200px){.pgrid{grid-template-columns:minmax(0,2fr) minmax(300px,1fr)}}
+.pmain,.pside{min-width:0}
+.panel{padding:var(--sp-4);background:var(--surface);border:1px solid var(--border);border-radius:var(--r)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:var(--sp-1) var(--sp-4);margin:0 0 var(--sp-3);font-size:var(--fs-sm)}
+.kv dt{color:var(--fg-muted);font:var(--fs-xs)/1.6 var(--mono);text-transform:uppercase;letter-spacing:.06em}.kv dd{margin:0;font-family:var(--mono);text-align:right;overflow-wrap:anywhere}
+.pside .tbl td:first-child{white-space:nowrap}
+.askcard{flex-direction:column;align-items:stretch;gap:var(--sp-2);border-left-width:3px}
+.askcard .ah,.askcard .ab,.askcard .aa{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-3);align-items:center}
+.askcard .ah code{font-size:var(--fs-md);overflow-wrap:anywhere}.askcard .ab{color:var(--fg-muted);font-size:var(--fs-sm)}.askcard .aa{justify-content:flex-end}
+.tbl tr.d-block td:first-child,.tbl tr.d-declined td:first-child{box-shadow:inset 2px 0 var(--bad)}.tbl tr.d-asking td:first-child,.tbl tr.d-ask td:first-child{box-shadow:inset 2px 0 var(--warn)}
+@media (max-width:820px){.ptiles{grid-template-columns:repeat(2,minmax(0,1fr))}.phead-meta{margin-left:0}}
 .gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:var(--sp-3)}
 .gate{display:flex;flex-direction:column;gap:var(--sp-2);padding:var(--sp-3) var(--sp-4);background:var(--surface);border:1px solid var(--border);border-top:2px solid var(--border-strong);border-radius:var(--r)}
 .gate.hot{border-top-color:var(--warn)}
@@ -534,13 +553,30 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="e-hist"></span></h2><div class="tblwrap"><table class="tbl" id="e-hist"></table></div></div>
   </div>
   <div class="tabpanel" id="p-guard" role="tabpanel" aria-labelledby="tab-guard" hidden>
-    <div class="seg" id="g-ribbon" role="group" aria-label="profile"></div>
-    <div class="sect"><h2 data-i="g-queue"></h2><div class="queue" id="g-queue"></div></div>
-    <div class="sect"><h2 data-i="g-cats"></h2><div class="tblwrap"><table class="tbl" id="g-cats"></table></div></div>
-    <div class="sect"><h2 data-i="g-table"></h2>
-      <div class="fchips" id="g-chips"></div>
-      <div class="tblwrap"><table class="tbl" id="g-tbl"></table></div><div class="muted" id="g-more" hidden></div></div>
-    <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="g-audit"></span> <button id="g-export" data-i="g-export"></button></h2><div class="tblwrap"><table class="tbl" id="g-audit"></table></div></div>
+    <div class="phead" id="g-head">
+      <h2 class="phead-t"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><span data-i="g-title"></span></h2>
+      <div class="seg" id="g-ribbon" role="group" aria-label="profile"></div>
+      <div class="phead-meta" id="g-meta"></div>
+    </div>
+    <div class="ptiles" id="g-tiles">
+      <div class="tile static" id="g-t-ask"><span class="k-l" data-i="g-t-ask"></span><span class="k-v" id="g-t-ask-v">0</span><span class="k-s" id="g-t-ask-s"></span></div>
+      <div class="tile static" id="g-t-rules"><span class="k-l" data-i="g-t-rules"></span><span class="k-v" id="g-t-rules-v">–</span><span class="k-s" id="g-t-rules-s"></span></div>
+      <div class="tile static" id="g-t-block"><span class="k-l" data-i="g-t-block"></span><span class="k-v" id="g-t-block-v">0</span><span class="k-s" id="g-t-block-s"></span></div>
+      <div class="tile static" id="g-t-allow"><span class="k-l" data-i="g-t-allow"></span><span class="k-v" id="g-t-allow-v">0</span><span class="k-s" id="g-t-allow-s"></span></div>
+    </div>
+    <div class="pgrid">
+      <div class="pmain">
+        <div class="sect"><h2 data-i="g-queue"></h2><div class="queue" id="g-queue"></div></div>
+        <div class="sect"><h2 data-i="g-table"></h2>
+          <div class="fchips" id="g-chips"></div>
+          <div class="tblwrap"><table class="tbl" id="g-tbl"></table></div><div class="muted" id="g-more" hidden></div></div>
+        <div class="sect"><h2 data-i="g-cats"></h2><div class="tblwrap"><table class="tbl" id="g-cats"></table></div></div>
+      </div>
+      <aside class="pside">
+        <div class="sect panel" id="g-side-audit"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-list"/></svg><span data-i="g-audit"></span> <button id="g-export" data-i="g-export"></button></h2><dl class="kv" id="g-kv"></dl><div class="tblwrap"><table class="tbl" id="g-audit"></table></div></div>
+        <div class="sect panel" id="g-side-rules"><h2 data-i="g-order"></h2><p class="muted" data-i="g-order-note"></p><button id="g-open-status" hidden></button></div>
+      </aside>
+    </div>
   </div>
   <div class="tabpanel" id="p-agents" role="tabpanel" aria-labelledby="tab-agents" hidden>
     <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><span data-i="t-gates"></span> <span class="mc" id="t-state"></span></h2><div class="gates" id="t-gates"></div></div>
@@ -627,7 +663,7 @@ var DICT = {
   'tl-q-ph': ['search · tool:Bash -policy:allow "npm test" ms:>500 is:fail', '검색 · tool:Bash -policy:allow "npm test" ms:>500 is:fail'], 'tl-crit-l': ['◆ critical path', '◆ 임계 경로'], 'tl-zoom-l': ['reset zoom', '확대 해제'],
   'h-title': ['Keyboard and search', '키보드와 검색'], 'h-keys': ['Keys', '단축키'], 'h-query': ['Search words (Timeline)', '검색어 (타임라인)'], 'h-off': ['Turn off single-key shortcuts', '한 글자 단축키 끄기'], 'h-close': ['Close', '닫기'],
   'h-note': ['Shortcuts do nothing while you type in a field or hold Ctrl, Alt or ⌘.', '입력창에 글을 쓰는 중이거나 Ctrl·Alt·⌘를 누른 동안에는 단축키가 동작하지 않습니다.'],
-  'app-status': ['Status & settings', '상태·설정'], 'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Run & guard', '실행·가드'], 'tab-agents': ['Team mode', '팀 모드'],
+  'app-status': ['Status & settings', '상태·설정'], 'g-title': ['Run & guard', '실행·가드'], 'g-t-ask': ['Pending questions', '대기 중인 확인'], 'g-t-rules': ['Guard file rules', '가드 파일 규칙'], 'g-t-block': ['Blocked or stopped', '차단·중단'], 'g-t-allow': ['Allowed', '허용'], 'g-order': ['Rule order', '규칙 순서'], 'g-order-note': ['The rule list is not in the live feed. Open Status & settings in the desktop app to see and edit the guard file.', '규칙 목록은 실시간 피드에 없습니다. 데스크톱 앱의 상태·설정에서 가드 파일을 보고 고칠 수 있습니다.'], 'g-open-status': ['Open Status & settings', '상태·설정 열기'], 'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Run & guard', '실행·가드'], 'tab-agents': ['Team mode', '팀 모드'],
   'g-queue': ['Needs attention', '확인이 필요한 것'], 'g-cats': ['Decisions by category', '범주별 판정'], 'g-table': ['Decisions', '판정 목록'],
   'a-kinds': ['By kind of agent', '에이전트 종류별'], 'a-runs': ['Agent runs', '에이전트 실행'], 'a-wf': ['Workflows', '워크플로'], 'a-codex': ['Codex runs', 'Codex 실행'],
   'st-live': ['● live', '● 연결됨'], 'st-reconnect': ['◌ reconnecting', '◌ 다시 연결 중'], 'st-down': ['✕ disconnected', '✕ 끊김'], 'st-wait': ['◌ connecting', '◌ 연결 중'],
@@ -2341,7 +2377,7 @@ function drawTable(tbl, head, rows, sort, onSort, onRow, empty){
   var tbody = el('tbody');
   if (!rows.length) { var er = el('tr'), ec = el('td', null, empty || L('nothing yet', '아직 없음')); ec.colSpan = head.length; er.appendChild(ec); tbody.appendChild(er); }
   rows.forEach(function(r){
-    var row = el('tr', r.key ? 'clk' : '');
+    var row = el('tr', (r.key ? 'clk' : '') + (r.cls ? (r.key ? ' ' : '') + r.cls : ''));
     r.cells.forEach(function(c, i){
       var td = el('td', head[i] && head[i].num ? 'num' : '');
       if (c instanceof Node) td.appendChild(c); else td.textContent = c == null ? '' : String(c);
@@ -2458,30 +2494,55 @@ function drawGuard(){
     if (wbp && wbp.profile === pn) b.setAttribute('aria-current', 'true');
     rib.appendChild(b);
   });
-  if (wbp) { rib.appendChild(chip(T('g-rules') + ' ' + wbp.rules, '', 'list')); if (wbp.paused) rib.appendChild(chip(T('wb-paused'), 'warn', 'pause')); }
+  var meta = $('g-meta'); meta.textContent = '';
+  if (wbp) { meta.appendChild(chip(T('g-rules') + ' ' + wbp.rules, '', 'list')); if (wbp.paused) meta.appendChild(chip(T('wb-paused'), 'warn', 'pause')); }
   drawAudit('g-audit', /^(guard|contract|evidence|task|condition|session|desktop)\./);
   var now = nowFor() || Date.now();
   var q = $('g-queue'); q.textContent = '';
   var items = attention(TR, now);
+  var gs = guardStats(TR), sum = { allow: 0, ask: 0, block: 0, declined: 0, aborted: 0, asking: 0 };
+  Object.keys(gs).forEach(function(c){ Object.keys(sum).forEach(function(d){ sum[d] += gs[c][d] || 0; }); });
+  var nAsk = items.filter(function(it){ return it.type === 'ask'; }), askOldest = nAsk.reduce(function(m, it){ return Math.max(m, it.age || 0); }, 0);
+  function tile(id, cls, v, sub){ $(id).className = 'tile static' + (cls ? ' ' + cls : ''); $(id + '-v').textContent = v; $(id + '-s').textContent = sub; }
+  tile('g-t-ask', nAsk.length ? 'warn' : '', (nAsk.length ? '? ' : '') + nAsk.length, nAsk.length ? L('oldest ' + fmtMs(askOldest), '가장 오래된 것 ' + fmtMs(askOldest)) : L('none waiting', '대기 없음'));
+  tile('g-t-rules', '', wbp ? String(wbp.rules) : '–', wbp ? L('guard file rules · profile ' + wbp.profile, '가드 파일 규칙 · 프로필 ' + wbp.profile) : L('no state line yet', '아직 상태 줄이 없습니다'));
+  var stopped = sum.block + sum.declined + sum.aborted;
+  tile('g-t-block', stopped ? 'bad' : '', String(stopped), L('blocked ' + sum.block + ' · declined ' + sum.declined + ' · stopped ' + sum.aborted, '차단 ' + sum.block + ' · 거절 ' + sum.declined + ' · 중단 ' + sum.aborted));
+  var allTot = sum.allow + sum.ask + sum.asking + stopped;
+  tile('g-t-allow', allTot ? 'ok' : '', sum.allow + ' / ' + allTot, L('after a question ' + sum.ask, '확인 후 허용 ' + sum.ask));
+  var kv = $('g-kv'); kv.textContent = '';
+  var guardEv = TR.audit.filter(function(a){ return /^guard\./.test(a.kind); }).length, lastEv = TR.audit.length ? clock(TR.audit[TR.audit.length - 1].at) : '–';
+  [[L('audit events', '감사 이벤트'), TR.audit.length], [L('guard events', '가드 이벤트'), guardEv], [L('last event', '마지막 이벤트'), lastEv]].forEach(function(p){ kv.appendChild(el('dt', null, p[0])); kv.appendChild(el('dd', null, String(p[1]))); });
   if (!items.length) q.appendChild(el('div', 'muted', L('Nothing needs attention.', '확인이 필요한 것이 없습니다.')));
   items.forEach(function(it){
-    var box = el('div', 'qitem' + (it.type === 'ask' ? '' : it.kind === 'codex.write-check' || it.kind === 'feed.recovered' ? ' bad' : ' hold'));
+    var box = el('div', 'qitem' + (it.type === 'ask' ? ' askcard' : it.kind === 'codex.write-check' || it.kind === 'feed.recovered' ? ' bad' : ' hold'));
     if (it.type === 'ask') {
-      box.appendChild(el('span', 'dec asking', '? ' + L('waiting ' + fmtMs(it.age), fmtMs(it.age) + ' 대기 중')));
       var rec = askOf(TR, it.sp.id), live = rec && !rec.refused && (rec.until === 0 || Date.now() < rec.until);
       var can = !!(live && srv && srv.approve === true && TOKEN);
       var why = rec && rec.refused ? ' (' + askWhy(rec.refused) + ')' : rec && rec.until && Date.now() >= rec.until ? ' (' + askWhy('expired') + ')' : srv && srv.approve === true && !TOKEN ? ' (' + L('open this page from the desktop app to answer here', '여기서 답하려면 데스크톱 앱에서 이 화면을 여세요') + ')' : '';
-      box.appendChild(el('span', 'grow', it.sp.tool + ' ' + cut(it.sp.summary, 120) + ' · ' + it.sp.category + '/' + it.sp.risk + (can ? '' : ' · ' + L('answer in the terminal', '터미널에서 답하세요') + why)));
+      var ah = el('div', 'ah');
+      ah.appendChild(el('span', 'dec asking', '? ' + L('waiting ' + fmtMs(it.age), fmtMs(it.age) + ' 대기 중')));
+      ah.appendChild(el('span', 'tag', it.sp.tool));
+      ah.appendChild(el('code', null, cut(it.sp.summary, 160)));
+      box.appendChild(ah);
+      var ab = el('div', 'ab');
+      if (it.sp.category) ab.appendChild(chip(L('category', '범주') + ': ' + it.sp.category, '', 'list'));
+      if (it.sp.risk) ab.appendChild(chip(L('risk', '위험') + ': ' + it.sp.risk, it.sp.risk === 'high' ? 'bad' : 'warn', 'alert'));
+      if (it.sp.guard && it.sp.guard.reason) ab.appendChild(el('span', null, cut(it.sp.guard.reason, 200)));
+      if (!can) ab.appendChild(el('span', null, L('answer in the terminal', '터미널에서 답하세요') + why));
+      box.appendChild(ab);
+      var aa = el('div', 'aa');
       if (can) {
         [[true, L('Allow once', '이번만 허용')], [false, L('Block', '차단')]].forEach(function(p){
-          var ab = el('button', null, p[1]); ab.disabled = rec.busy; ab.dataset.fk = 'ask-' + rec.id + '-' + p[0];
-          ab.onclick = function(){ answerAsk(rec, p[0]); };
-          box.appendChild(ab);
+          var abtn = el('button', null, p[1]); abtn.disabled = rec.busy; abtn.dataset.fk = 'ask-' + rec.id + '-' + p[0];
+          abtn.onclick = function(){ answerAsk(rec, p[0]); };
+          aa.appendChild(abtn);
         });
       }
-      if (rec && rec.msg) box.appendChild(el('span', 'muted', rec.msg));
+      if (rec && rec.msg) aa.appendChild(el('span', 'muted', rec.msg));
       var go = el('button', null, L('go to call', '호출로 이동')); go.onclick = function(){ gotoCall(selKey('call', it.sp.id)); };
-      box.appendChild(go);
+      aa.appendChild(go);
+      box.appendChild(aa);
     } else {
       box.appendChild(el('span', 'tm mono', clock(it.at)));
       box.appendChild(el('span', 'grow', eventText(it)));
@@ -2512,7 +2573,7 @@ function drawGuard(){
   drawTable($('g-tbl'), [{ key: 'at', label: L('time', '시각') }, { key: 'decision', label: L('decision', '판정') }, { key: 'tool', label: L('tool', '도구') }, { label: L('input', '입력') }, { key: 'reason', label: L('reason', '이유') }, { key: 'category', label: L('category', '범주') }, { key: 'risk', label: L('risk', '위험') }, { key: 'turn', label: L('turn', '턴'), num: true }, { key: 'ms', label: 'ms', num: true }],
     capped.map(function(g){
       var r = g.row;
-      return { key: r.key, cells: [clock(r.at), decNode(r.decision), r.tool + (g.n > 1 ? ' ×' + g.n : ''), cut(r.input, 100), cut(r.reason, 80), r.category, r.risk, r.turn, r.ms == null ? '' : r.decision === 'block' && !r.ms ? '–' : fmtMs(r.ms)] };
+      return { key: r.key, cls: 'd-' + r.decision, cells: [clock(r.at), decNode(r.decision), r.tool + (g.n > 1 ? ' ×' + g.n : ''), cut(r.input, 100), cut(r.reason, 80), r.category, r.risk, r.turn, r.ms == null ? '' : r.decision === 'block' && !r.ms ? '–' : fmtMs(r.ms)] };
     }),
     gd.sort, function(key){ gd.sort = { key: key, dir: gd.sort.key === key ? -gd.sort.dir : (key === 'at' || key === 'turn' || key === 'ms' ? -1 : 1) }; withFocus(drawGuard); }, gotoCall, L('no decisions match the filter', '조건에 맞는 판정이 없습니다'));
   $('g-more').hidden = list.length <= capped.length;
@@ -2689,6 +2750,7 @@ function translate(){
   $('lang').title = lang === 'ko' ? 'Switch to English' : '한글로 보기';
   $('title').textContent = location.host;
   lbl($('appstatus'), 'gauge', T('app-status'));
+  $('g-open-status').textContent = T('g-open-status');
   lbl($('theme'), theme === 'dark' ? 'sun' : 'moon', theme === 'dark' ? T('th-light') : T('th-dark'));
   $('theme').title = L('switch theme', '테마 바꾸기');
   $('lang').setAttribute('aria-describedby', 'title');
