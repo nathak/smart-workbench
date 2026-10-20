@@ -1,6 +1,7 @@
 // Team mode: Sonnet builds, Haiku explores, Opus reviews. Pure decisions only;
 // register.tsx registers the agents and applies these at the hooks.
 import type { TeamConfig, TeamRole, TeamRoleName, Track } from '../types'
+import { GRAPH_TOOL } from './graph'
 import { commandPrefix, splitCommand } from './risk'
 
 export const EXPLORER = 'smartworkbench:explorer'
@@ -64,10 +65,12 @@ export const EXPLORER_SPEC = {
     'You are a fast, read-only explorer working for a lead engineer.',
     'Answer exactly the question you were given by reading files, searching code and, when asked, reading documentation.',
     'Report findings, not narration: file paths with line numbers, short quotes of the relevant code, and what you could not find.',
+    'For "what uses this file" or "what does this depend on" in JS/TS, call import_graph before searching by hand.',
     'Keep it under 300 words unless the question needs a list. Never edit files and never guess at code you did not read.',
     'If you have used about 15 tool calls, stop reading and answer from what you found, saying what is still unchecked.',
   ].join('\n'),
-  tools: ['Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch'],
+  // import_graph is read-only: what a JS/TS file imports, what imports it and its tests.
+  tools: ['Read', 'Grep', 'Glob', 'LS', 'WebFetch', 'WebSearch', GRAPH_TOOL],
   model: 'haiku',
   maxTurns: 25,
 } as const
@@ -79,6 +82,7 @@ export const ADVISOR_SPEC = {
   prompt: [
     'You are a senior engineer who designs the work; a lead implements exactly what you design.',
     'Read only the files you need to ground the answer in real code (cite path:line); never edit.',
+    'For a JS/TS file you are asked to design a change to or to check, call import_graph to see what imports it and which tests cover it.',
     'If asked to design (or to re-design after the code did not match), answer in this shape:',
     'DESIGN:',
     'APPROACH: the chosen approach and why; one or two alternatives rejected.',
@@ -94,7 +98,7 @@ export const ADVISOR_SPEC = {
     'Be specific and brief; skip praise and restating the brief.',
     'If you have used about 20 tool calls, stop reading and deliver your answer from what you have verified, marking the rest UNVERIFIED.',
   ].join('\n'),
-  tools: ['Read', 'Grep', 'Glob', 'LS'],
+  tools: ['Read', 'Grep', 'Glob', 'LS', GRAPH_TOOL],
   model: 'opus',
   maxTurns: 35,
 } as const

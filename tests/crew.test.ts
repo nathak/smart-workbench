@@ -38,6 +38,13 @@ describe('team mode decisions', () => {
       expect(spec.tools.some(tool => ['Edit', 'Write', 'Bash', 'NotebookEdit'].includes(tool))).toBe(false)
     }
   })
+
+  test('both agents may ask the import graph, which is how the agents see what uses a file', async () => {
+    for (const spec of [crew.EXPLORER_SPEC, crew.ADVISOR_SPEC]) {
+      expect(spec.tools).toContain('mcp__smartworkbench__import_graph')
+      expect(spec.prompt).toContain('import_graph')
+    }
+  })
 })
 
 describe('design first', () => {
