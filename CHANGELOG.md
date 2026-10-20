@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-20
+
 ### Changed
 - A done condition can carry an expectation of its check (`expect`): at least N tests passed, at most M failed, and/or text the test command must contain. Claude sets it with the `set_condition_expectation` tool (on an unlocked contract, or as a first one on a locked contract's linked condition; never over one the person set, never to replace or remove one on a locked contract). The numbers are read from the run's own summary line (jest, vitest, pytest, cargo, node:test, bun, Maven; the last 40 lines, one plain test run) and kept as counts with one masked line, never the output. An expectation only ever lowers a verdict: a condition is never verified by it, a person's mark and a condition without a check link are left alone. A condition it brings down shows `expected … got …` in the Evidence view of the live page and in the terminal tab, and holds the finish once (not again for the same run, and not on the stop that follows a hold); the person clears it in the Evidence tab. A barrier against accidents: a command can print a summary line.
 - A Gradle or Maven test/build run piped into `tail` (or otherwise hiding its exit code) is recorded as passed or failed from its closing `BUILD SUCCESSFUL`/`BUILD FAILED` (Maven `BUILD SUCCESS`/`BUILD FAILURE`, failing test totals) line, instead of staying `observed`; only for a single build run, never for an interrupted or background run, a failure line wins and a success line is ignored when the call ended in error. A barrier against accidents: a command can print such a line.
