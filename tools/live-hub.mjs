@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { readAnswer, takePair, writeCommand } from './desktop-channel.mjs'
 import { desktopHome } from './desktop-state.mjs'
 import { gitOf } from './live-git.mjs'
+import { graphService } from './live-graph.mjs'
 import { ID_PATTERN, ensureRegistry, feedOf, registryDir, scan, trustedHosts } from './live-registry.mjs'
 import { makeTail } from './live-tail.mjs'
 
@@ -209,6 +210,8 @@ export function runHub({ port, keep = false, watchParent = false, approve = fals
   }
   const stream = res => res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' })
 
+  const graphOf = graphService()
+
   const server = createServer((req, res) => {
     if (!HOSTS.has((req.headers.host ?? '').toLowerCase())) {
       res.writeHead(403).end()
@@ -259,6 +262,14 @@ export function runHub({ port, keep = false, watchParent = false, approve = fals
       for (const line of own.tail.recent) res.write(`data: ${line}\n\n`)
       own.clients.add(res)
       res.on('close', () => own.clients.delete(res))
+      return
+    }
+    if (url.pathname === '/graph') {
+      // The import graph of a live session's project, built here from the project folder the registry vouched for (never from the request).
+      if (!own?.alive) return json(res, 404, { error: 'no such session' })
+      // Through a shared address the file tree of a project is not offered unless the person turned it on.
+      if (TRUSTED.length > 0 && process.env.SWB_LIVE_GRAPH !== '1') return json(res, 403, { error: 'graph is off for a shared address' })
+      graphOf(own.reg.project, url.searchParams.get('fresh') === '1' ? 1000 : 5000).then(graph => json(res, 200, graph), () => json(res, 500, { error: 'failed' }))
       return
     }
     if (url.pathname === '/sessions') {

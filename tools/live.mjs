@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { runHub } from './live-hub.mjs'
 import { runJoin } from './live-join.mjs'
 import { gitOf } from './live-git.mjs'
+import { graphService } from './live-graph.mjs'
 import { claimFeed, feedOf, noteOf, releaseFeed } from './live-registry.mjs'
 import { makeTail } from './live-tail.mjs'
 
@@ -86,6 +87,8 @@ const HOSTS = new Set(TRUSTED.flatMap(name => [name, `${name}:80`, `${name}:443`
 // The page is one file with inline script and style and talks only to this server; anything else it is tricked into loading is refused.
 const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
+const graphOf = graphService()
+
 const server = createServer((req, res) => {
   if (!HOSTS.has((req.headers.host ?? '').toLowerCase())) {
     res.writeHead(403).end()
@@ -100,6 +103,18 @@ const server = createServer((req, res) => {
     for (const line of tail.recent) res.write(`data: ${line}\n\n`)
     clients.add(res)
     res.on('close', () => clients.delete(res))
+    return
+  }
+  if (path === '/graph') {
+    // The import graph of the project this server was started for.
+    if (TRUSTED.length > 0 && process.env.SWB_LIVE_GRAPH !== '1') {
+      res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'graph is off for a shared address' }))
+      return
+    }
+    graphOf(project, new URL(req.url ?? '/', 'http://x').searchParams.get('fresh') === '1' ? 1000 : 5000).then(graph => {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(graph))
+    }, () => res.writeHead(500).end())
     return
   }
   if (path === '/info') {
