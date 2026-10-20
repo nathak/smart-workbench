@@ -864,7 +864,7 @@ function ingest(tr, ev){
         profile: /^(off|permissive|balanced|strict)$/.test(String(ev.profile)) ? String(ev.profile) : 'balanced',
         met: Number(ev.met) || 0,
         total: Number(ev.total) || 0,
-        conds: Array.isArray(ev.conds) ? ev.conds.slice(0, 10).filter(function(c){ return c && typeof c === 'object'; }).map(function(c){ return Object.assign({}, c, { id: clean(c.id, 20), t: clean(c.t, 120), s: clean(c.s, 12), link: c.link ? clean(c.link, 20) : null }); }) : [],
+        conds: Array.isArray(ev.conds) ? ev.conds.slice(0, 10).filter(function(c){ return c && typeof c === 'object'; }).map(function(c){ return Object.assign({}, c, { id: clean(c.id, 20), t: clean(c.t, 120), s: clean(c.s, 12), link: c.link ? clean(c.link, 20) : null, x: typeof c.x === 'string' ? clean(c.x, 60) : '', g: typeof c.g === 'string' ? clean(c.g, 60) : '', by: c.by === 'u' || c.by === 'c' ? c.by : '' }); }) : [],
         rules: Number(ev.rules) || 0,
         paused: ev.paused === true,
         team: ev.team === true,
@@ -2575,6 +2575,7 @@ function drawIntent(){
     row.appendChild(condPill(String(c.s)));
     row.appendChild(el('span', 'grow', String(c.t)));
     if (c.link) row.appendChild(chip(String(c.link), '', 'tree'));
+    if (c.x) row.appendChild(el('span', 'muted', L('expects ', '기대 ') + c.x + (c.g ? L(' · got ', ' · 실제 ') + c.g : '') + (c.by === 'c' ? L(' · set by Claude', ' · Claude 설정') : '')));
     list.appendChild(row);
   });
   if (w.total > (w.conds || []).length) list.appendChild(el('div', 'muted', L('+ ' + (w.total - w.conds.length) + ' more', '+ ' + (w.total - w.conds.length) + '개 더')));
@@ -2589,9 +2590,9 @@ function drawEvidence(){
   ban.appendChild(el('span', null, w ? w.met + ' / ' + w.total + ' ' + T('e-banner') : T('i-none')));
   var rows = ((w && w.conds) || []).map(function(c){
     var ev = c.link ? lastEvid(String(c.link)) : null;
-    return { cells: [String(c.t), condPill(String(c.s)), c.link ? String(c.link) : '–', ev ? el('code', 'arg', ev.command) : '–', ev ? okPill(ev.ok) : '–', ev ? clock(ev.at) : '–'] };
+    return { cells: [String(c.t), condPill(String(c.s)), c.link ? String(c.link) : '–', c.x ? c.x + (c.by === 'c' ? L(' (Claude)', ' (Claude)') : '') : '–', c.x && c.g ? c.g : '–', ev ? el('code', 'arg', ev.command) : '–', ev ? okPill(ev.ok) : '–', ev ? clock(ev.at) : '–'] };
   });
-  drawTable($('e-matrix'), [{ label: T('e-col-cond') }, { label: T('e-col-status') }, { label: T('e-col-kind') }, { label: T('e-col-cmd') }, { label: T('e-col-result') }, { label: L('time', '시각') }], rows, null, null, null, T('i-none'));
+  drawTable($('e-matrix'), [{ label: T('e-col-cond') }, { label: T('e-col-status') }, { label: T('e-col-kind') }, { label: L('expected', '기대') }, { label: L('got', '실제') }, { label: T('e-col-cmd') }, { label: T('e-col-result') }, { label: L('time', '시각') }], rows, null, null, null, T('i-none'));
   var ch = $('e-changed'); ch.textContent = '';
   if (w) { ch.appendChild(statBox(String(w.files), T('e-files'))); ch.appendChild(statBox('+' + w.added, L('added', '추가'), 'allow')); ch.appendChild(statBox('-' + w.removed, L('removed', '삭제'), 'block')); }
   drawTable($('e-hist'), [{ label: L('time', '시각') }, { label: T('e-col-kind') }, { label: T('e-col-cmd') }, { label: T('e-col-result') }],

@@ -4,6 +4,7 @@ import type {
   ContextPin,
   EvidenceKind,
   EvidenceRecord,
+  Expectation,
   GuardProfile,
   IssueRef,
   Live,
@@ -173,9 +174,31 @@ export function removeCondition(wb: Workbench, id: string): Workbench {
 export function linkCondition(wb: Workbench, id: string, link: EvidenceKind | 'none'): Workbench {
   const doneConditions = wb.task.doneConditions.map(one => {
     if (one.id !== id) return one
-    const { link: _old, ...rest } = one
+    const { link: _old, ...kept } = one
+    // Claude's expectation was meant for the old check; the person's stays unless its test counts no longer apply.
+    const drops = kept.expect?.setBy === 'claude' || (kept.expect?.tests !== undefined && link !== 'test')
+    const rest = drops ? (({ expect: _expect, ...others }) => others)(kept) : kept
 
     return link === 'none' ? rest : { ...rest, link }
+  })
+
+  return { ...wb, task: { ...wb.task, doneConditions } }
+}
+
+// An expectation is a stricter check, not a verification: setting or clearing one is allowed while locked. Changing what a condition
+// is linked to drops an expectation Claude set (its numbers were meant for the old check); the person's own stays.
+export function setExpectation(wb: Workbench, id: string, expect: Expectation): Workbench {
+  const doneConditions = wb.task.doneConditions.map(one => (one.id === id ? { ...one, expect } : one))
+
+  return { ...wb, task: { ...wb.task, doneConditions } }
+}
+
+export function clearExpectation(wb: Workbench, id: string): Workbench {
+  const doneConditions = wb.task.doneConditions.map(one => {
+    if (one.id !== id) return one
+    const { expect: _gone, ...rest } = one
+
+    return rest
   })
 
   return { ...wb, task: { ...wb.task, doneConditions } }

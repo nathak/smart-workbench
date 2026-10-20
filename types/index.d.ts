@@ -17,11 +17,25 @@ export type ManualMark = {
   at: number
 }
 
+// What a condition expects of the run that checks it. It only ever makes the verdict stricter: a condition is never verified by it.
+// A person's own mark and a missing link are not touched. setBy tells who wrote it; Claude may not change one the person wrote.
+export type Expectation = {
+  // The latest run of the linked kind must contain this plain text in its command (no pattern), up to 80 characters.
+  cmd?: string
+  // Test counts from the run's own summary line: at least `min` passed, at most `failedMax` failed.
+  tests?: { min?: number; failedMax?: number }
+  setBy: 'user' | 'claude'
+  at: number
+  // Claude's one line on why, masked.
+  reason?: string
+}
+
 export type DoneCondition = {
   id: string
   text: string
   link?: EvidenceKind
   manual?: ManualMark
+  expect?: Expectation
 }
 
 export type LineRange = { from: number; to: number }
@@ -129,6 +143,8 @@ export type EvidenceRecord = {
   command: string
   ok: boolean | null
   at: number
+  // Test counts read from the run's own summary line (never the output itself), for a test run whose outcome was settled.
+  facts?: { passed?: number; failed?: number; total?: number; line?: string }
 }
 
 export type Task = {
@@ -199,6 +215,10 @@ export type Live = {
   contextPercent?: number
   contextTokens?: number
   contextWindow?: number
+  // The evidence ids of failed expectations the finish check already held a turn for (a repeat is not held again).
+  expectHeld?: string[]
+  // The last stop was held for an expectation alone: the stop after it is not a repeat of a final check.
+  expectHoldOnly?: boolean
   // The subscription rate-limit windows the last response reported (empty off a subscription), as the live feed carries them.
   rateLimits?: { kind: 'five_hour' | 'seven_day' | 'spend_limit'; pct: number; resetsAt?: number }[]
   // Why the live feed could not be written, while it cannot; session-only.

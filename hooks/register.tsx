@@ -12,7 +12,8 @@ import { GRAPH_DESCRIPTION, GRAPH_TOOL, graphAnswer, graphDataOf, queryPath, typ
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
-import { checkOutcome, completionOf, evidenceKindsOf, isStale, latestOf, markOf, outcomeFromOutput, statusOf, turnSummary } from './evidence'
+import { checkOutcome, completionOf, evidenceKindsOf, expectText, isStale, judgeOf, latestOf, markOf, outcomeFromOutput, statusOf, turnSummary } from './evidence'
+import { canSet, checkExpectInput, EXPECT_DESCRIPTION, EXPECT_TOOL, expectOf, testFactsOf } from './expect'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
 import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
@@ -1166,6 +1167,58 @@ async function importGraphAnswer($: $, input: Record<string, unknown>): Promise<
   const direction = input.direction === 'imports' || input.direction === 'importers' ? input.direction : 'both'
 
   return { result: graphAnswer(data, asked.rel, input.depth === 2 ? 2 : 1, direction, wb, root) }
+}
+
+type Unmet = { id: string; text: string; rec: string; expected: string; got: string; by: string }
+
+// The conditions an expectation brought down (the plain rules would not have failed them), with the run that decided it.
+function unmetExpectations(wb: Workbench): Unmet[] {
+  const lastEdit = lastCheckedEdit(wb.changed)
+  const out: Unmet[] = []
+  for (const one of wb.task.doneConditions) {
+    if (!one.expect || !one.link) continue
+    const judged = judgeOf(one, wb.evidence, lastEdit)
+    const latest = latestOf(wb.evidence, one.link)
+    if (judged.status !== 'failed' || judged.expected === undefined || !latest) continue
+    if (statusOf({ ...one, expect: undefined }, wb.evidence, lastEdit) === 'failed') continue
+    out.push({ id: one.id, text: one.text, rec: latest.id, expected: judged.expected, got: judged.got ?? '', by: one.expect.setBy })
+  }
+
+  return out
+}
+
+function expectHoldReason(unmet: readonly Unmet[]): string {
+  const lines = unmet.map(one => `done condition ${one.id} "${model.cut(redact(one.text), 80)}" expected ${one.expected}, got ${one.got || 'less'} (set by ${one.by})`)
+
+  return `SmartWorkbench: ${lines.join('; ')}. Fix it and re-run the check, or say why the expectation is wrong (propose_contract_change); then finish.`
+}
+
+// Claude sets what a done condition expects of its check. Only stricter: see judgeOf. The person can clear it in the panel.
+async function setConditionExpectation($: $, input: Record<string, unknown>): Promise<{ result: string }> {
+  const checked = checkExpectInput(input)
+  if (!checked.ok) return { result: `rejected: ${checked.reason}.` }
+  const id = typeof input.id === 'string' ? input.id.trim() : ''
+  const wb = await read($, wbAtom)
+  const allowed = canSet(wb.task.locked, wb.task.doneConditions.find(one => one.id === id), checked.value)
+  if (!allowed.ok) return { result: `rejected: ${allowed.reason}.` }
+  const expect = expectOf(checked.value, await $.clock.now())
+  // Checked again on the state the write sees: the person may have locked the contract or changed the condition meanwhile.
+  let refused = ''
+  await mutate($, current => {
+    const again = canSet(current.task.locked, current.task.doneConditions.find(one => one.id === id), checked.value)
+    if (!again.ok) {
+      refused = again.reason
+      return current
+    }
+
+    return model.setExpectation(current, id, expect)
+  })
+  if (refused) return { result: `rejected: ${refused}.` }
+  await audit($, 'contract.expect-set', { id, by: 'claude', expected: expectText(expect), reason: expect.reason })
+  $.ui.toast(`SmartWorkbench: Claude set what ${id} expects (${expectText(expect)}) · /swb to review`)
+  await emitState($)
+
+  return { result: `recorded on ${id}: ${expectText(expect)}. It only makes the verdict stricter; the person can clear it. Finishing is held once when the numbers fall short.` }
 }
 
 async function propose($: $, input: Record<string, unknown>): Promise<{ result: string }> {
@@ -2965,8 +3018,10 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
       </Text>
       {total === 0 && <Text dimColor>Add done conditions in the Intent tab.</Text>}
       {wb.task.doneConditions.map(one => {
-        const status = statusOf(one, wb.evidence, lastEdit)
+        const judged = judgeOf(one, wb.evidence, lastEdit)
+        const status = judged.status
         const latest = one.link ? latestOf(wb.evidence, one.link) : undefined
+        const expectLine = one.expect ? `expects ${judged.expected ?? expectText(one.expect)}${judged.got ? ` · got ${judged.got}` : ''} · set by ${one.expect.setBy}` : ''
         const detail = one.manual
           ? `manual ${one.manual.status}: ${one.manual.note}`
           : latest
@@ -2985,6 +3040,12 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
               {'  '}
               {model.cut(detail, width - 4)}
             </Text>
+            {expectLine !== '' && (
+              <Text color={status === 'failed' ? 'error' : undefined} dimColor={status !== 'failed'} wrap="truncate-end">
+                {'  '}
+                {model.cut(expectLine, width - 4)}
+              </Text>
+            )}
             <Box gap={1} marginLeft={2}>
               <Select
                 key={`link-${one.id}`}
@@ -2993,6 +3054,18 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
                 options={LINKS.map(value => ({ value }))}
                 onSelect={value => void mutate($, wb => model.linkCondition(wb, one.id, value as EvidenceKind | 'none'))}
               />
+              {one.expect && (
+                <Button
+                  key={`unexpect-${one.id}`}
+                  plain
+                  dimColor
+                  label="Clear expectation"
+                  onPress={() => {
+                    void mutate($, current => model.clearExpectation(current, one.id))
+                    void audit($, 'contract.expect-cleared', { id: one.id, by: 'user' })
+                  }}
+                />
+              )}
               {one.manual ? (
                 <Button key={`auto-${one.id}`} plain dimColor label="Undo" onPress={() => void stamp($, one.id, 'auto', '')} />
               ) : (
@@ -3260,6 +3333,21 @@ export const register: Register = on => {
         required: ['file'],
       },
     }).catch(error => $.ui.log(`SmartWorkbench: could not register import_graph: ${String(error)}`, { to: 'debug' }))
+    await $.tool.register({
+      name: 'set_condition_expectation',
+      description: EXPECT_DESCRIPTION,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'The done condition id, e.g. dc-2' },
+          min: { type: 'integer', description: 'At least this many tests must pass (for a condition linked to a test run)' },
+          failed_max: { type: 'integer', description: 'At most this many tests may fail, usually 0' },
+          cmd: { type: 'string', description: 'Plain text the check command must contain, e.g. a package or filter (no pattern)' },
+          reason: { type: 'string', description: 'Why, in one sentence' },
+        },
+        required: ['id', 'reason'],
+      },
+    }).catch(error => $.ui.log(`SmartWorkbench: could not register set_condition_expectation: ${String(error)}`, { to: 'debug' }))
     const sessionId = await $.session.id().catch(() => undefined)
     if (sessionId) await setLive($, live => ({ ...live, sessionId }))
     isAskable = e.isInteractive !== false
@@ -3383,6 +3471,9 @@ export const register: Register = on => {
     // Read-only and answered from paths the graph accepted: like the proposal tool it is not a call the guard classifies or the feed shows.
     if (e.tool === GRAPH_TOOL) {
       return importGraph($, e as unknown as Record<string, unknown>)
+    }
+    if (e.tool === EXPECT_TOOL) {
+      return setConditionExpectation($, e as unknown as Record<string, unknown>)
     }
     const hookStart = await $.clock.now()
     const isTeam = (await read($, wbAtom)).team?.enabled === true
@@ -3609,7 +3700,9 @@ export const register: Register = on => {
         kinds.forEach((kind, i) => {
           // The exit code decides when it can; a build tool's own closing line decides when a pipe hid it.
           const ok = isUnsettled ? null : (checkOutcome(e.command, kind, isOk) ?? outcomeFromOutput(e.command, kind, streams, isOk))
-          const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt }
+          // The counts the run's own summary line shows, for a test run that finished: what a condition's expectation is judged by.
+          const facts = kind === 'test' && !isUnsettled ? testFactsOf(e.command, streams) : undefined
+          const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt, ...(facts ? { facts } : {}) }
           updated = model.addEvidence(updated, record)
           fresh.push(record)
         })
@@ -3791,10 +3884,25 @@ export const register: Register = on => {
     const wb = await read($, wbAtom)
     const live = await read($, liveAtom)
     const running = live.loop
+    // A done condition whose expectation the last check did not meet holds the finish once per run; a stop that follows a hold is not held again.
+    const unmet = e.stop_hook_active && !running?.continuing ? [] : unmetExpectations(wb).filter(one => !live.expectHeld?.includes(one.rec))
+    const heldText = unmet.length > 0 ? expectHoldReason(unmet) : ''
+    // The answer of this stop. A hold is remembered only when a block really leaves with it; a hold that was for the expectation alone is
+    // remembered as such, so the stop after it is not taken for a repeat of the team's final check.
+    const leave = async (block: string | undefined, isExpectOnly: boolean) => {
+      if (unmet.length > 0 && block !== undefined) {
+        await setLive($, current => ({ ...current, expectHeld: [...(current.expectHeld ?? []), ...unmet.map(one => one.rec)].slice(-30), expectHoldOnly: isExpectOnly }))
+        await audit($, 'contract.expect-hold', { ids: unmet.map(one => one.id) })
+      } else if (live.expectHoldOnly) {
+        await setLive($, current => ({ ...current, expectHoldOnly: undefined }))
+      }
+
+      return block === undefined ? result : { ...result, block }
+    }
 
     if (wb.team?.enabled) {
       // A stop right after the loop held the turn starts a new pass, not a repeat of the same stop.
-      const isRepeat = e.stop_hook_active && !running?.continuing
+      const isRepeat = e.stop_hook_active && !running?.continuing && live.expectHoldOnly !== true
       const held = live.track ?? crew.EMPTY_TRACK
       // Later loop passes never go through prompt.submit, so the turn start is the start of this pass.
       const track = running?.passAt === undefined ? held : { ...held, turnStartedAt: Math.max(held.turnStartedAt ?? 0, running.passAt) }
@@ -3805,12 +3913,12 @@ export const register: Register = on => {
 
         const wantsCodex = codex.isCodexOn(wb.team) && codex.codexOf(wb.team).review && !!live.codexPath && !running && !codex.hasReviewedThisTurn(track)
 
-        return { ...result, block: crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text), wantsCodex) }
+        return leave(`${crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text), wantsCodex)}${heldText ? ` ${heldText}` : ''}`, false)
       }
     }
 
     // The command's own turn ends before pass 1 went out; that stop is not a pass.
-    if (!running || running.pending) return result
+    if (!running || running.pending) return leave(heldText || undefined, true)
 
     const lastEdit = lastAnyEdit(wb.changed)
     // An infinite loop that only edits through the shell still counts as working when the git working tree changed.
@@ -3828,7 +3936,7 @@ export const register: Register = on => {
     await audit($, step.loop ? 'loop.pass' : 'loop.done', { done: running.done + 1 }).catch(() => undefined)
     if (step.text) $.ui.toast(`SmartWorkbench: ${step.text}`)
 
-    return step.reason ? { ...result, block: step.reason } : result
+    return step.reason ? leave(`${step.reason}${heldText ? ` ${heldText}` : ''}`, false) : leave(heldText || undefined, true)
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -3847,7 +3955,7 @@ export const register: Register = on => {
     const row = await next(e)
     const id = e.props.tool_use_id
     const text = (await read($, badgesAtom))[id]
-    const isFailed = e.props.isErrored && !e.props.isRunning && !e.props.isInterrupted && e.props.tool !== PROPOSE_TOOL && e.props.tool !== GRAPH_TOOL
+    const isFailed = e.props.isErrored && !e.props.isRunning && !e.props.isInterrupted && e.props.tool !== PROPOSE_TOOL && e.props.tool !== GRAPH_TOOL && e.props.tool !== EXPECT_TOOL
 
     if (text === undefined && !isFailed) {
       return row

@@ -10,7 +10,7 @@ A mod runs with your own user rights and is not sandboxed. This page lists every
 
 | Hook | Why | If the hook fails |
 |---|---|---|
-| `session.start` | register `/smartworkbench`, `/swb`, `/workbench` and the `propose_contract_change` and `import_graph` tools; restore the project's state; read the guard file | the rest of the session runs without the mod |
+| `session.start` | register `/smartworkbench`, `/swb`, `/workbench` and the `propose_contract_change`, `import_graph` and `set_condition_expectation` tools; restore the project's state; read the guard file | the rest of the session runs without the mod |
 | `prompt.submit` | add the locked contract and pins as model-only context; `requireContract` may hold a prompt back; a prompt you type ends a running `/swb loop` | the prompt goes through unchanged |
 | `tool.call` | record each call, apply guard rules (allow, ask, block), collect check results | high-risk calls are refused, the rest run normally (fail closed for high risk only) |
 | `turn.complete` | completion summary, `git diff -U0 HEAD`, context usage | skipped; the turn is unaffected |
@@ -82,7 +82,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 | Hook | 용도 | hook이 실패하면 |
 |---|---|---|
-| `session.start` | `/smartworkbench`·`/swb`·`/workbench` 명령과 `propose_contract_change`·`import_graph` 툴 등록, 프로젝트 상태 복원, Guard 파일 읽기 | 이 세션은 Mod 없이 진행 |
+| `session.start` | `/smartworkbench`·`/swb`·`/workbench` 명령과 `propose_contract_change`·`import_graph`·`set_condition_expectation` 툴 등록, 프로젝트 상태 복원, Guard 파일 읽기 | 이 세션은 Mod 없이 진행 |
 | `prompt.submit` | 잠긴 계약과 Pin을 Claude만 읽는 컨텍스트로 추가, `requireContract`면 프롬프트 보류, 직접 입력한 프롬프트는 실행 중인 `/swb loop`를 종료 | 프롬프트는 그대로 전송 |
 | `tool.call` | 호출 기록, Guard 규칙 적용(허용·질문·차단), 검증 결과 수집 | 고위험 호출만 거부, 나머지는 정상 실행 |
 | `turn.complete` | 완료 요약, `git diff -U0 HEAD`, 컨텍스트 사용량 | 건너뜀(턴에는 영향 없음) |

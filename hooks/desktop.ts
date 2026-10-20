@@ -1,7 +1,7 @@
 // The read-only picture of a session's workbench that the desktop app shows (tools/desktop-snapshot.mjs writes it).
 // Nothing here is a command or a prompt: the contract's own words, the team and guard settings, and the evidence results.
 import type { EvidenceRecord, Live, Workbench } from '../types'
-import { statusOf } from './evidence'
+import { judgeOf, statusOf } from './evidence'
 import { codexOf } from './codex'
 import { REPEAT_LIMIT, SMALL_EDIT_CHARS, SMALL_EDIT_LINES, SMALL_TURN_LINES } from './crew'
 import * as model from './model'
@@ -114,7 +114,12 @@ export function rateWindowsOf(list: unknown): RateWindow[] {
 export function feedStateOf(wb: Workbench, live: Live) {
   const evidence: readonly EvidenceRecord[] = wb.evidence
   const lastEdit = Math.max(0, ...Object.values(wb.changed.edits ?? {}))
-  const conds = wb.task.doneConditions.map(one => ({ id: one.id, t: redact(one.text).slice(0, FEED_TEXT), link: one.link ?? null, s: statusOf(one, evidence, lastEdit || undefined) }))
+  const conds = wb.task.doneConditions.map(one => {
+    const judged = judgeOf(one, evidence, lastEdit || undefined)
+
+    // x and g: what was expected and what the run showed, only for a condition that has an expectation; by: who set it (u person, c Claude).
+    return { id: one.id, t: redact(one.text).slice(0, FEED_TEXT), link: one.link ?? null, s: judged.status, ...(judged.expected ? { x: redact(judged.expected).slice(0, 60), g: redact(judged.got ?? '').slice(0, 60), by: one.expect?.setBy === 'user' ? 'u' : 'c' } : {}) }
+  })
 
   return {
     goal: redact(wb.task.goal).slice(0, 200),

@@ -1,4 +1,4 @@
-import type { ConditionStatus, DoneCondition, EvidenceKind, EvidenceRecord, Task } from '../types'
+import type { ConditionStatus, DoneCondition, EvidenceKind, EvidenceRecord, Expectation, Task } from '../types'
 
 // A check counts only when it is the command word of a segment (after env assignments, `time`, a launcher such as npx),
 // so `pip install ruff`, `echo "npm test"` and `cat jest.config.js` prove nothing.
@@ -47,10 +47,10 @@ function maskText(command: string): string {
 // Flags that make a tool exit 0 without running its check (version, dry run, list only, format only, skipped tests).
 const NO_CHECK = /(?:^|\s)(?:--version|--help|--init|--showConfig|--no-run|--collect-only|--co|--listTests|--dry-run|--just-print|-DskipTests|-Dmaven\.test\.skip(?:=true)?|--passWithNoTests|-list)(?=\s|=|$)|(?:^|\s)ruff\s+format\b|^make\s+(?:\S+\s+)*-[a-zA-Z]*n\b/
 
-type Segment = { text: string; op: string | undefined }
+export type Segment = { text: string; op: string | undefined }
 
 // Splits at ; & && | || |& and newlines, outside quotes. A lone & (background) is its own operator; 2>&1 and &> are not.
-function segmentsOf(command: string): Segment[] {
+export function segmentsOf(command: string): Segment[] {
   const masked = maskText(command)
   const result: Segment[] = []
   const operator = /\|\||&&|\|&|\||;|\n|(?<![<>&])&(?![>&])/g
@@ -66,11 +66,11 @@ function segmentsOf(command: string): Segment[] {
 }
 
 // A segment's command, without grouping, env assignments and launchers.
-function bodyOf(text: string): string {
+export function bodyOf(text: string): string {
   return text.trim().replace(/^[({]\s*/, '').replace(/[)}\s]+$/, '').replace(PREFIX, '')
 }
 
-function kindOfSegment(text: string): EvidenceKind | undefined {
+export function kindOfSegment(text: string): EvidenceKind | undefined {
   const body = bodyOf(text)
 
   return NO_CHECK.test(body) ? undefined : KINDS.find(one => one.pattern.test(body))?.kind
@@ -115,6 +115,51 @@ export function isStale(record: EvidenceRecord | undefined, lastEditAt: number |
 
 // Never derived from the model's words: only recorded results or the person's own mark.
 export function statusOf(condition: DoneCondition, evidence: readonly EvidenceRecord[], lastEditAt?: number): ConditionStatus {
+  return judgeOf(condition, evidence, lastEditAt).status
+}
+
+export type Judged = { status: ConditionStatus; expected?: string; got?: string }
+
+export function expectText(expect: Expectation): string {
+  const parts: string[] = []
+  if (expect.tests?.min !== undefined) parts.push(`≥${expect.tests.min} passed`)
+  if (expect.tests?.failedMax !== undefined) parts.push(`≤${expect.tests.failedMax} failed`)
+  if (expect.cmd) parts.push(`command has "${expect.cmd}"`)
+
+  return parts.join(', ')
+}
+
+// The verdict with what was expected and what the run showed. An expectation can only lower a verified verdict (to failed or observed);
+// it never raises one, and a person's mark or a condition without a check link is left as it is. The counts are read from the run's own
+// summary line (see hooks/expect.ts); a command can print such a line, so this is no defence against a command that means to.
+export function judgeOf(condition: DoneCondition, evidence: readonly EvidenceRecord[], lastEditAt?: number): Judged {
+  const status = baseStatusOf(condition, evidence, lastEditAt)
+  const expect = condition.expect
+  if (!expect || condition.manual || !condition.link) return { status }
+  const expected = expectText(expect)
+  if (expected === '') return { status }
+  const latest = latestOf(evidence, condition.link)
+  if (!latest || (status !== 'verified' && status !== 'observed')) return { status, expected }
+  const facts = latest.facts
+  // A stored expectation is not trusted to be well formed: a value that is not a whole number counts for nothing.
+  const count = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
+  const tests = expect.tests && { min: count(expect.tests.min), failedMax: count(expect.tests.failedMax) }
+  // A failure count past the limit fails the condition even when a pipe hid the exit code (a lowering is always safe).
+  if (tests?.failedMax !== undefined && facts?.failed !== undefined && facts.failed > tests.failedMax) return { status: 'failed', expected, got: `${facts.failed} failed` }
+  if (status !== 'verified') return { status, expected }
+  if (tests?.min !== undefined) {
+    if (facts?.passed === undefined) return { status: 'observed', expected, got: 'no test count in the output (run it unfiltered)' }
+    if (facts.passed < tests.min) return { status: 'failed', expected, got: `${facts.passed} passed` }
+  }
+  if (tests?.failedMax !== undefined && facts?.failed === undefined) return { status: 'observed', expected, got: 'no test count in the output (run it unfiltered)' }
+  // The stored command is cut at 200 characters: a longer one cannot be judged by its text.
+  if (typeof expect.cmd === 'string' && expect.cmd !== '' && latest.command.length < 200 && !latest.command.includes(expect.cmd)) return { status: 'observed', expected, got: `latest run: ${latest.command.slice(0, 60)}` }
+  const got = [facts?.passed !== undefined ? `${facts.passed} passed` : '', facts?.failed !== undefined ? `${facts.failed} failed` : ''].filter(Boolean).join(', ')
+
+  return { status, expected, ...(got ? { got } : {}) }
+}
+
+function baseStatusOf(condition: DoneCondition, evidence: readonly EvidenceRecord[], lastEditAt?: number): ConditionStatus {
   if (condition.manual) {
     return condition.manual.status
   }
@@ -205,13 +250,13 @@ export function checkOutcome(command: string, kind: EvidenceKind, isOk: boolean)
 // Read only for a run of one build tool, after quiet set-up commands and piped only into filters, and only as the tool's own final
 // line (not text the command or the model wrote): a failure line wins, a success line counts only when the call did not end in error.
 // A quiet run, a marker cut off by `tail` and anything odd stay unknown. A barrier against accidents: a command can print the line.
-const TAIL_LINES = 40
+export const TAIL_LINES = 40
 const QUIET_BEFORE = /^(?:|cd(?:\s+\S+)?|(?:export|unset|set)(?:\s+\S+)+)$/
 const FILTER_AFTER = /^(?:tail|head|e?grep|fgrep|tee)(?=\s|$)/
 const GRADLE_MARK = /^BUILD (SUCCESSFUL|FAILED)(?: in \d+(?:\.\d+)?(?:ms|s|m|h)(?: \d+(?:\.\d+)?(?:ms|s|m|h))*)?$/
 const MAVEN_MARK = /^\[INFO\] BUILD (SUCCESS|FAILURE)$/
-const MAVEN_TOTAL = /^\[(?:INFO|WARNING|ERROR)\] Tests run: \d+, Failures: (\d+), Errors: (\d+), Skipped: \d+(?:, Flakes: \d+)?$/
-const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g
+export const MAVEN_TOTAL = /^\[(?:INFO|WARNING|ERROR)\] Tests run: \d+, Failures: (\d+), Errors: (\d+), Skipped: \d+(?:, Flakes: \d+)?$/
+export const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g
 
 export function outcomeFromOutput(command: string, kind: EvidenceKind, streams: readonly string[], isOk: boolean): boolean | null {
   const segments = segmentsOf(command)

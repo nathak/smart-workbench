@@ -53,6 +53,8 @@ type WorldOptions = {
   agentId?: string
   // What the engine reports as the session's context use; the default is only the window.
   context?: { tokens?: number; window: number; percent?: number }
+  // What a Bash call prints on stdout; the default is 'ok'.
+  bashOut?: string
   // What tools/graph-build.mjs prints (the graph, and a cache to hand back), and its exit code; unset, the script is not run.
   graph?: { stdout: string; exitCode?: number }
   // The rate-limit windows the engine reports; the default is none (not a subscription).
@@ -150,7 +152,7 @@ function world(on: On, options: WorldOptions = {}) {
       return { isError: true, result: 'Exit code 1', text: 'Exit code 1\nauth: 1 failed' }
     }
     if (e.tool === 'Agent' && options.agentId) return { result: { agentId: options.agentId } }
-    return { result: { stdout: 'ok', stderr: '', interrupted: false } }
+    return { result: { stdout: e.tool === 'Bash' && options.bashOut !== undefined ? options.bashOut : 'ok', stderr: '', interrupted: false } }
   })
 
   // The engine hands fs hooks absolute paths; read back by project-relative name.
@@ -1508,6 +1510,33 @@ const GRAPH_TOOL = 'mcp__smartworkbench__import_graph'
 const GRAPH_OUT = JSON.stringify({
   graph: { v: 1, builtAt: 1, truncated: false, skipped: { secret: 0, generated: 0, big: 0, link: 0 }, unresolved: 0, nodes: [{ p: 'src/a.ts', c: 'source', l: 'ts', s: 5, ext: 0 }, { p: 'src/b.ts', c: 'source', l: 'ts', s: 5, ext: 0 }], edges: [[0, 1, 'i']] },
   cache: { v: 1, cache: [] },
+})
+
+test('a stop held for an expectation alone does not use up the team final check', async ($, on) => {
+  const { workbench, clock } = world(on, { bashOut: 'Tests:       9 passed, 9 total\n' })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'Fix login' })
+  await ui.input({ key: 'add-condition', text: 'Related tests pass' })
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'fix it', ...COMPOSER })
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '30' })
+  await $.tool.call(advisorCall)
+  await $.tool.call({ tool: 'mcp__smartworkbench__set_condition_expectation', id: 'dc-1', min: 12, reason: 'the suite has 12' })
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(workbench().evidence[0]?.facts?.passed).toBe(9)
+
+  const held = await $.classic.Stop({ stop_hook_active: false })
+  expect(held.block).toContain('expected ≥12 passed')
+  expect(held.block).not.toContain('final check')
+
+  // The change made after the hold has not been seen by the advisor: the stop that follows is a first stop for the final check.
+  await clock.set(Date.UTC(2026, 9, 8, 1, 5, 0))
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: '31' })
+  const again = await $.classic.Stop({ stop_hook_active: true })
+  expect(again.block).toContain(`run a final check with ${ADVISOR}`)
+  await ui.unmount()
 })
 
 test('the import_graph tool answers from the graph build, builds once for calls close together, and is not a guarded call', async ($, on) => {

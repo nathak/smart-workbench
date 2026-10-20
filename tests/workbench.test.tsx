@@ -1,6 +1,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { judgeOf } from '../hooks/evidence'
+import { linkCondition, setExpectation } from '../hooks/model'
 import type { Workbench } from '../types'
 
 const CWD = '/work'
@@ -145,6 +147,71 @@ test('a Gradle run piped into tail is recorded from its closing line, and not wh
   output = { stdout: 'BUILD SUCCESSFUL in 4s\n', stderr: '', backgroundTaskId: 'b1' }
   await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -30' })
   expect(workbench().evidence.map(one => one.ok)).toEqual([false, true, null, null])
+  await ui.unmount()
+})
+
+const EXPECT = 'mcp__smartworkbench__set_condition_expectation'
+
+test('a condition expecting 12 passed tests is failed by a run that shows 9, holds the finish once, and is verified by one that shows 12', async ($, on) => {
+  const workbench = world(on)
+  let stdout = 'Tests:       9 passed, 9 total\n'
+  on('tool.call', () => ({ result: { stdout, stderr: '', interrupted: false } }))
+  on('classic.Stop', () => ({}))
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'Fix it' })
+  await ui.input({ key: 'add-condition', text: 'Related tests pass' })
+
+  expect(JSON.stringify(await $.tool.call({ tool: EXPECT, id: 'dc-1', min: 12, failed_max: 0, reason: 'the suite has 12' }))).toContain('recorded on dc-1')
+  expect(workbench().task.doneConditions[0]?.expect).toMatchObject({ setBy: 'claude', tests: { min: 12, failedMax: 0 } })
+
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(workbench().evidence[0]?.facts).toMatchObject({ passed: 9, failed: 0 })
+  expect(workbench().task.status).toBe('verifying')
+  expect(judgeOf(workbench().task.doneConditions[0] as never, workbench().evidence)).toMatchObject({ status: 'failed', expected: '≥12 passed, ≤0 failed', got: '9 passed' })
+
+  const held = await $.classic.Stop({ stop_hook_active: false })
+  expect(held.block).toContain('done condition dc-1')
+  expect(held.block).toContain('expected ≥12 passed')
+  expect(held.block).toContain('got 9 passed')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+
+  stdout = 'Tests:       12 passed, 12 total\n'
+  await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  expect(workbench().task.status).toBe('complete')
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toBe(undefined)
+  await ui.unmount()
+})
+
+test('a locked contract takes a first expectation on a linked condition and nothing more from Claude', async ($, on) => {
+  const workbench = world(on)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'Fix it' })
+  await ui.input({ key: 'add-condition', text: 'Related tests pass' })
+  await ui.input({ key: 'add-condition', text: 'Looks right to the person' })
+  await ui.press({ key: 'lock' })
+
+  const set = (input: Record<string, unknown>) => $.tool.call({ tool: EXPECT, reason: 'because', ...input } as never).then(result => JSON.stringify(result))
+  expect(await set({ id: 'dc-1', min: 5 })).toContain('recorded on dc-1')
+  expect(await set({ id: 'dc-1', min: 1 })).toContain('locked')
+  expect(await set({ id: 'dc-2', min: 5 })).toContain('no check link')
+  expect(await set({ id: 'dc-9', min: 5 })).toContain('no such done condition')
+  expect(await set({ id: 'dc-1' })).toContain('rejected')
+  expect(workbench().task.doneConditions[0]?.expect?.tests?.min).toBe(5)
+  await ui.unmount()
+})
+
+test('relinking a condition drops an expectation Claude set, and one with test counts when the link is no longer a test run', async ($, on) => {
+  const workbench = world(on)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'Fix it' })
+  await ui.input({ key: 'add-condition', text: 'Related tests pass' })
+  await $.tool.call({ tool: EXPECT, id: 'dc-1', min: 3, reason: 'r' })
+  expect(workbench().task.doneConditions[0]?.expect).toBeDefined()
+  const mine = linkCondition(workbench(), 'dc-1', 'build')
+  expect(mine.task.doneConditions[0]?.expect).toBeUndefined()
+  const theirs = setExpectation(workbench(), 'dc-1', { setBy: 'user', at: 1, tests: { min: 3 } })
+  expect(linkCondition(theirs, 'dc-1', 'build').task.doneConditions[0]?.expect).toBeUndefined()
+  expect(linkCondition(theirs, 'dc-1', 'test').task.doneConditions[0]?.expect?.setBy).toBe('user')
   await ui.unmount()
 })
 

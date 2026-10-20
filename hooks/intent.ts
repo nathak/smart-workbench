@@ -1,3 +1,4 @@
+import { expectText } from './evidence'
 import type { Task } from '../types'
 
 // The tool Claude calls to ask for a contract change (registered by register.tsx).
@@ -43,7 +44,8 @@ export function serializeContract(task: Task): string | undefined {
   if (conditions.length > 0) {
     lines.push('  <done_conditions>')
     for (const one of conditions) {
-      lines.push(`    <condition id="${one.id}">${escapeXml(one.text)}</condition>`)
+      const expects = one.expect ? ` expects="${escapeXml(expectText(one.expect))}"` : ''
+      lines.push(`    <condition id="${one.id}"${expects}>${escapeXml(one.text)}</condition>`)
     }
     lines.push('  </done_conditions>')
   }
