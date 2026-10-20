@@ -819,8 +819,33 @@ const G = await import('./live-graph.mjs')
   const again = await G.buildGraph(proj, cache)
   check(again.cache.get('src/a.ts') === cache.get('src/a.ts') && JSON.stringify(again.graph.edges) === JSON.stringify(graph.edges) && again.graph.skipped.big === 1, 'a second build reuses what it read before and gives the same edges')
   for (let k = 0; k < 6; k++) put(`many/f${k}.ts`, `import './f${(k + 1) % 6}'\n`)
+  put('.ssh/id.js', 'export const k = 1\n')
+  put('src/secret.pem.js', 'export const s = 1\n')
+  const ssh = await G.buildGraph(proj)
+  check(!ssh.graph.nodes.some(n => n.p.startsWith('.ssh/')) && ssh.graph.skipped.secret >= 3, 'a secret path whose name ends in a code extension is left out too')
+  // A file the build ran out of time for is read on the next build, not remembered as empty.
+  put('late/x.ts', "import './y'\n"); put('late/y.ts', 'export {}\n')
+  // The clock runs out only after the walk and three reads, so the rest of the files meet the budget in the read loop.
+  let counted = 0
+  const full = await G.buildGraph(proj, new Map(), () => (counted++, 0))
+  const readsNeeded = full.graph.nodes.filter(n => !n.big).length
+  let calls = 0
+  const slow = () => (calls++ < counted - readsNeeded + 3 ? 0 : 5000)
+  const cut = await G.buildGraph(proj, new Map(), slow)
+  check(cut.graph.truncated && cut.graph.truncated.time === true && [...cut.cache.values()].some(e => e.stale), 'the files the budget ran out for are marked, not remembered as empty')
+  const next = await G.buildGraph(proj, cut.cache)
+  const edgeOf = g => g.edges.some(e => g.nodes[e[0]].p === 'src/viaalias.ts' && g.nodes[e[1]].p === 'src/b.ts')
+  check(!edgeOf(cut.graph) && edgeOf(next.graph), 'a file skipped for lack of time has no links in the cut build and is read again by the next one')
   const small = await G.buildGraph(proj, new Map(), (() => { let t = 0; return () => (t += 800) })())
   check(small.graph.truncated && small.graph.truncated.time === true, 'a build over the time budget says it was cut short')
+  let builds = 0, fail = true
+  const svc = G.graphService(async () => { builds++; await sleep(30); if (fail) throw new Error('x'); return { graph: { v: 1, nodes: [], edges: [] }, cache: new Map() } })
+  const both = await Promise.allSettled([svc('/p', 0), svc('/p', 0)])
+  check(builds === 1 && both.every(r => r.status === 'rejected'), 'two requests for one project share a single build, and a failed build is an error for both')
+  fail = false
+  const [g1, g2] = await Promise.all([svc('/p', 0), svc('/p', 0)])
+  const g3 = await svc('/p', 60000)
+  check(builds === 2 && g1 === g2 && g3 === g1, 'the next request builds again after a failure, and a fresh answer is reused within its age')
   check(['.env', 'a/.env.local', 'x/server.pem', 'id_rsa', 'a/credentials.json'].every(p => G.kindOfPath(p) === 'secret') && G.kindOfPath('.env.example') !== 'secret' && G.kindOfPath('dist/x.js') === 'generated' && G.kindOfPath('src/a.test.ts') === 'test', 'the path rules agree with the secret and generated rules')
   const rules = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'files.ts'), 'utf8')
   check(rules.includes(G.SECRET.source) && rules.includes(G.GENERATED.source), 'the secret and generated rules are the same text as in hooks/files.ts')
@@ -843,7 +868,7 @@ const G = await import('./live-graph.mjs')
   const nbA2 = P.graphNeighbors(d, ix, 0, 2)
   check(nbA2.imports.map(x => x.i + ':' + x.step + ':' + x.via).join() === '1:1:-1,3:2:1', 'depth 2 adds what the neighbours import, with the file each came through')
   check(P.graphMatches(d, ix, 'B.T', '').join() === '1' && P.graphMatches(d, ix, '', 'test').join() === '2' && P.graphMatches(d, ix, 'zzz', '').length === 0, 'the search is by path part without case, and the category narrows it')
-  check(page.includes('id="p-graph"') && /\bTABS = \[[^\]]*'graph'\]/.test(page) && page.includes("'flow', 'graph'") && !/graph[^\n]{0,80}innerHTML/.test(page.slice(page.indexOf('// ---- graph tab'), page.indexOf('// ---- tabs: roving'))), 'the graph tab is in the tab list and the key list, and its code draws no markup from text')
+  check(page.includes('id="p-graph"') && /\bTABS = \[[^\]]*'graph'\]/.test(page) && page.includes("'flow', 'graph'") && !page.slice(page.indexOf('// ---- graph tab'), page.indexOf('// ---- tabs: roving')).includes('innerHTML'), 'the graph tab is in the tab list and the key list, and its code draws no markup from text')
 }
 
 process.exit(failed === 0 ? 0 : 1)

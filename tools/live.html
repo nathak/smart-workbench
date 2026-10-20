@@ -2845,7 +2845,8 @@ function graphData(raw){
     if (Array.isArray(e) && Number.isInteger(e[0]) && Number.isInteger(e[1]) && e[0] >= 0 && e[1] >= 0 && e[0] < nodes.length && e[1] < nodes.length && /^[irdt]$/.test(String(e[2]))) edges.push([e[0], e[1], String(e[2])]);
   });
   var tr = raw.truncated && typeof raw.truncated === 'object' ? Object.keys(raw.truncated).filter(function(k){ return /^(files|depth|bytes|time|edges)$/.test(k); }) : [];
-  return { nodes: nodes, edges: edges, builtAt: Number(raw.builtAt) || 0, truncated: tr, unresolved: Number(raw.unresolved) || 0 };
+  var sig = nodes.length + '/' + edges.length + '/' + nodes.reduce(function(a, n){ return a + n.s; }, 0);
+  return { nodes: nodes, edges: edges, sig: sig, builtAt: Number(raw.builtAt) || 0, truncated: tr, unresolved: Number(raw.unresolved) || 0 };
 }
 function graphIndex(d){
   var out = [], inn = [], byPath = Object.create(null);
@@ -2915,9 +2916,10 @@ function graphSize(n){ return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toF
 function graphNote(text){ var n = $('gr-state'); n.textContent = text; }
 function loadGraph(force){
   var owner = hub ? curId : '';
-  if (GR.loading) return;
-  if (hub && !curId) { GR.err = L('Pick a session first.', '세션을 먼저 고르세요.'); drawGraph(); return; }
+  // Another session than the one the graph was made for: forget it at once, even while a request for the old one is still out.
   if (GR.owner !== owner) { GR.data = null; GR.ix = null; GR.center = -1; GR.back = []; GR.key = ''; GR.auto = true; GR.owner = owner; }
+  if (hub && !curId) { GR.err = L('Pick a session first.', '세션을 먼저 고르세요.'); drawGraphFocus(); return; }
+  if (GR.loading) { GR.again = true; return; }
   GR.loading = true;
   var url = (hub ? '/graph?session=' + encodeURIComponent(curId) : '/graph') + (force ? (hub ? '&' : '?') + 'fresh=1' : '');
   fetch(url, { cache: 'no-store' }).then(function(r){
@@ -2929,12 +2931,12 @@ function loadGraph(force){
     var d = graphData(raw);
     if (!d) throw new Error(L('The graph is in a form this page does not know.', '이 페이지가 모르는 형식의 그래프입니다.'));
     if (GR.owner !== (hub ? curId : '')) return;
-    var changed = !GR.data || GR.data.builtAt !== d.builtAt;
+    var changed = !GR.data || GR.data.sig !== d.sig;
     GR.data = d; GR.ix = graphIndex(d); GR.err = null;
     if (GR.center < 0 || GR.center >= d.nodes.length || (GR.centerPath && GR.ix.byPath[GR.centerPath] === undefined)) GR.center = graphStart();
     else if (GR.centerPath && GR.ix.byPath[GR.centerPath] !== undefined) GR.center = GR.ix.byPath[GR.centerPath];
     if (changed) GR.key = '';
-  }).catch(function(e){ GR.err = e && e.message ? e.message : String(e); }).then(function(){ GR.loading = false; drawGraph(); });
+  }).catch(function(e){ GR.err = e && e.message ? e.message : String(e); }).then(function(){ GR.loading = false; drawGraphFocus(); if (GR.again) { GR.again = false; loadGraph(false); } });
 }
 function graphStart(){
   var d = GR.data, ix = GR.ix;
@@ -2949,7 +2951,7 @@ function graphGo(i, pushBack){
   if (!GR.data || i < 0 || i >= GR.data.nodes.length) return;
   if (pushBack && GR.center >= 0 && GR.center !== i) { GR.back.push(GR.center); if (GR.back.length > 30) GR.back.shift(); }
   GR.center = i; GR.centerPath = GR.data.nodes[i].p; GR.key = ''; GR.auto = false;
-  drawGraph(true);
+  drawGraph(true); // the focus is meant to move to the new centre, so no withFocus here
 }
 var GR_KIND = { i: ['import', 'import'], r: ['re-export', '재수출'], d: ['dynamic', '동적'], t: ['test of', '테스트 대상'] };
 function graphItem(i, extra, touched){
@@ -3021,7 +3023,7 @@ function drawGraph(refocus){
   var d = GR.data, ix = GR.ix, t = graphTouched(d, ix);
   // Until a file is picked by hand, the view follows the file the session touched last.
   if (GR.auto && t.order.length && t.order[t.order.length - 1] !== GR.center) { GR.center = t.order[t.order.length - 1]; GR.centerPath = d.nodes[GR.center].p; }
-  var key = [d.builtAt, GR.center, GR.q, GR.cat, GR.depth, GR.back.length, t.order.length, lang].join('|');
+  var key = [d.sig, GR.center, GR.q, GR.cat, GR.depth, GR.back.length, t.order.length, lang].join('|');
   graphNote(d.nodes.length + L(' files · ', '개 파일 · ') + d.edges.length + L(' links', '개 연결') + (d.truncated.length ? ' · ' + L('cut short', '일부만') : ''));
   box.hidden = !GR.err; if (GR.err) box.textContent = GR.err;
   $('gr-main').hidden = false; $('gr-side').hidden = false;
@@ -3052,7 +3054,7 @@ function drawGraph(refocus){
   var back = el('button', null, L('Back', '뒤로')); back.type = 'button'; back.disabled = !GR.back.length; back.dataset.fk = 'gr-back';
   back.onclick = function(){ var p = GR.back.pop(); if (p !== undefined) graphGo(p, false); };
   var dep = el('button', null, GR.depth === 1 ? L('Depth 1', '깊이 1') : L('Depth 2', '깊이 2')); dep.type = 'button'; dep.dataset.fk = 'gr-depth';
-  dep.setAttribute('aria-pressed', GR.depth === 2 ? 'true' : 'false'); dep.onclick = function(){ GR.depth = GR.depth === 1 ? 2 : 1; GR.key = ''; drawGraph(); };
+  dep.setAttribute('aria-pressed', GR.depth === 2 ? 'true' : 'false'); dep.onclick = function(){ GR.depth = GR.depth === 1 ? 2 : 1; GR.key = ''; drawGraphFocus(); };
   var cp = el('button', null, L('Copy path', '경로 복사')); cp.type = 'button'; cp.dataset.fk = 'gr-copy';
   cp.onclick = function(){ try { navigator.clipboard.writeText(n.p); cp.textContent = L('Copied', '복사됨'); } catch (e) { cp.textContent = n.p; } };
   var rf = el('button', null, L('Refresh', '새로고침')); rf.type = 'button'; rf.dataset.fk = 'gr-refresh'; rf.onclick = function(){ loadGraph(true); };
@@ -3067,9 +3069,11 @@ function drawGraph(refocus){
   main.appendChild(cols);
   if (refocus) { var h = $('gr-center-h'); if (h) h.focus({ preventScroll: true }); }
 }
+// Every redraw that is not the one in the queue keeps the focus where the keyboard was.
+function drawGraphFocus(refocus){ withFocus(function(){ drawGraph(refocus); }); }
 function graphInit(){
-  $('gr-q').oninput = function(){ GR.q = this.value; GR.key = ''; drawGraph(); };
-  [['all', ''], ['source', 'source'], ['test', 'test'], ['config', 'config']].forEach(function(p){ $('gr-cat-' + p[0]).onclick = function(){ GR.cat = p[1]; GR.key = ''; drawGraph(); }; });
+  $('gr-q').oninput = function(){ GR.q = this.value; GR.key = ''; drawGraphFocus(); };
+  [['all', ''], ['source', 'source'], ['test', 'test'], ['config', 'config']].forEach(function(p){ $('gr-cat-' + p[0]).onclick = function(){ GR.cat = p[1]; GR.key = ''; drawGraphFocus(); }; });
   // While the tab is open the graph is asked for again now and then (the server builds only what changed).
   setInterval(function(){ if (tab === 'graph' && !document.hidden) loadGraph(false); }, 8000);
 }
