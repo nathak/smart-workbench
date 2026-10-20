@@ -1901,6 +1901,33 @@ test('the Codex plugin list is read from CLAUDE_CONFIG_DIR when that is set', as
 
 const REVIEW = `node ${CODEX_DIR}/scripts/codex-companion.mjs review --wait`
 
+test('work committed within the turn: the final check names the commit the turn started from, and a review against it runs unasked', async ($, on) => {
+  const ran: string[] = []
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const HEAD = 'git -c core.quotePath=false rev-parse HEAD'
+  world(on, {
+    files: { ...CODEX_FILES, '.claude/smartworkbench-live.jsonl': '', '.claude/smartworkbench-live.pid': 'h 1' },
+    commands: { ...CODEX_RUNS, [`tee -a ${CWD}/.claude/smartworkbench-live.jsonl`]: { exitCode: 0, stdout: '' }, [HEAD]: [{ exitCode: 0, stdout: 'aaaaaaa1111\n' }, { exitCode: 0, stdout: 'bbbbbbb2222\n' }] },
+    ran,
+    processed: writes,
+    ask: labels => (labels.includes('Turn on') ? 'Turn on' : 'Block'),
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.session.start(start)
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.command.run({ command: 'swb', args: 'team codex on', ...COMMAND })
+  await $.prompt.submit({ text: 'fix it', ...COMPOSER })
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '30' })
+
+  const held = await $.classic.Stop({ stop_hook_active: false })
+  expect(held.block).toContain(`review --wait --base aaaaaaa1111`)
+  expect(held.block).toContain('would see nothing')
+  const bin = `node ${CODEX_DIR}/scripts/codex-companion.mjs`
+  await $.tool.call({ tool: 'Bash', command: `${bin} review --wait --base aaaaaaa1111` })
+  expect(ran).toContain(`${bin} review --wait --base aaaaaaa1111`)
+})
+
 test('with Codex on in team mode: the prompt carries the Codex brief, a review runs unasked once per turn, and the final check names it', async ($, on) => {
   const ran: string[] = []
   const writes: Array<{ argv: string[]; stdin?: string }> = []

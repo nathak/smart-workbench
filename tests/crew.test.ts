@@ -153,6 +153,11 @@ describe('codex plugin', () => {
       expect([bad, ok(`node ${path} ${bad}`)]).toEqual([bad, false])
     }
     expect(ok(`node ${path} task "explain the failing test in src/a.ts"`)).toBe(true)
+    // A review of committed work names the commit it compares against; only a hex commit id, only once, only for a review.
+    expect(ok(`node ${path} review --wait --base abc1234`)).toBe(true)
+    expect(ok(`node ${path} adversarial-review --base ${'0123456789abcdef'.repeat(2)}12345678`)).toBe(true)
+    for (const bad of ['review --base abc12', 'review --base ABC1234', 'review --base main', 'review --base abc1234 --base def5678', 'review --base', 'review --base abc1234 --scope branch', 'task --base abc1234 "x"', 'review --base $(git rev-parse HEAD)', 'review --base abc1234;git push', 'review --base abc1234 extra'])
+      expect([bad, ok(`node ${path} ${bad}`)]).toEqual([bad, false])
     expect(ok(`node ${path} review > out.txt`)).toBe(false)
     expect(ok(`node /other/codex-companion.mjs review`)).toBe(false)
     expect(ok(`node ${path} review\ngit push`)).toBe(false)

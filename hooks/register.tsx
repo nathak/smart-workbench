@@ -3428,7 +3428,9 @@ export const register: Register = on => {
       }
     }
     const carriesDesign = (e.origin.kind === 'plugin' && (await read($, liveAtom)).loop !== undefined) || crew.planWasApproved((await read($, liveAtom)).track ?? crew.EMPTY_TRACK)
-    await updateTrack($, track => crew.turnStart(track, startedAt, carriesDesign))
+    // The commit the turn starts from, for a Codex review of work that gets committed within the turn.
+    const turnHead = wb.team?.enabled && codex.isCodexOn(wb.team) && codex.codexOf(wb.team).review ? (await gitOut($, ['rev-parse', 'HEAD']))?.trim() : undefined
+    await updateTrack($, track => ({ ...crew.turnStart(track, startedAt, carriesDesign), ...(turnHead && /^[0-9a-f]{7,40}$/.test(turnHead) ? { turnHead } : {}) }))
     await setLive($, current => {
       const { turnResult: _done, ...rest } = current
 
@@ -3924,7 +3926,11 @@ export const register: Register = on => {
 
         const wantsCodex = codex.isCodexOn(wb.team) && codex.codexOf(wb.team).review && !!live.codexPath && !running && !codex.hasReviewedThisTurn(track)
 
-        return leave(`${crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text), wantsCodex)}${heldText ? ` ${heldText}` : ''}`, false)
+        // Work committed within the turn leaves a clean tree: the review then compares against the commit the turn started from.
+        const nowHead = wantsCodex && track.turnHead ? (await gitOut($, ['rev-parse', 'HEAD']))?.trim() : undefined
+        const codexBase = wantsCodex && track.turnHead && nowHead && nowHead !== track.turnHead && live.codexPath ? { path: live.codexPath, sha: track.turnHead } : undefined
+
+        return leave(`${crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text), wantsCodex, codexBase)}${heldText ? ` ${heldText}` : ''}`, false)
       }
     }
 

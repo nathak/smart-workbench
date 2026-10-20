@@ -189,10 +189,11 @@ export function needsFinalCheck(track: Track, lastEditAt: number | undefined, is
   return (track.lastAdvisorAt ?? 0) < lastEditAt
 }
 
-export function finalCheckReason(goal: string, conditions: readonly string[], codexReview = false): string {
+export function finalCheckReason(goal: string, conditions: readonly string[], codexReview = false, codexBase?: { path: string; sha: string }): string {
   const what = goal.trim() ? ` Goal: ${goal.trim()}.` : ''
   const done = conditions.length > 0 ? ` Done conditions: ${conditions.join('; ')}.` : ''
-  const codex = codexReview ? ' First run the Codex review once (see smartworkbench_codex) and give the advisor its findings with the goal, files and checks.' : ''
+  const base = codexReview && codexBase ? ` This turn's work is committed, so a plain review would see nothing: run node "${codexBase.path}" review --wait --base ${codexBase.sha}` : ''
+  const codex = codexReview ? ` First run the Codex review once (see smartworkbench_codex)${base ? '.' : ''}${base} and give the advisor its findings with the goal, files and checks.` : ''
 
   return `SmartWorkbench team mode: before finishing, run a final check with ${ADVISOR}.${what}${done}${codex} Give it the goal, the files you changed and the check results; fix what it finds or say why not, then finish.`
 }
