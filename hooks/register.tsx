@@ -12,7 +12,7 @@ import { GRAPH_DESCRIPTION, GRAPH_TOOL, graphAnswer, graphDataOf, queryPath, typ
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
-import { checkOutcome, completionOf, evidenceKindsOf, isStale, latestOf, markOf, statusOf, turnSummary } from './evidence'
+import { checkOutcome, completionOf, evidenceKindsOf, isStale, latestOf, markOf, outcomeFromOutput, statusOf, turnSummary } from './evidence'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
 import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
@@ -295,6 +295,18 @@ function inputText(input: unknown): string {
   const shown = Object.fromEntries(Object.entries(args).filter(([key]) => key !== 'tool' && key !== 'tool_use_id' && key !== 'agentId').map(([key, value]) => [key, typeof value === 'string' && value.length > 4000 ? `${value.slice(0, 4000)}…` : value]))
 
   return JSON.stringify(shown, null, 2)
+}
+
+// A Bash result as separate streams, so the end of one is not pushed off by the other; an error result may carry its text apart.
+function outputStreams(result: unknown, text: unknown): string[] {
+  if (typeof result === 'string' && result !== '') return [result]
+  if (typeof result === 'object' && result !== null) {
+    const one = result as Record<string, unknown>
+    const parts = [one.stdout, one.stderr].filter((part): part is string => typeof part === 'string' && part !== '')
+    if (parts.length > 0) return parts
+  }
+
+  return typeof text === 'string' && text !== '' ? [text] : []
 }
 
 function resultText(result: unknown): string {
@@ -3587,6 +3599,7 @@ export const register: Register = on => {
     const bashResult = e.tool === 'Bash' && !ran.isError ? (ran.result as { interrupted?: boolean; backgroundTaskId?: string } | undefined) : undefined
     const isUnsettled = bashResult?.interrupted === true || bashResult?.backgroundTaskId !== undefined
 
+    const streams = e.tool === 'Bash' && !isUnsettled && kinds.length > 0 ? outputStreams(ran.result, (ran as { text?: unknown }).text) : []
     const fresh: EvidenceRecord[] = []
     await mutate($, current => {
       let updated = model.recordCall(current, { ...call, outcome, durationMs: endedAt - startedAt })
@@ -3594,7 +3607,8 @@ export const register: Register = on => {
       if (kinds.length > 0 && e.tool === 'Bash' && ran.deny === undefined) {
         // One record per kind a command runs; the first keeps the call id, which the badge and the counts look up.
         kinds.forEach((kind, i) => {
-          const ok = isUnsettled ? null : checkOutcome(e.command, kind, isOk)
+          // The exit code decides when it can; a build tool's own closing line decides when a pipe hid it.
+          const ok = isUnsettled ? null : (checkOutcome(e.command, kind, isOk) ?? outcomeFromOutput(e.command, kind, streams, isOk))
           const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt }
           updated = model.addEvidence(updated, record)
           fresh.push(record)

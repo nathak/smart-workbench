@@ -90,6 +90,55 @@ describe('exit codes the shell hides', () => {
   })
 })
 
+describe('build tool output when the exit code cannot tell', () => {
+  const { outcomeFromOutput: from, checkOutcome } = evidence
+  const OK = '> Task :test\n\nBUILD SUCCESSFUL in 12s\n4 actionable tasks: 2 executed\n'
+  const PIPED = './gradlew test 2>&1 | tail -30'
+
+  test('a Gradle or Maven run piped into a filter is decided by its closing line', () => {
+    expect(checkOutcome(PIPED, 'test', true)).toBe(null)
+    expect(from(PIPED, 'test', [OK], true)).toBe(true)
+    expect(from(PIPED, 'test', ['BUILD SUCCESSFUL in 1m 5s'], true)).toBe(true)
+    expect(from(PIPED, 'test', ['BUILD SUCCESSFUL'], true)).toBe(true)
+    expect(from(PIPED, 'test', ['a\r\nBUILD SUCCESSFUL in 2s\r\n'], true)).toBe(true)
+    expect(from('cd app && ./gradlew test |& tail', 'test', [OK], true)).toBe(true)
+    expect(from('./gradlew test | tee out.log | tail -40', 'test', [OK], true)).toBe(true)
+    expect(from(PIPED, 'test', [OK, `${'warning\n'.repeat(50)}`], true)).toBe(true)
+    expect(from('mvn -q test | tail', 'test', ['[\x1b[1;34mINFO\x1b[m] \x1b[1;32mBUILD SUCCESS\x1b[m'], true)).toBe(true)
+    expect(from(PIPED, 'test', ['BUILD FAILED in 3s'], true)).toBe(false)
+    expect(from(PIPED, 'test', ['BUILD FAILED in 3s'], false)).toBe(false)
+    expect(from(PIPED, 'test', ['BUILD SUCCESSFUL in 1s\nBUILD FAILED in 3s'], true)).toBe(false)
+    expect(from(PIPED, 'test', ['x', 'FAILURE: Build failed with an exception.\nBUILD FAILED in 2s'], true)).toBe(false)
+    expect(from('mvn test | tail', 'test', [`[INFO] BUILD FAILURE\n${'[ERROR] x\n'.repeat(20)}`], true)).toBe(false)
+  })
+
+  test('Maven runs that ignore failures count a success line for nothing, but failing totals still fail', () => {
+    const out = '[ERROR] Tests run: 5, Failures: 1, Errors: 0, Skipped: 0\n[INFO] BUILD SUCCESS'
+    expect(from('mvn test -Dmaven.test.failure.ignore=true | tail -50', 'test', [out], true)).toBe(false)
+    expect(from('mvn test -Dmaven.test.failure.ignore=true | tail -50', 'test', ['[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0\n[INFO] BUILD SUCCESS'], true)).toBe(null)
+    expect(from('mvn test -fn | tail', 'test', ['[INFO] BUILD SUCCESS'], true)).toBe(null)
+  })
+
+  test('anything that makes the line less than the tool\'s own verdict stays unknown', () => {
+    expect(from(PIPED, 'test', [OK], false)).toBe(null)
+    expect(from(PIPED, 'test', [''], true)).toBe(null)
+    expect(from(PIPED, 'test', [], true)).toBe(null)
+    expect(from('./gradlew test | head -5', 'test', ['> Task :compileJava'], true)).toBe(null)
+    expect(from(PIPED, 'test', ['  BUILD SUCCESSFUL'], true)).toBe(null)
+    expect(from(PIPED, 'test', ['echo: BUILD SUCCESSFUL in 1s'], true)).toBe(null)
+    expect(from(PIPED, 'test', [`BUILD SUCCESSFUL\n${'x\n'.repeat(41)}`], true)).toBe(null)
+    expect(from('npm test | tail', 'test', [OK], true)).toBe(null)
+    expect(from(PIPED, 'test', ['[INFO] BUILD SUCCESS'], true)).toBe(null)
+    expect(from('./gradlew build | tail', 'test', [OK], true)).toBe(null)
+  })
+
+  test('a command that is not one plain build run is not read', () => {
+    for (const command of ['./gradlew clean; ./gradlew test | tail', './gradlew test; echo BUILD SUCCESSFUL', 'cat old.log; ./gradlew test | tail', './gradlew test | sed s/a/b/', './gradlew test -m | tail', 'echo $(./gradlew test)', '! ./gradlew test | tail', './gradlew test | cat - old.log', './gradlew test & ']) {
+      expect(from(command, 'test', [OK], true)).toBe(null)
+    }
+  })
+})
+
 describe('which command counts as a check', () => {
   const { evidenceKindsOf, checkOutcome } = evidence
 

@@ -4,6 +4,9 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+- A Gradle or Maven test/build run piped into `tail` (or otherwise hiding its exit code) is recorded as passed or failed from its closing `BUILD SUCCESSFUL`/`BUILD FAILED` (Maven `BUILD SUCCESS`/`BUILD FAILURE`, failing test totals) line, instead of staying `observed`; only for a single build run, never for an interrupted or background run, a failure line wins and a success line is ignored when the call ended in error. A barrier against accidents: a command can print such a line.
+
 ### Added
 - An `import_graph` tool for Claude (read-only): what a JS/TS file imports, what imports it and its tests, one or two steps out, each marked with what the session knows (changed and whether a check followed, pinned, read, the last test run when its command names the test file). Paths only, no contents; the graph is built by `tools/graph-build.mjs` with the Files view's engine and limits (secret, generated, linked and large files are never read), kept 5 seconds and until the next edit; a path outside the project, secret, generated or not JS/TS is refused without echoing it. Not a call the guard classifies, like `propose_contract_change`. The team's explorer and advisor agents may call it too (their tool lists and prompts name it).
 - The live page shows the subscription limits (the 5 hour and weekly windows, or a gateway's spend limit) under the context figure: the share used with a bar and the time to the reset, coloured like the context (amber from 75 %, red from 90 %). They come from the engine's own `session.usage()` and `session.measure`, travel as numbers on the `wb` state line (never the turn line or the ledger), and are absent off a subscription.

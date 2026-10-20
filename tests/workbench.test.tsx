@@ -129,6 +129,25 @@ test('blocked calls never run; allowed calls are recorded with evidence', async 
   await ui.unmount()
 })
 
+test('a Gradle run piped into tail is recorded from its closing line, and not when it was interrupted', async ($, on) => {
+  const workbench = world(on)
+  let output = { stdout: '> Task :test\n\nBUILD FAILED in 3s\n', stderr: '', interrupted: false } as Record<string, unknown>
+  on('tool.call', () => ({ result: output }))
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'Fix it' })
+  await ui.input({ key: 'add-condition', text: 'Related tests pass' })
+
+  await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -30' })
+  output = { stdout: 'BUILD SUCCESSFUL in 4s\n', stderr: '', interrupted: false }
+  await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -30' })
+  output = { stdout: 'BUILD SUCCESSFUL in 4s\n', stderr: '', interrupted: true }
+  await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -30' })
+  output = { stdout: 'BUILD SUCCESSFUL in 4s\n', stderr: '', backgroundTaskId: 'b1' }
+  await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -30' })
+  expect(workbench().evidence.map(one => one.ok)).toEqual([false, true, null, null])
+  await ui.unmount()
+})
+
 test('state survives a restart through the store', async ($, on) => {
   const saved: Workbench = {
     schemaVersion: 1,

@@ -8,6 +8,8 @@ const LAUNCHER = String.raw`(?:(?:npx|bunx|pnpx|pnpm\s+(?:exec|dlx)|yarn(?:\s+ex
 const SCRIPT = (names: string) =>
   String.raw`(?:npm|pnpm|yarn|bun)\s+(?:(?:-w|--workspace|--filter|-F|-C|--prefix|--cwd|--dir)(?:=\S+|\s+[^\s-]\S*)\s+|--?\w[\w-]*\s+)*(?:run(?:-script)?\s+)?(?:${names})(?:[:-][\w:.-]*)?(?=\s|$)`
 // Goals of a build tool come after any options: `mvn -q clean test`, `./gradlew :app:test`.
+const GRADLE = String.raw`gradle|\.?/?gradlew`
+const MAVEN = String.raw`mvn|\.?/?mvnw`
 const GOAL = (tool: string, goals: string) => String.raw`(?:${tool})(?:\s+\S+)*?\s+(?:\S*:)?(?:${goals})(?=\s|$)`
 
 const KINDS: readonly { kind: EvidenceKind; pattern: RegExp }[] = [
@@ -26,13 +28,13 @@ const KINDS: readonly { kind: EvidenceKind; pattern: RegExp }[] = [
   {
     kind: 'test',
     pattern: new RegExp(
-      `^(?:${LAUNCHER}(?:jest|vitest|mocha|pytest|phpunit|rspec|playwright\\s+test)|${SCRIPT('test')}|(?:npm|pnpm|yarn)\\s+t|python3?\\s+-m\\s+(?:pytest|unittest)|(?:go|deno|dotnet)\\s+test|cargo(?:\\s+\\+\\S+)?\\s+(?:test|t|nextest\\s+run)|claude\\s+plugin\\s+test|bun\\s+test|${GOAL('mvn|\\.?/?mvnw', 'test|verify')}|${GOAL('gradle|\\.?/?gradlew', 'test|check')}|make\\s+(?:(?:-C\\s+[^\\s-]\\S*|-\\S+)\\s+)*(?:test|tests|check))(?=\\s|$)`,
+      `^(?:${LAUNCHER}(?:jest|vitest|mocha|pytest|phpunit|rspec|playwright\\s+test)|${SCRIPT('test')}|(?:npm|pnpm|yarn)\\s+t|python3?\\s+-m\\s+(?:pytest|unittest)|(?:go|deno|dotnet)\\s+test|cargo(?:\\s+\\+\\S+)?\\s+(?:test|t|nextest\\s+run)|claude\\s+plugin\\s+test|bun\\s+test|${GOAL(MAVEN, 'test|verify')}|${GOAL(GRADLE, 'test|check')}|make\\s+(?:(?:-C\\s+[^\\s-]\\S*|-\\S+)\\s+)*(?:test|tests|check))(?=\\s|$)`,
     ),
   },
   {
     kind: 'build',
     pattern: new RegExp(
-      `^(?:${SCRIPT('build')}|(?:${LAUNCHER}(?:vite|next|webpack|esbuild|rollup))\\s+build|${LAUNCHER}tsc\\s+(?:\\S+\\s+)*?(?:--build|-b)|(?:go|dotnet)\\s+build|cargo(?:\\s+\\+\\S+)?\\s+(?:build|b)|${GOAL('mvn|\\.?/?mvnw', 'package|install|compile')}|${GOAL('gradle|\\.?/?gradlew', 'build|assemble')}|make\\s*$|make\\s+(?:(?:-C\\s+[^\\s-]\\S*|-\\S+)\\s+)*(?:build|all)|claude\\s+plugin\\s+validate)(?=\\s|$)`,
+      `^(?:${SCRIPT('build')}|(?:${LAUNCHER}(?:vite|next|webpack|esbuild|rollup))\\s+build|${LAUNCHER}tsc\\s+(?:\\S+\\s+)*?(?:--build|-b)|(?:go|dotnet)\\s+build|cargo(?:\\s+\\+\\S+)?\\s+(?:build|b)|${GOAL(MAVEN, 'package|install|compile')}|${GOAL(GRADLE, 'build|assemble')}|make\\s*$|make\\s+(?:(?:-C\\s+[^\\s-]\\S*|-\\S+)\\s+)*(?:build|all)|claude\\s+plugin\\s+validate)(?=\\s|$)`,
     ),
   },
 ]
@@ -63,8 +65,13 @@ function segmentsOf(command: string): Segment[] {
   return result
 }
 
+// A segment's command, without grouping, env assignments and launchers.
+function bodyOf(text: string): string {
+  return text.trim().replace(/^[({]\s*/, '').replace(/[)}\s]+$/, '').replace(PREFIX, '')
+}
+
 function kindOfSegment(text: string): EvidenceKind | undefined {
-  const body = text.trim().replace(/^[({]\s*/, '').replace(/[)}\s]+$/, '').replace(PREFIX, '')
+  const body = bodyOf(text)
 
   return NO_CHECK.test(body) ? undefined : KINDS.find(one => one.pattern.test(body))?.kind
 }
@@ -190,6 +197,62 @@ export function checkOutcome(command: string, kind: EvidenceKind, isOk: boolean)
 
   if (after.length === 0) return isOk
   if (after.every(op => op === '&&')) return isOk ? true : null
+
+  return null
+}
+
+// What a Gradle or Maven run's own output says when the exit code cannot (`./gradlew test 2>&1 | tail -30` exits with tail's code).
+// Read only for a run of one build tool, after quiet set-up commands and piped only into filters, and only as the tool's own final
+// line (not text the command or the model wrote): a failure line wins, a success line counts only when the call did not end in error.
+// A quiet run, a marker cut off by `tail` and anything odd stay unknown. A barrier against accidents: a command can print the line.
+const TAIL_LINES = 40
+const QUIET_BEFORE = /^(?:|cd(?:\s+\S+)?|(?:export|unset|set)(?:\s+\S+)+)$/
+const FILTER_AFTER = /^(?:tail|head|e?grep|fgrep|tee)(?=\s|$)/
+const GRADLE_MARK = /^BUILD (SUCCESSFUL|FAILED)(?: in \d+(?:\.\d+)?(?:ms|s|m|h)(?: \d+(?:\.\d+)?(?:ms|s|m|h))*)?$/
+const MAVEN_MARK = /^\[INFO\] BUILD (SUCCESS|FAILURE)$/
+const MAVEN_TOTAL = /^\[(?:INFO|WARNING|ERROR)\] Tests run: \d+, Failures: (\d+), Errors: (\d+), Skipped: \d+(?:, Flakes: \d+)?$/
+const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g
+
+export function outcomeFromOutput(command: string, kind: EvidenceKind, streams: readonly string[], isOk: boolean): boolean | null {
+  const segments = segmentsOf(command)
+  const at = segments.findIndex(one => kindOfSegment(one.text) === kind)
+  if (at < 0) return null
+  const body = bodyOf(segments[at]?.text ?? '')
+  const tool = new RegExp(`^(?:${GRADLE})(?=\\s|$)`).test(body) ? 'gradle' : new RegExp(`^(?:${MAVEN})(?=\\s|$)`).test(body) ? 'maven' : undefined
+  if (tool === undefined) return null
+  if (/\$\(|[<>]\(|`/.test(maskText(command))) return null
+  // One build run only: an earlier or later one leaves markers of its own.
+  const runs = segments.filter(one => new RegExp(`^(?:${GRADLE}|${MAVEN})(?=\\s|$)`).test(bodyOf(one.text))).length
+  if (runs !== 1) return null
+  for (let i = 0; i < at; i += 1) {
+    const op = segments[i]?.op
+    if ((op !== '&&' && op !== ';') || !QUIET_BEFORE.test(bodyOf(segments[i]?.text ?? ''))) return null
+  }
+  if (/^\s*!/.test(segments[at]?.text ?? '')) return null
+  for (let i = at; i < segments.length - 1; i += 1) {
+    if (segments[i]?.op !== '|' || !FILTER_AFTER.test(bodyOf(segments[i + 1]?.text ?? ''))) return null
+  }
+  // -m skips the tasks and still prints BUILD SUCCESSFUL; Maven's ignore flags make a success line mean less.
+  if (tool === 'gradle' && /(?:^|\s)(?:-m|--dry-run)(?=\s|$)/.test(body)) return null
+  const trustSuccess = !(tool === 'maven' && /(?:^|\s)(?:-fn|--fail-never)(?=\s|$)|-Dmaven\.test\.(?:failure|error)\.ignore(?:=true)?(?=\s|$)/.test(body))
+
+  let success = false
+  let failure = false
+  for (const stream of streams) {
+    const lines = stream.replace(ANSI, '').split(/\r\n|\r|\n/).map(line => line.trimEnd())
+    while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+    for (const line of lines.slice(-TAIL_LINES)) {
+      const mark = (tool === 'gradle' ? GRADLE_MARK : MAVEN_MARK).exec(line)
+      if (mark) {
+        if (mark[1] === 'SUCCESSFUL' || mark[1] === 'SUCCESS') success = true
+        else failure = true
+      }
+      const total = tool === 'maven' ? MAVEN_TOTAL.exec(line) : null
+      if (total && Number(total[1]) + Number(total[2]) > 0) failure = true
+    }
+  }
+  if (failure) return false
+  if (success && trustSuccess && isOk) return true
 
   return null
 }
