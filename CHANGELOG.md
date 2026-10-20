@@ -4,6 +4,9 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- Background work shows in the live page: a call that returned with work still running (a Bash run sent to the background, a background agent, a workflow, a monitor) opens an entry (`bg.start` feed line), and the task notice that arrives when it ends closes it (`bg.end`, read from the `<task-notification>` prompt: task id, tool-use id, status, summary, duration). A chip in the top bar counts what is running (a click opens the list), the team view's count includes it, and the Agents (team) tab lists each task with its state (running, done, failed, stopped), what it is, when it started and how long it ran. Work whose end notice never arrives shows `no end seen` after 30 minutes and is never shown as finished; an end whose start fell out of the buffer is kept and marked. Feed-only lines (not in the ledger); older pages ignore them.
+
 ## [0.22.0] - 2026-10-20
 
 ### Changed

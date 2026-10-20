@@ -599,7 +599,7 @@ for (const theme of ['dark', 'light']) {
 
 // ---- the data model: pure, so it runs here on synthetic events ----
 const modelCode = page.slice(page.indexOf('// model:begin'), page.indexOf('// model:end'))
-const M = new Function(`${modelCode}\nreturn { limitsOf, untilOf, newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf, decisionOf, guardRows, sortRows, groupRows, guardStats, attention, kindStats, rebuild }`)()
+const M = new Function(`${modelCode}\nreturn { rebuild, bgStatus, bgList, bgCounts, BG_STALE_MS, limitsOf, untilOf, newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf, decisionOf, guardRows, sortRows, groupRows, guardStats, attention, kindStats, rebuild }`)()
 const feedOf = list => { const tr = M.newTrace(); let at = 1000; for (const ev of list) { at += 100; M.ingest(tr, { at, ...ev }) } return tr }
 // The rate-limit windows: only known kinds with a number survive the page's own check, whatever the feed holds.
 {
@@ -609,6 +609,35 @@ const feedOf = list => { const tr = M.newTrace(); let at = 1000; for (const ev o
   check(M.untilOf(1e6 + 130 * 60000, 1e6) === 130 && M.untilOf(1e6, 1e6) === null && M.untilOf(null, 1e6) === null && M.untilOf(5, 1e6) === null, 'the minutes to a reset are whole, and none once it has passed')
 }
 check(page.includes('id="ctx-lim"') && page.includes('function drawLimits'), 'the context tile has a place for the rate-limit rows')
+
+// Background work: a start opens it, a notice closes it; no end is never shown as finished.
+{
+  const T0 = 1000
+  const feed = list => { const tr = M.newTrace(); let at = T0; for (const ev of list) { at += ev.gap ?? 100; M.ingest(tr, { at, ...ev }) } return tr }
+  const one = tr => M.bgList(tr, tr.lastAt)[0]
+  const t1 = feed([{ kind: 'bg.start', id: 'u1', task: 'b1', tool: 'Bash', btype: 'shell', summary: 'sleep 20' }, { kind: 'bg.end', task: 'b1', id: 'u1', status: 'completed', ms: 20000, by: 'note' }])
+  check(one(t1).st === 'done' && one(t1).dur === 20000 && one(t1).b.summary === 'sleep 20', 'a background start closed by its notice is done, with the duration the notice gave')
+  const t2 = feed([{ kind: 'bg.start', id: 'u2', task: 'b2', tool: 'Agent', btype: 'agent', summary: 'review' }, { kind: 'bg.end', task: 'b2', status: 'failed', by: 'note' }])
+  check(one(t2).st === 'failed', 'a notice with only the task id closes the start by that id')
+  const t3 = feed([{ kind: 'bg.end', task: 'zz', status: 'completed', by: 'note' }])
+  check(one(t3).st === 'done' && one(t3).b.orphan === true && one(t3).dur === null, 'an end with no start is kept, marked, with no made-up duration')
+  const t4 = feed([{ kind: 'bg.start', id: 'u4', task: 'b4', tool: 'Bash', btype: 'shell', summary: 'x' }])
+  const at4 = t4.bg.get('u4').at
+  check(M.bgStatus(t4.bg.get('u4'), at4 + M.BG_STALE_MS - 1) === 'running' && M.bgStatus(t4.bg.get('u4'), at4 + M.BG_STALE_MS + 1) === 'unknown', 'without an end it runs, then after the stale time shows no end seen, never done')
+  const t5 = feed([{ kind: 'bg.start', id: 'u5', task: 'b5', tool: 'Agent', btype: 'agent' }, { kind: 'bg.end', task: 'b5', status: 'completed', by: 'turn' }, { kind: 'bg.end', task: 'b5', id: 'u5', status: 'failed', ms: 5, by: 'note' }])
+  check(one(t5).st === 'failed' && one(t5).b.endAt === t5.bg.get('u5').endAt, 'a notice after the turn end decides the status and the first end time stays')
+  const many = feed(Array.from({ length: 50 }, (_, i) => ({ kind: 'bg.start', id: `m${i}`, task: `t${i}`, tool: 'Bash', btype: 'shell' })).concat([{ kind: 'bg.end', task: 't3', status: 'completed', by: 'note' }, { kind: 'bg.start', id: 'm50', task: 't50', tool: 'Bash', btype: 'shell' }]))
+  check(many.bg.size === 50 && !many.bg.has('m3') && many.bg.has('m0') && many.bg.has('m50'), 'beyond 50 the oldest finished one goes first, a running one is kept')
+  const kept = M.rebuild([{ at: 5000, kind: 'bg.end', task: 'r1', status: 'completed', by: 'note' }], feed([{ kind: 'bg.start', id: 'r1', task: 'r1', tool: 'Bash', btype: 'shell', summary: 'long run' }, { kind: 'bg.start', id: 'r2', task: 'r2', tool: 'Bash', btype: 'shell' }]))
+  check(kept.bg.get('r1').orphan === false && kept.bg.get('r1').status === 'completed' && kept.bg.get('r1').summary === 'long run' && M.bgStatus(kept.bg.get('r2'), kept.lastAt) === 'running', 'a rebuild keeps the work whose start the buffer no longer holds, and merges a later end into it')
+  const hostile = feed([{ kind: 'bg.start', id: { a: 1 }, task: 5 }, { kind: 'bg.start', id: 'h', task: 'h', summary: { x: 1 }, btype: 'nope' }, { kind: 'bg.end', id: 'h', status: 'weird', ms: -5, by: 'x' }, { kind: 'bg.end' }])
+  const hb = hostile.bg.get('h')
+  check(hostile.bg.size === 1 && hb.btype === 'other' && hb.ms === null && M.bgStatus(hb, 5000) === 'ended', 'odd bg lines are given a fixed shape, never an exception')
+  check(M.bgList(feedOf([{ kind: 'tool.start', id: 'a', tool: 'Read' }]), 5).length === 0, 'a feed without bg lines has none')
+  const c = M.bgCounts(feed([{ kind: 'bg.start', id: 'c1', task: 'c1', tool: 'Bash', btype: 'shell' }, { kind: 'bg.start', id: 'c2', task: 'c2', tool: 'Bash', btype: 'shell' }, { kind: 'bg.end', task: 'c2', status: 'killed', by: 'note' }]), 2000)
+  check(c.running === 1 && c.stopped === 1 && c.done === 0, 'the counts tell running from stopped')
+  check(page.includes('id="bgchip"') && page.includes('id="a-bg"') && /'a-bg': \[/.test(page), 'the page has the background chip and the list')
+}
 
 const tr1 = feedOf([
   { kind: 'tool.start', id: 'x0', tool: 'Read', policy: 'allow' }, { kind: 'tool.end', id: 'x0', outcome: 'ok', ms: 30 },

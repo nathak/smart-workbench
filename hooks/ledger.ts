@@ -18,7 +18,7 @@ const finite = (value: unknown): boolean => typeof value === 'number' && Number.
 
 // An event is trusted only in shape: shared sessions are written by other people, so an id that could name another path, a time that is not a number
 // or a commit id too short to be one never reaches the readers.
-const FIELD_CAP: Record<string, number> = { text: LEDGER_TEXT_MAX, goal: 2000, done: 4000, summary: 400, subject: 400, reason: 400, input: 400, user: 100, branch: 255, file: 1024, tool: 100, answer: 40, origin: 20, category: 40, risk: 10, policy: 10, outcome: 20, id: 100, agent: 100, subagent: 100, rule: 100, profile: 20, scope: 300, via: 10, sha: 40, head: 40 }
+const FIELD_CAP: Record<string, number> = { text: LEDGER_TEXT_MAX, goal: 2000, done: 4000, summary: 400, subject: 400, reason: 400, input: 400, user: 100, branch: 255, file: 1024, tool: 100, answer: 40, origin: 20, category: 40, risk: 10, policy: 10, outcome: 20, id: 100, agent: 100, subagent: 100, rule: 100, profile: 20, scope: 300, via: 10, sha: 40, head: 40, task: 100, status: 20, btype: 20 }
 
 // What a shared session may carry: only the fields publishing writes, each of the right type and within its limit.
 // A text cut to the limit a reader will accept: what is written can never be something the reading side refuses.

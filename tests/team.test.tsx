@@ -53,6 +53,8 @@ type WorldOptions = {
   agentId?: string
   // What the engine reports as the session's context use; the default is only the window.
   context?: { tokens?: number; window: number; percent?: number }
+  // A Bash call with `sleep` in it goes to the background under this task id.
+  bgTask?: string
   // What a Bash call prints on stdout; the default is 'ok'.
   bashOut?: string
   // What tools/graph-build.mjs prints (the graph, and a cache to hand back), and its exit code; unset, the script is not run.
@@ -152,6 +154,7 @@ function world(on: On, options: WorldOptions = {}) {
       return { isError: true, result: 'Exit code 1', text: 'Exit code 1\nauth: 1 failed' }
     }
     if (e.tool === 'Agent' && options.agentId) return { result: { agentId: options.agentId } }
+    if (e.tool === 'Bash' && options.bgTask && String(e.command).includes('sleep')) return { result: { stdout: '', stderr: '', backgroundTaskId: options.bgTask } }
     return { result: { stdout: e.tool === 'Bash' && options.bashOut !== undefined ? options.bashOut : 'ok', stderr: '', interrupted: false } }
   })
 
@@ -1510,6 +1513,32 @@ const GRAPH_TOOL = 'mcp__smartworkbench__import_graph'
 const GRAPH_OUT = JSON.stringify({
   graph: { v: 1, builtAt: 1, truncated: false, skipped: { secret: 0, generated: 0, big: 0, link: 0 }, unresolved: 0, nodes: [{ p: 'src/a.ts', c: 'source', l: 'ts', s: 5, ext: 0 }, { p: 'src/b.ts', c: 'source', l: 'ts', s: 5, ext: 0 }], edges: [[0, 1, 'i']] },
   cache: { v: 1, cache: [] },
+})
+
+test('work sent to the background opens a bg.start line, and its notice closes it with bg.end', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, bgTask: 'b00fzbyaq' })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Bash', command: 'sleep 30 && echo done', run_in_background: true } as never)
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  const started = feedLines(writes).filter(one => one.kind === 'bg.start')
+  expect(started).toHaveLength(1)
+  expect(started[0]).toMatchObject({ task: 'b00fzbyaq', tool: 'Bash', btype: 'shell' })
+  expect(String(started[0]?.summary)).toContain('sleep 30')
+
+  await $.prompt.submit({ text: '<task-notification>\n<task-id>b00fzbyaq</task-id>\n<tool-use-id>toolu_01AB</tool-use-id>\n<status>completed</status>\n<summary>Background command "sleep 30" completed (exit code 0)</summary>\n</task-notification>', ...COMPOSER })
+  const ended = feedLines(writes).filter(one => one.kind === 'bg.end')
+  expect(ended).toHaveLength(1)
+  expect(ended[0]).toMatchObject({ task: 'b00fzbyaq', id: 'toolu_01AB', status: 'completed', by: 'note' })
+  // A prompt the person typed that merely contains a notice closes nothing.
+  await $.prompt.submit({ text: 'what does this mean? <task-notification><task-id>other1</task-id><status>failed</status></task-notification>', ...COMPOSER })
+  expect(feedLines(writes).filter(one => one.kind === 'bg.end')).toHaveLength(1)
+  expect(String(ended[0]?.summary)).toContain('completed')
 })
 
 test('a stop held for an expectation alone does not use up the team final check', async ($, on) => {

@@ -8,6 +8,7 @@ import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
 import { editPolicy, isPolicyEditOp, type PolicyEditOp } from './policy-edit'
 import { applyOps, feedStateOf, isSettingOp, needsAnswer, rateWindowsOf, snapshotText, type AskView, type DeskOp, type SettingOp } from './desktop'
+import { backgroundOf, notificationsOf } from './background'
 import { GRAPH_DESCRIPTION, GRAPH_TOOL, graphAnswer, graphDataOf, queryPath, type GraphData } from './graph'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
@@ -362,7 +363,7 @@ async function agentOutput($: $, result: unknown): Promise<Record<string, unknow
 }
 
 // Recorded where they happen (the prompt) or only for the live view (the state line and the evidence results), never in the ledger.
-const FEED_ONLY = new Set(['prompt', 'wb', 'evidence'])
+const FEED_ONLY = new Set(['prompt', 'wb', 'evidence', 'bg.start', 'bg.end'])
 let stateLast = ''
 
 // The contract and guard state for the live view's header and its intent and evidence views; a line only when something changed.
@@ -3451,6 +3452,13 @@ export const register: Register = on => {
       }
       await record($, 'prompt', { origin: e.origin.kind, text: e.text })
     }
+    // Notices that background work ended (they arrive as prompts): each closes the task its ids name.
+    // Only a prompt that is a notice from its first character: one the person typed or pasted among other words closes nothing.
+    if (e.text.trimStart().startsWith('<task-notification>')) {
+      for (const note of notificationsOf(e.text)) {
+        await emit($, 'bg.end', { ...(note.toolUseId ? { id: note.toolUseId } : {}), ...(note.task ? { task: note.task } : {}), status: note.status, ...(note.ms !== undefined ? { ms: note.ms } : {}), by: 'note', ...(note.summary ? { summary: model.cut(redact(note.summary), 120) } : {}) }).catch(() => undefined)
+      }
+    }
     await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(scanned(e.text)).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
 
     // A loop pass that rides on a typed prompt carries no Codex brief either.
@@ -3689,6 +3697,9 @@ export const register: Register = on => {
     // A Bash run that was interrupted or sent to the background has no known outcome: it neither counts as a failure nor clears one.
     const bashResult = e.tool === 'Bash' && !ran.isError ? (ran.result as { interrupted?: boolean; backgroundTaskId?: string } | undefined) : undefined
     const isUnsettled = bashResult?.interrupted === true || bashResult?.backgroundTaskId !== undefined
+    // The call came back but work goes on: the live view keeps it open until a notice says it ended.
+    const bgRun = ran.deny === undefined ? backgroundOf(e.tool, e, ran.result, !ran.isError) : null
+    if (bgRun) await emit($, 'bg.start', { id: call.id, ...(bgRun.task ? { task: bgRun.task } : {}), tool: e.tool.slice(0, 40), btype: bgRun.btype, summary: model.cut(call.summary, 120), ...(e.agentId ? { agent: e.agentId } : {}) })
 
     const streams = e.tool === 'Bash' && !isUnsettled && kinds.length > 0 ? outputStreams(ran.result, (ran as { text?: unknown }).text) : []
     const fresh: EvidenceRecord[] = []

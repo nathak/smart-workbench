@@ -48,6 +48,7 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font:var(--fs-md)/1.5 va
 .turnhead .tt .ic{width:14px;height:14px;margin-right:2px;transition:transform .15s}.turnhead .tt .rot{transform:rotate(90deg)}
 .turnhead .mt{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
 .mc{display:inline-flex;gap:4px;align-items:center;padding:0 8px;border:1px solid var(--border-strong);border-radius:999px;color:var(--fg-muted);font-size:var(--fs-xs);line-height:18px}
+.bgchip{background:transparent;font-family:inherit;cursor:pointer}
 .mc .ic{width:12px;height:12px;margin:0}.mc.bad{color:var(--bad);border-color:var(--bad)}.mc.warn{color:var(--warn);border-color:var(--warn)}
 .trow:hover .arg,.trow[aria-selected=true] .arg{background:var(--surface);outline:1px solid var(--border)}
 .trow .ti{color:var(--fg-muted);margin:0}.trow .tn{font-weight:700;flex:none}.trow .arg{font:var(--fs-xs)/1.6 var(--mono);color:var(--fg-muted);background:var(--surface-2);padding:0 6px;border-radius:var(--r)}
@@ -417,6 +418,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <span class="brand">SmartWorkbench · Live</span>
     <span class="mchips" id="mchips"></span>
     <span class="wbchips" id="wbchips" hidden></span>
+    <button class="mc bgchip" id="bgchip" hidden></button>
     <span class="muted mono" id="sess"></span>
     <span class="muted mono" id="srv"></span>
     <span class="grow">
@@ -644,6 +646,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     </div>
     <div class="sect"><h2 data-i="t-matrix"></h2><div class="agrid" id="t-matrix"></div></div>
     <div class="sect"><h2><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><span data-i="t-gates"></span></h2><div class="gates" id="t-gates"></div></div>
+    <div class="sect"><h2 data-i="a-bg"></h2><div class="tblwrap"><table class="tbl" id="a-bg"></table></div></div>
     <div class="sect"><h2 data-i="a-runs"></h2><div class="tblwrap"><table class="tbl" id="a-runs"></table></div></div>
     <div class="sect"><h2 data-i="a-codex"></h2><div class="tblwrap"><table class="tbl" id="a-codex"></table></div></div>
     <div class="sect"><h2 data-i="a-wf"></h2><div class="tblwrap"><table class="tbl" id="a-wf"></table></div></div>
@@ -731,6 +734,7 @@ var DICT = {
   'gr-all': ['All', '전체'], 'gr-source': ['Source', '소스'], 'gr-test': ['Tests', '테스트'], 'gr-config': ['Config', '설정'], 'gr-q-ph': ['Search files…', '파일 검색…'],
   'app-status': ['Status & settings', '상태·설정'], 't-title': ['Team mode', '팀 모드'], 't-sub': ['The advisor designs and reviews, the lead builds, the explorer reads. Context is spent only where it is needed.', '조언자가 설계하고 검토하며, 리드가 구현하고, 탐색 담당이 읽습니다. 컨텍스트는 필요한 곳에만 씁니다.'], 't-t-adv': ['Advisor runs', '조언자 실행'], 't-t-exp': ['Explorer runs', '탐색 실행'], 't-t-gates': ['Safety gates raised', '발생한 안전 게이트'], 't-t-codex': ['Codex runs', 'Codex 실행'], 't-matrix': ['Agent roles', '역할별 에이전트'], 'g-title': ['Run & guard', '실행·가드'], 'g-t-ask': ['Pending questions', '대기 중인 확인'], 'g-t-rules': ['Guard file rules', '가드 파일 규칙'], 'g-t-block': ['Blocked or stopped', '차단·중단'], 'g-t-allow': ['Allowed', '허용'], 'g-order': ['Rule order', '규칙 순서'], 'g-order-note': ['The rule list is not in the live feed. Open Status & settings in the desktop app to see and edit the guard file.', '규칙 목록은 실시간 피드에 없습니다. 데스크톱 앱의 상태·설정에서 가드 파일을 보고 고칠 수 있습니다.'], 'g-open-status': ['Open Status & settings', '상태·설정 열기'], 'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Run & guard', '실행·가드'], 'tab-agents': ['Team mode', '팀 모드'],
   'g-queue': ['Needs attention', '확인이 필요한 것'], 'g-cats': ['Decisions by category', '범주별 판정'], 'g-table': ['Decisions', '판정 목록'],
+  'a-bg': ['Background work', '백그라운드 작업'], 'nav-bg': ['running in the background', '백그라운드 실행 중'],
   'a-kinds': ['By kind of agent', '에이전트 종류별'], 'a-runs': ['Agent runs', '에이전트 실행'], 'a-wf': ['Workflows', '워크플로'], 'a-codex': ['Codex runs', 'Codex 실행'],
   'st-live': ['● live', '● 연결됨'], 'st-reconnect': ['◌ reconnecting', '◌ 다시 연결 중'], 'st-down': ['✕ disconnected', '✕ 끊김'], 'st-wait': ['◌ connecting', '◌ 연결 중'],
   'lim-5h': ['5h', '5시간'], 'lim-7d': ['weekly', '주간'], 'lim-spend': ['spend', '지출'],
@@ -754,7 +758,7 @@ var STATUS = Object.assign(Object.create(null), { ok: 'ok', error: 'error', bloc
 function newTrace(){
   return { turns: [], spans: new Map(), byAgent: new Map(), pendingAsk: new Map(), attention: [], agentTok: Object.create(null),
     tok: Object.create(null), ctx: null, ctxHist: [], sessions: Object.create(null), missed: 0, loopPasses: 0, loopActive: false, activeMs: 0,
-    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0, audit: [], wb: null, evid: [], asks: new Map() };
+    startAt: [], failAt: [], failTotal: 0, runOf: new Map(), lastAt: 0, events: 0, order: 0, audit: [], wb: null, evid: [], asks: new Map(), bg: new Map(), bgTask: new Map() };
 }
 function turnOf(tr, at, extra){
   var t = { n: tr.turns.length, at: at, end: null, aborted: false, text: '', origin: 'user', loop: false, spans: [], marks: [], warn: [], ctx: null, tokIn: 0, tokOut: 0, models: Object.create(null), early: !!(extra && extra.early) };
@@ -877,6 +881,41 @@ function ingest(tr, ev){
         limits: limitsOf(ev.limits),
       });
       break;
+    case 'bg.start': {
+      // Work that went on in the background after its call returned: open until a notice says it ended.
+      var bkey = typeof ev.id === 'string' ? clean(ev.id, 80) : '', btask = typeof ev.task === 'string' ? clean(ev.task, 80) : '';
+      if (!bkey) break;
+      var open = tr.bg.get(bkey) || (btask && tr.bgTask.has(btask) ? tr.bg.get(tr.bgTask.get(btask)) : null);
+      var item = open || { key: bkey, task: btask, at: at, endAt: null, status: null, ms: null, by: '', orphan: false, summary: '' };
+      item.tool = clean(ev.tool, 40); item.btype = /^(shell|agent|workflow|monitor|other)$/.test(String(ev.btype)) ? String(ev.btype) : 'other';
+      item.summary = clean(ev.summary, 120) || item.summary; item.agent = ev.agent ? clean(ev.agent, 40) : '';
+      if (!open) item.at = at; else item.orphan = false;
+      item.task = btask || item.task;
+      tr.bg.set(item.key, item);
+      if (item.task) tr.bgTask.set(item.task, item.key);
+      bgTrim(tr);
+      break;
+    }
+    case 'bg.end': {
+      var ekey = typeof ev.id === 'string' ? clean(ev.id, 80) : '', etask = typeof ev.task === 'string' ? clean(ev.task, 80) : '';
+      var found = (ekey && tr.bg.get(ekey)) || (etask && tr.bgTask.has(etask) ? tr.bg.get(tr.bgTask.get(etask)) : null);
+      if (!found) {
+        // The start fell out of the buffer (or was never seen): keep the end, honestly marked.
+        found = { key: ekey || 'task:' + etask, task: etask, at: null, endAt: null, status: null, ms: null, by: '', orphan: true, summary: '', tool: '', btype: 'other', agent: '' };
+        if (!found.key || found.key === 'task:') break;
+        tr.bg.set(found.key, found);
+        if (etask) tr.bgTask.set(etask, found.key);
+      }
+      // A second end (a notice after another) keeps the first time; a notice's own status wins.
+      if (found.endAt === null) found.endAt = at;
+      var st = /^(completed|failed|killed|other)$/.test(String(ev.status)) ? String(ev.status) : 'other';
+      if (found.status === null || ev.by === 'note') found.status = st;
+      var ems = Number(ev.ms); if (found.ms === null && isFinite(ems) && ems >= 0 && ems <= 7 * 86400000) found.ms = ems;
+      found.by = ev.by === 'turn' ? 'turn' : 'note';
+      if (ev.summary && !found.summary) found.summary = clean(ev.summary, 120);
+      bgTrim(tr);
+      break;
+    }
     case 'evidence':
       tr.evid.push({ at: at, id: clean(ev.id, 60), kind: clean(ev.ekind, 20), command: clean(ev.command, 120), ok: ev.ok === true ? true : ev.ok === false ? false : null });
       if (tr.evid.length > 100) tr.evid.shift();
@@ -969,9 +1008,25 @@ function kpis(tr, now){
   };
 }
 // A fresh trace from the events the page still holds, so the model never outgrows the buffer.
-function rebuild(list){
+function rebuild(list, old){
   var tr = newTrace();
   list.forEach(function(ev){ try { ingest(tr, ev); } catch (e) { tr.lastError = e; } });
+  // Background work whose start the buffer no longer holds is still running: carry it over from the trace being replaced.
+  if (old && old.bg) {
+    old.bg.forEach(function(b, key){
+      var nowKey = tr.bg.has(key) ? key : b.task && tr.bgTask.has(b.task) ? tr.bgTask.get(b.task) : null;
+      var now = nowKey === null ? null : tr.bg.get(nowKey);
+      if (now && !now.orphan) return;
+      if (now) {
+        // The new trace holds only an end for it: the start comes from the old one.
+        if (b.endAt === null) { b.endAt = now.endAt; b.status = now.status; b.ms = now.ms; b.by = now.by; if (!b.summary) b.summary = now.summary; }
+        tr.bg.delete(nowKey);
+      }
+      tr.bg.set(key, b);
+      if (b.task) tr.bgTask.set(b.task, key);
+    });
+    bgTrim(tr);
+  }
   return tr;
 }
 // A fixed key for a row, used in the address bar. Looked up in a Map only, never used as a selector.
@@ -1224,6 +1279,35 @@ function limitsOf(raw){
 // Whole minutes until a window resets, or null once it has (or when no time is known).
 function untilOf(at, now){
   return typeof at === 'number' && at > now ? Math.ceil((at - now) / 60000) : null;
+}
+var BG_MAX = 50, BG_STALE_MS = 30 * 60000;
+// The oldest finished entry goes first when there are too many, else the oldest of all.
+function bgTrim(tr){
+  while (tr.bg.size > BG_MAX) {
+    var drop = null;
+    tr.bg.forEach(function(b, key){ if (drop === null && b.endAt !== null) drop = key; });
+    if (drop === null) drop = tr.bg.keys().next().value;
+    var gone = tr.bg.get(drop);
+    tr.bg.delete(drop);
+    if (gone && gone.task && tr.bgTask.get(gone.task) === drop) tr.bgTask.delete(gone.task);
+  }
+}
+// running while no end was seen, no end seen once it has been quiet for BG_STALE_MS (never shown as finished), else how it ended.
+function bgStatus(b, now){
+  if (b.endAt === null) return b.at !== null && now - b.at > BG_STALE_MS ? 'unknown' : 'running';
+  return b.status === 'completed' ? 'done' : b.status === 'failed' ? 'failed' : b.status === 'killed' ? 'stopped' : 'ended';
+}
+function bgList(tr, now){
+  var rows = [];
+  tr.bg.forEach(function(b){ rows.push({ b: b, st: bgStatus(b, now), dur: b.ms !== null ? b.ms : b.at !== null ? Math.max(0, (b.endAt === null ? now : b.endAt) - b.at) : null }); });
+  var rank = { running: 0, unknown: 1, failed: 2, stopped: 3, ended: 3, done: 4 };
+  rows.sort(function(x, y){ return rank[x.st] - rank[y.st] || (y.b.at || y.b.endAt || 0) - (x.b.at || x.b.endAt || 0); });
+  return rows;
+}
+function bgCounts(tr, now){
+  var c = { running: 0, done: 0, failed: 0, stopped: 0, ended: 0, unknown: 0 };
+  tr.bg.forEach(function(b){ c[bgStatus(b, now)]++; });
+  return c;
 }
 // model:end
 var S, inflight, TR, events = [];
@@ -1728,7 +1812,7 @@ function take(ev){
   events.push(ev); if (events.length > 2000) events.shift();
   handle(ev);
   // The model follows the buffer: past twice its size it is rebuilt from the events still held.
-  if (TR.events > 4000) { TR = rebuild(events); if (TR.lastError) pageError('model', TR.lastError); said = { order: TR.order, fails: TR.failTotal }; resetViews(); queueView(); }
+  if (TR.events > 4000) { TR = rebuild(events, TR); if (TR.lastError) pageError('model', TR.lastError); said = { order: TR.order, fails: TR.failTotal }; resetViews(); queueView(); }
 }
 function quiet(list){ replaying = true; try { list.forEach(take); } finally { replaying = false; } render(); applyFilter(); queueView(); }
 // While paused the tiles and tables stand still, but a call that waits on you or a block is still spoken and counted in the status bar.
@@ -2789,6 +2873,7 @@ function drawTeamHead(ks){
   mx.appendChild(codexCard(wbp));
 }
 function drawAgents(){
+  drawBg();
   drawGates();
   drawAudit('a-audit', /^(team|codex)\./);
   var now = nowFor() || Date.now();
@@ -2844,9 +2929,54 @@ function queueKpi(){ if (!kpiQueued) { kpiQueued = true; requestAnimationFrame(f
 function nowFor(){ return replaying || playback || paused ? TR.lastAt : Date.now(); }
 function setCount(id, n, prefix, title){ var c = $(id); c.hidden = !n; var shown = el('span', null, prefix + n); shown.setAttribute('aria-hidden', 'true'); c.replaceChildren(shown, el('span', 'sr', ', ' + n + ' ' + title)); c.title = title; }
 function agentRuns(){ var n = 0; TR.spans.forEach(function(sp){ if (sp.tool === 'Agent') n++; }); return n; }
+var BG_ST = { running: ['running', '실행 중'], unknown: ['no end seen', '끝 신호 없음'], failed: ['failed', '실패'], stopped: ['stopped', '중지됨'], ended: ['ended', '종료'], done: ['done', '완료'] };
+var BG_TYPE = { shell: ['shell', '셸'], agent: ['agent', '에이전트'], workflow: ['workflow', '워크플로'], monitor: ['monitor', '모니터'], other: ['task', '작업'] };
+// The count of background work in the top bar, so a person can tell at a glance whether something is still going.
+function drawBgChip(){
+  var box = $('bgchip');
+  if (!box) return;
+  var c = bgCounts(TR, nowFor() || Date.now());
+  var total = c.running + c.unknown + c.failed + c.done + c.stopped + c.ended;
+  var text = c.running || c.unknown ? (c.running ? L(c.running + ' running in the background', '백그라운드 ' + c.running + '개 실행 중') : '') + (c.running && c.unknown ? ' · ' : '') + (c.unknown ? L(c.unknown + ' with no end seen', '끝 신호 없음 ' + c.unknown + '개') : '') : total ? L('background: all ended' + (c.failed ? ' · ' + c.failed + ' failed' : ''), '백그라운드 모두 종료' + (c.failed ? ' · 실패 ' + c.failed + '개' : '')) : '';
+  var cls = 'mc bgchip' + (c.failed ? ' bad' : c.running || c.unknown ? ' warn' : '');
+  var sig = cls + '|' + text;
+  if (box.getAttribute('data-sig') === sig) return;
+  box.setAttribute('data-sig', sig);
+  box.hidden = !text;
+  box.className = cls;
+  box.textContent = '';
+  if (!text) return;
+  box.appendChild(ico(c.running ? 'timer' : c.failed || c.unknown ? 'alert' : 'check'));
+  box.appendChild(el('span', null, text));
+  box.title = L('Open the list of background work', '백그라운드 작업 목록 열기');
+}
+function drawBg(){
+  var now = nowFor() || Date.now();
+  var rows = bgList(TR, now);
+  drawTable($('a-bg'), [{ label: L('status', '상태') }, { label: L('kind', '종류') }, { label: L('what', '내용') }, { label: L('started', '시작') }, { label: L('ran for', '경과') }, { label: L('task', '작업 ID') }],
+    rows.map(function(r){
+      var b = r.b, name = BG_ST[r.st] || BG_ST.ended;
+      var pill = el('span', 'cpill ' + (r.st === 'done' ? 'verified' : r.st === 'failed' ? 'failed' : 'pending'));
+      pill.appendChild(ico(r.st === 'done' ? 'check' : r.st === 'failed' || r.st === 'unknown' ? 'alert' : r.st === 'running' ? 'timer' : 'x'));
+      pill.appendChild(el('span', null, L(name[0], name[1])));
+      if (r.st === 'unknown') pill.title = L('no end notice arrived; it may still be running or the session ended', '종료 알림이 오지 않았습니다. 아직 실행 중이거나 세션이 끝났을 수 있습니다');
+      var what = b.summary || (b.orphan ? L('start not in the buffer', '시작 기록 없음') : '');
+      var ty = BG_TYPE[b.btype] || BG_TYPE.other;
+      return { cells: [pill, L(ty[0], ty[1]), what ? el('code', 'arg', what) : '–', b.at !== null ? clock(b.at) : '–', r.dur === null ? '–' : fmtMs(r.dur), b.task ? cut(b.task, 12) : '–'] };
+    }), null, null, null, L('no background work yet', '백그라운드 작업 없음'));
+}
+$('bgchip').addEventListener('click', function(){ showTab('agents', true); });
+// Background agents are already counted as Agent calls; the rest (shell, workflow, monitor) are added.
+function bgRunningOutsideAgents(){
+  var n = 0, now = nowFor() || Date.now();
+  TR.bg.forEach(function(b){ if (b.btype !== 'agent' && bgStatus(b, now) === 'running') n++; });
+  return n;
+}
 function drawKpis(){
   kpiQueued = false;
   var K = kpis(TR, nowFor() || Date.now());
+  drawBgChip();
+  setCount('nav-agents-n', agentRuns() + bgRunningOutsideAgents(), '', T('nav-runs'));
   $('k-calls-v').textContent = K.callsPerMin;
   $('k-calls-s').textContent = L(K.spans + ' calls in the buffer', '버퍼 내 호출 ' + K.spans + '개') + (K.rateDelta === null ? '' : ' · ' + (K.rateDelta >= 0 ? '↑' : '↓') + Math.abs(K.rateDelta) + '% ' + L('vs previous turn', '이전 턴 대비'));
   spark($('k-calls-sp'), K.callSpark);
@@ -2861,11 +2991,10 @@ function drawKpis(){
   $('k-ask-s').textContent = K.askPending ? L('oldest ' + fmtMs(K.askAge) + ' · answer in the terminal', '가장 오래된 것 ' + fmtMs(K.askAge) + ' · 터미널에서 답하세요') : L('none waiting', '대기 없음');
   $('k-ask').className = 'tile' + (K.askPending ? ' warn' : '');
   setCount('nav-guard-n', K.askPending, '? ', T('nav-wait'));
-  setCount('nav-agents-n', agentRuns(), '', T('nav-runs'));
   $('k-tok-v').textContent = K.tokIn || K.tokOut ? k(K.tokIn) + ' / ' + k(K.tokOut) : '–';
   $('k-tok-s').textContent = L('input includes cache · ' + K.turns + ' turns · active ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · loop ' + K.loopPasses : ''), '입력은 캐시 포함 · ' + K.turns + '턴 · 활동 ' + fmtMs(K.activeMs) + (K.loopPasses ? ' · 루프 ' + K.loopPasses : ''));
 }
-setInterval(function(){ if (!replaying && !playback && !paused && !document.hidden) { queueKpi(); if (tab === 'guard' || tab === 'intent' || tab === 'evidence') queueView(); } }, 1000);
+setInterval(function(){ if (!replaying && !playback && !paused && !document.hidden) { queueKpi(); if (tab === 'guard' || tab === 'intent' || tab === 'evidence' || (tab === 'agents' && bgCounts(TR, nowFor() || Date.now()).running > 0)) queueView(); } }, 1000);
 
 // ---- the server's own count of what it read, against what this page received ----
 var srv = null, srvBase = 0, rtt = null;
