@@ -256,6 +256,14 @@ nav.stabs .sb.ask::before{content:"? "}
 .cbar i{display:block;height:100%;width:0;background:var(--border-strong)}
 .cbar i.allow{background:var(--ok)}.cbar i.ask{background:var(--warn)}.cbar i.block{background:var(--bad)}
 #ctx-spark{letter-spacing:0;color:var(--fg-muted)}
+.lim{display:grid;grid-template-columns:auto 30px auto minmax(0,1fr);gap:2px 6px;align-items:center;margin-top:4px;white-space:nowrap}
+.lim[hidden]{display:none}
+.lim .lrow{display:contents}
+.lim .lrow .lt{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.lim .lrow .cbar{width:30px}
+.lim .lrow.warn .lp::before{content:"\25B2\00a0";content:"\25B2\00a0" / ""}
+.lim .lrow.bad .lp::before{content:"\2715\00a0";content:"\2715\00a0" / ""}
+.lim .lrow.warn .lp{color:var(--warn)}.lim .lrow.bad .lp{color:var(--bad)}
 pre.full{margin:0;padding:6px 8px;font-size:var(--fs-sm);white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:var(--r);color:var(--fg)}
 #dw-prompts h5{margin:10px 0 4px;font-size:var(--fs-sm);font-weight:400;color:var(--fg-muted)}
 .c-opus{color:var(--opus)}.c-sonnet{color:var(--sonnet)}.c-haiku{color:var(--haiku)}.c-guard{color:var(--guard)}.c-loop{color:var(--loop)}
@@ -449,7 +457,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
     <button class="tile" id="k-lat"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-timer"/></svg><span class="k-l" data-i="k-lat"></span><span class="k-v" id="k-lat-v">–</span><span class="k-s" id="k-lat-s"></span></button>
     <button class="tile" id="k-fail"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-alert"/></svg><span class="k-l" data-i="k-fail"></span><span class="k-v" id="k-fail-v">0</span><span class="k-s" id="k-fail-s"></span><svg class="spark" id="k-fail-sp" viewBox="0 0 64 22" aria-hidden="true"></svg></button>
     <button class="tile" id="k-ask"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-help"/></svg><span class="k-l" data-i="k-ask"></span><span class="k-v" id="k-ask-v">0</span><span class="k-s" id="k-ask-s"></span></button>
-    <button class="tile" id="ctx"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-ctx"/></svg><span class="k-l" data-i="k-ctx"></span><span class="k-v" id="ctx-t">–</span><span class="cbar"><i id="ctx-f"></i></span><span class="k-s" id="k-ctx-s"></span><span class="k-s" id="ctx-spark"></span></button>
+    <button class="tile" id="ctx"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-ctx"/></svg><span class="k-l" data-i="k-ctx"></span><span class="k-v" id="ctx-t">–</span><span class="cbar"><i id="ctx-f"></i></span><span class="k-s" id="k-ctx-s"></span><span class="k-s" id="ctx-spark"></span><span class="k-s lim" id="ctx-lim" hidden></span></button>
     <button class="tile" id="k-tok"><svg class="ic k-i" aria-hidden="true" focusable="false"><use href="#i-swap"/></svg><span class="k-l" data-i="k-tok"></span><span class="k-v" id="k-tok-v">–</span><span class="k-s" id="k-tok-s"></span></button>
   </section>
 
@@ -725,6 +733,7 @@ var DICT = {
   'g-queue': ['Needs attention', '확인이 필요한 것'], 'g-cats': ['Decisions by category', '범주별 판정'], 'g-table': ['Decisions', '판정 목록'],
   'a-kinds': ['By kind of agent', '에이전트 종류별'], 'a-runs': ['Agent runs', '에이전트 실행'], 'a-wf': ['Workflows', '워크플로'], 'a-codex': ['Codex runs', 'Codex 실행'],
   'st-live': ['● live', '● 연결됨'], 'st-reconnect': ['◌ reconnecting', '◌ 다시 연결 중'], 'st-down': ['✕ disconnected', '✕ 끊김'], 'st-wait': ['◌ connecting', '◌ 연결 중'],
+  'lim-5h': ['5h', '5시간'], 'lim-7d': ['weekly', '주간'], 'lim-spend': ['spend', '지출'],
   'k-calls': ['calls / min', '호출 / 분'], 'k-lat': ['tool latency', '도구 지연'], 'k-fail': ['blocks + errors', '차단 + 오류'], 'k-ask': ['asks waiting', '확인 대기'], 'k-ctx': ['context window', '컨텍스트 창'], 'k-tok': ['tokens in / out', '토큰 입력 / 출력'],
   'th-light': ['light', '밝게'], 'th-dark': ['dark', '어둡게']
 };
@@ -865,6 +874,7 @@ function ingest(tr, ev){
         codexReview: ev.codexReview === true,
         codexRescue: ev.codexRescue === true,
         gates: gateLimits(ev.gates),
+        limits: limitsOf(ev.limits),
       });
       break;
     case 'evidence':
@@ -1194,6 +1204,26 @@ function kindStats(tr, now){
     e.calls += st.calls; e.fails += st.fails; e.tokIn += st.tokIn; e.tokOut += st.tokOut;
   });
   return Object.keys(kinds).map(function(k){ var e = kinds[k]; e.avg = e.durs.length ? Math.round(e.durs.reduce(function(a, b){ return a + b; }, 0) / e.durs.length) : null; e.p95 = pct(e.durs, 95); return e; });
+}
+// The subscription rate-limit windows of a state line, in a fixed order, numbers only; anything else is dropped.
+function limitsOf(raw){
+  var out = [];
+  if (!Array.isArray(raw)) return out;
+  ['five_hour', 'seven_day', 'spend_limit'].forEach(function(kind){
+    for (var i = 0; i < raw.length; i++) {
+      var w = raw[i];
+      if (!w || typeof w !== 'object' || w.kind !== kind) continue;
+      var p = typeof w.pct === 'number' ? w.pct : NaN;
+      if (!isFinite(p)) break;
+      out.push({ kind: kind, pct: Math.max(0, Math.min(1000, p)), at: typeof w.resetsAt === 'number' && isFinite(w.resetsAt) ? w.resetsAt : null });
+      break;
+    }
+  });
+  return out;
+}
+// Whole minutes until a window resets, or null once it has (or when no time is known).
+function untilOf(at, now){
+  return typeof at === 'number' && at > now ? Math.ceil((at - now) / 60000) : null;
 }
 // model:end
 var S, inflight, TR, events = [];
@@ -1556,6 +1586,7 @@ function render(){
   $('ctx-spark').textContent = S.ctxHist.map(function(p){ return '▁▂▃▄▅▆▇█'.charAt(Math.min(7, Math.floor(p * 8 / 100))); }).join('');
   $('ctx').title = L('context per lead turn; subagents are not measured', '리드 턴 기준 컨텍스트 · 서브에이전트는 측정되지 않음');
   $('ctx').className = 'tile' + (lvl === 'block' ? ' bad' : lvl === 'ask' ? ' warn' : '');
+  drawLimits();
   $('tok').textContent = Object.keys(TR.tok).map(function(m){ return m + ' ' + L('in ', '입력 ') + k(TR.tok[m].i) + ' · ' + L('out ', '출력 ') + k(TR.tok[m].o); }).join('  |  ');
   queueLayout();
   if (!$('drawer').hidden && !$('p-timeline').hidden && !replaying && !$('drawer').contains(document.activeElement) && !$('dw-list').querySelector('.detail:not([hidden])') && !$('dw-prompts').querySelector('.full:not([hidden])')) drawRefresh();
@@ -1576,7 +1607,42 @@ function showLast(){
   var ago = s >= 5 ? ' (' + (s >= 120 ? Math.round(s / 60) + L(' min', '분') : s + L(' s', '초')) + L(' ago', ' 전') + ')' : '';
   n.textContent = L('last event ', '마지막 이벤트 ') + clock(S.lastAt) + ago;
 }
-setInterval(function(){ if (!replaying) showLast(); }, 1000);
+setInterval(function(){ if (!replaying) { showLast(); drawLimits(); } }, 1000);
+// The subscription limits under the context figure: one row per window, its share used and when it resets. Absent off a subscription.
+var LIM_KEY = { five_hour: 'lim-5h', seven_day: 'lim-7d', spend_limit: 'lim-spend' };
+var limSig = '';
+function resetText(at){
+  if (at == null) return '';
+  var m = untilOf(at, Date.now());
+  if (m == null) return L('passed', '지남');
+  if (m < 60) return m + L('m', '분');
+  if (m < 2880) return Math.floor(m / 60) + L('h', '시간') + (m % 60) + L('m', '분');
+  return Math.floor(m / 1440) + L('d', '일') + Math.floor(m % 1440 / 60) + L('h', '시간');
+}
+function drawLimits(){
+  var box = $('ctx-lim');
+  if (!box) return;
+  var list = TR && TR.wb && Array.isArray(TR.wb.limits) ? TR.wb.limits : [];
+  var rows = list.map(function(w){ return { key: LIM_KEY[w.kind], pct: w.pct, lvl: w.pct < 75 ? 'allow' : w.pct < 90 ? 'ask' : 'block', text: resetText(w.at) }; });
+  var sig = lang + '|' + rows.map(function(r){ return [r.key, r.pct, r.text].join(':'); }).join('|');
+  if (sig === limSig) return;
+  limSig = sig;
+  box.hidden = !rows.length;
+  box.textContent = '';
+  rows.forEach(function(r){
+    var row = el('span', 'lrow' + (r.lvl === 'block' ? ' bad' : r.lvl === 'ask' ? ' warn' : ''));
+    var bar = el('span', 'cbar'), fill = el('i', r.lvl);
+    fill.style.width = Math.min(100, r.pct) + '%';
+    bar.appendChild(fill);
+    row.appendChild(el('span', null, T(r.key)));
+    row.appendChild(bar);
+    row.appendChild(el('span', 'lp', Math.round(r.pct) + '%'));
+    var when = el('span', 'lt', r.text);
+    if (r.text && r.text !== L('passed', '지남')) when.title = L('resets in ', '초기화까지 ') + r.text;
+    row.appendChild(when);
+    box.appendChild(row);
+  });
+}
 function addTokens(ev){
   if (typeof ev.model !== 'string' || !ev.model) return;
   var name = cut(ev.model.replace(/^claude-/, ''), 24);

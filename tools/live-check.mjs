@@ -560,7 +560,7 @@ const dict = new Function(`return {${dictBody}}`)()
 check(Object.keys(dict).length > 20 && Object.entries(dict).every(([, v]) => Array.isArray(v) && v.length === 2 && v[0] && v[1]), 'every DICT entry has an English and a Korean text')
 const usedKeys = [...page.matchAll(/data-i="([^"]+)"/g)].map(m => m[1]).concat([...page.matchAll(/\bT\('([^']+)'\)/g)].map(m => m[1]))
 const missingKeys = [...new Set(usedKeys)].filter(key => !(key in dict))
-const dynamicKeys = ['ok', 'error', 'blocked', 'declined', 'aborted', 'running', 'bg', 'ask'].map(one => `s-${one}`).concat(['timeline', 'guard', 'agents', 'flow', 'graph'].map(one => `tab-${one}`))
+const dynamicKeys = ['ok', 'error', 'blocked', 'declined', 'aborted', 'running', 'bg', 'ask'].map(one => `s-${one}`).concat(['timeline', 'guard', 'agents', 'flow', 'graph'].map(one => `tab-${one}`)).concat(['lim-5h', 'lim-7d', 'lim-spend'])
 const missingDynamic = dynamicKeys.filter(key => !(key in dict))
 check(missingDynamic.length === 0, `the keys built at run time (statuses and tabs) are in DICT${missingDynamic.length ? ' (missing ' + missingDynamic.join(', ') + ')' : ''}`)
 check(missingKeys.length === 0, `every data-i and T() key is in DICT${missingKeys.length ? ' (missing ' + missingKeys.join(', ') + ')' : ''}`)
@@ -599,8 +599,17 @@ for (const theme of ['dark', 'light']) {
 
 // ---- the data model: pure, so it runs here on synthetic events ----
 const modelCode = page.slice(page.indexOf('// model:begin'), page.indexOf('// model:end'))
-const M = new Function(`${modelCode}\nreturn { newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf, decisionOf, guardRows, sortRows, groupRows, guardStats, attention, kindStats, rebuild }`)()
+const M = new Function(`${modelCode}\nreturn { limitsOf, untilOf, newTrace, ingest, kpis, pct, buckets, statusOf, spanDur, latencyOf, selKey, buildHash, parseHash, agentStats, turnWarns, parseQuery, matchQuery, marksOf, criticalPath, runsOf, decisionOf, guardRows, sortRows, groupRows, guardStats, attention, kindStats, rebuild }`)()
 const feedOf = list => { const tr = M.newTrace(); let at = 1000; for (const ev of list) { at += 100; M.ingest(tr, { at, ...ev }) } return tr }
+// The rate-limit windows: only known kinds with a number survive the page's own check, whatever the feed holds.
+{
+  const lim = feedOf([{ kind: 'wb', limits: [{ kind: 'five_hour', pct: 5000, resetsAt: 5e12 }, { kind: 'evil', pct: 5 }, { kind: 'seven_day', pct: 'x' }, 's', null, { kind: 'spend_limit', pct: 104.2, resetsAt: 'soon' }] }]).wb.limits
+  check(lim.length === 2 && lim[0].kind === 'five_hour' && lim[0].pct === 1000 && lim[0].at === 5e12 && lim[1].kind === 'spend_limit' && lim[1].at === null, 'the page keeps only known rate-limit windows with numbers, clamped')
+  check(feedOf([{ kind: 'wb' }]).wb.limits.length === 0 && feedOf([{ kind: 'wb', limits: 'x' }]).wb.limits.length === 0, 'a state line without windows shows none')
+  check(M.untilOf(1e6 + 130 * 60000, 1e6) === 130 && M.untilOf(1e6, 1e6) === null && M.untilOf(null, 1e6) === null && M.untilOf(5, 1e6) === null, 'the minutes to a reset are whole, and none once it has passed')
+}
+check(page.includes('id="ctx-lim"') && page.includes('function drawLimits'), 'the context tile has a place for the rate-limit rows')
+
 const tr1 = feedOf([
   { kind: 'tool.start', id: 'x0', tool: 'Read', policy: 'allow' }, { kind: 'tool.end', id: 'x0', outcome: 'ok', ms: 30 },
   { kind: 'prompt', text: 'one', origin: 'user' },

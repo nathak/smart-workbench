@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- The live page shows the subscription limits (the 5 hour and weekly windows, or a gateway's spend limit) under the context figure: the share used with a bar and the time to the reset, coloured like the context (amber from 75 %, red from 90 %). They come from the engine's own `session.usage()` and `session.measure`, travel as numbers on the `wb` state line (never the turn line or the ledger), and are absent off a subscription.
 ## [0.21.0] - 2026-10-20
 
 ### Added

@@ -199,6 +199,8 @@ export type Live = {
   contextPercent?: number
   contextTokens?: number
   contextWindow?: number
+  // The subscription rate-limit windows the last response reported (empty off a subscription), as the live feed carries them.
+  rateLimits?: { kind: 'five_hour' | 'seven_day' | 'spend_limit'; pct: number; resetsAt?: number }[]
   // Why the live feed could not be written, while it cannot; session-only.
   feedError?: string
   // /swb live --no-prompts: the feed keeps only the 120-character start of a prompt, not its text.

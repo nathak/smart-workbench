@@ -7,7 +7,7 @@ import * as crew from './crew'
 import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
 import { editPolicy, isPolicyEditOp, type PolicyEditOp } from './policy-edit'
-import { applyOps, feedStateOf, isSettingOp, needsAnswer, snapshotText, type AskView, type DeskOp, type SettingOp } from './desktop'
+import { applyOps, feedStateOf, isSettingOp, needsAnswer, rateWindowsOf, snapshotText, type AskView, type DeskOp, type SettingOp } from './desktop'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -1026,9 +1026,12 @@ async function workTreeHash($: $): Promise<string | undefined> {
 }
 
 async function refreshUsage($: $): Promise<ContextNumbers> {
-  const { context } = await $.session.usage()
+  const { context, rateLimits } = await $.session.usage()
   const numbers: ContextNumbers = { contextPercent: context.percent, contextTokens: context.tokens, contextWindow: context.window }
-  await setLive($, live => ({ ...live, ...numbers }))
+  // The windows go to the state line only (not into the returned numbers, which the turn line, and so the ledger, carries).
+  // An answer without the list keeps what a measure put there.
+  const limits = Array.isArray(rateLimits) ? rateWindowsOf(rateLimits) : undefined
+  await setLive($, live => ({ ...live, ...numbers, ...(limits ? { rateLimits: limits } : {}) }))
 
   return numbers
 }
@@ -3595,6 +3598,23 @@ export const register: Register = on => {
       return { deny: 'SmartWorkbench guard failed; call not run.' }
     }
   })
+
+  // A rate-limit window moved (also mid-turn, or when another session spent from the account).
+  on('session.measure', async ($, e, next) => {
+    const ran = await next(e)
+    // After the engine's own answer: a failure here must not run the handlers below a second time through the catch.
+    try {
+      if (Array.isArray(e.changed) && e.changed.includes('rateLimits')) {
+        const limits = rateWindowsOf(e.rateLimits)
+        await setLive($, live => ({ ...live, rateLimits: limits }))
+        await emitState($)
+      }
+    } catch {
+      // The display is optional.
+    }
+
+    return ran
+  }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
     const ran = await next(e)

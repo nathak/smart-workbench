@@ -53,6 +53,8 @@ type WorldOptions = {
   agentId?: string
   // What the engine reports as the session's context use; the default is only the window.
   context?: { tokens?: number; window: number; percent?: number }
+  // The rate-limit windows the engine reports; the default is none (not a subscription).
+  rateLimits?: Array<{ kind: string; percentUsed: number; resetsAt?: string }>
   // Leaves the scope unset, so the default (per session) applies; the tests of the shared workbench start on `project`.
   defaultScope?: boolean
 }
@@ -79,7 +81,7 @@ function world(on: On, options: WorldOptions = {}) {
   on('session.cwd', () => ({ value: `${CWD}/sub` }))
   on('session.root', () => ({ value: CWD }))
   on('session.id', () => ({ value: 'session-a' }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: options.context ?? { window: 200000 }, rateLimits: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: options.context ?? { window: 200000 }, rateLimits: options.rateLimits ?? [] } }))
   on('fs.read', ($, e) => {
     const name = fileAt(e.path)
     if (name === undefined) throw new Error(`ENOENT: ${e.path}`)
@@ -1467,6 +1469,34 @@ test('the live feed turn line carries the context and the turn tokens; --no-prom
   const prompt = feedLines(writes).filter(one => one.kind === 'prompt').at(-1)
   expect(prompt?.text).toBe('secret plan')
   expect(prompt?.prompt).toBeUndefined()
+})
+
+test('the rate-limit windows reach the state line, not the turn line; a measure with a moved window rewrites it once', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, rateLimits: [{ kind: 'five_hour', percentUsed: 23.46, resetsAt: '2026-10-20T15:00:00Z' }, { kind: 'bogus', percentUsed: 5 }] })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  const states = () => feedLines(writes).filter(one => one.kind === 'wb')
+  expect(states().at(-1)?.limits).toEqual([{ kind: 'five_hour', pct: 23.5, resetsAt: Date.parse('2026-10-20T15:00:00Z') }])
+  const turn = feedLines(writes).find(one => one.kind === 'turn')
+  expect(turn).not.toHaveProperty('limits')
+  expect(turn).not.toHaveProperty('rateLimits')
+
+  const measure = (percentUsed: number, changed: Array<'rateLimits' | 'context'>) => $.session.measure({ context: { window: 200000 }, rateLimits: [{ kind: 'seven_day', percentUsed }], changed })
+  await measure(61, ['context'])
+  expect(states().at(-1)?.limits).toHaveLength(1)
+  const before = states().length
+  await measure(61, ['rateLimits'])
+  expect(states().at(-1)?.limits).toEqual([{ kind: 'seven_day', pct: 61 }])
+  expect(states().length).toBe(before + 1)
+  await measure(61, ['rateLimits'])
+  expect(states().length).toBe(before + 1)
 })
 
 test('the Team tab names the version an alias usually stands for and leaves other values alone', () => {

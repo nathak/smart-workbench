@@ -93,6 +93,24 @@ const FEED_TEXT = 120
  * Counts and short texts only (the goal up to 200 characters, each condition up to 120). The conditions are nested, and the feed masks
  * only top-level text, so each one is masked here.
  */
+// One subscription rate-limit window as the feed carries it: numbers only, so no text rides along.
+export type RateWindow = { kind: 'five_hour' | 'seven_day' | 'spend_limit'; pct: number; resetsAt?: number }
+const RATE_KINDS = ['five_hour', 'seven_day', 'spend_limit'] as const
+
+// The engine's windows reduced to the feed's shape; anything unexpected is dropped, not passed on.
+export function rateWindowsOf(list: unknown): RateWindow[] {
+  if (!Array.isArray(list)) return []
+  const out: RateWindow[] = []
+  for (const kind of RATE_KINDS) {
+    const one = list.find((item): item is Record<string, unknown> => typeof item === 'object' && item !== null && (item as { kind?: unknown }).kind === kind)
+    if (!one || typeof one.percentUsed !== 'number' || !Number.isFinite(one.percentUsed)) continue
+    const at = typeof one.resetsAt === 'string' ? Date.parse(one.resetsAt) : Number.NaN
+    out.push({ kind, pct: Math.round(Math.max(0, Math.min(1000, one.percentUsed)) * 10) / 10, ...(Number.isFinite(at) ? { resetsAt: at } : {}) })
+  }
+
+  return out
+}
+
 export function feedStateOf(wb: Workbench, live: Live) {
   const evidence: readonly EvidenceRecord[] = wb.evidence
   const lastEdit = Math.max(0, ...Object.values(wb.changed.edits ?? {}))
@@ -122,6 +140,7 @@ export function feedStateOf(wb: Workbench, live: Live) {
     codex: wb.team?.codex?.enabled === true,
     codexReview: wb.team?.codex?.review === true,
     codexRescue: wb.team?.codex?.rescue === true,
+    limits: live.rateLimits ?? [],
     gates: { editLines: SMALL_EDIT_LINES, editChars: SMALL_EDIT_CHARS, turnLines: SMALL_TURN_LINES, repeat: REPEAT_LIMIT },
   }
 }

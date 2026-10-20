@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { feedStateOf, SNAPSHOT_MAX_BYTES, snapshotText } from '../hooks/desktop'
+import { feedStateOf, rateWindowsOf, SNAPSHOT_MAX_BYTES, snapshotText } from '../hooks/desktop'
 import { parsePolicy } from '../hooks/policy'
 import type { Live, Workbench } from '../types'
 
@@ -46,5 +46,20 @@ describe('the guard file templates in the app snapshot', () => {
     expect(text).toBeDefined()
     expect(new TextEncoder().encode(text ?? '').length).toBeLessThanOrEqual(SNAPSHOT_MAX_BYTES)
     expect(filed(text)).toMatchObject({ editable: false, templates: [] })
+  })
+})
+
+describe('the rate-limit windows in the live feed state', () => {
+  test('only known windows with a number are kept, once each and in a fixed order, as numbers', () => {
+    const at = '2026-10-20T15:00:00Z'
+    const list = [{ kind: 'five_hour', percentUsed: 23.46, resetsAt: at }, { kind: 'x', percentUsed: 5 }, { kind: 'seven_day', percentUsed: '9' }, { kind: 'spend_limit', percentUsed: 104.2, resetsAt: 'nope' }, { kind: 'five_hour', percentUsed: 1 }]
+    expect(rateWindowsOf(list)).toEqual([{ kind: 'five_hour', pct: 23.5, resetsAt: Date.parse(at) }, { kind: 'spend_limit', pct: 104.2 }])
+    expect(rateWindowsOf([{ kind: 'seven_day', percentUsed: 5000 }])).toEqual([{ kind: 'seven_day', pct: 1000 }])
+    for (const odd of [null, undefined, {}, 'str', 4]) expect(rateWindowsOf(odd)).toEqual([])
+  })
+
+  test('the state carries the windows the session kept, none by default', () => {
+    expect(feedStateOf(base(undefined), {} as Live).limits).toEqual([])
+    expect(feedStateOf(base(undefined), { rateLimits: [{ kind: 'five_hour', pct: 7 }] } as unknown as Live).limits).toEqual([{ kind: 'five_hour', pct: 7 }])
   })
 })
