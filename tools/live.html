@@ -352,6 +352,23 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 @media (max-width:820px){.trow{grid-template-columns:minmax(0,1fr) 52px}.trow .wf,.trow .tm,.trow .who{display:none}.trow .st{min-width:0}.trow .nm .tx{flex:1 1 0}.turnhead .mt{width:100%}}
 @media (max-width:820px){#drawer{left:8px;right:8px;top:auto;bottom:8px;width:auto;max-width:none;max-height:55vh}.grid{grid-template-columns:1fr}.rows{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.tile,.pill{transition:none}.wf i.running{background:var(--warn)}#flow .pk.wait{animation:none}body.ready .box,body.ready .fill{transition:none}}
+
+.grgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-4);align-items:start}
+@media(min-width:900px){.grgrid{grid-template-columns:minmax(220px,300px) minmax(0,1fr)}}
+#gr-q{width:100%;box-sizing:border-box;margin-bottom:var(--sp-3)}
+.grcats{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-bottom:var(--sp-3)}.grcats button[aria-pressed=true]{border-color:var(--focus);color:var(--focus)}
+.grlist{display:flex;flex-direction:column;gap:var(--sp-1);max-height:60vh;overflow:auto}
+.gitem{display:flex;gap:var(--sp-3);align-items:baseline;width:100%;text-align:left;padding:var(--sp-2) var(--sp-3);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);color:var(--fg);font:var(--fs-sm) var(--mono)}
+.gitem .gp{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}.gitem .gt,.gitem .gx{color:var(--fg-muted);font-size:var(--fs-xs);white-space:nowrap}
+.gitem.touched{border-left:3px solid var(--warn)}.gitem[aria-current=true]{border-color:var(--focus)}
+.grhead{display:flex;flex-direction:column;gap:var(--sp-3);margin-bottom:var(--sp-4)}.grpath{margin:0;font:700 var(--fs-lg)/1.3 var(--mono);word-break:break-all}
+.grmeta,.grbar{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
+.grsvg{width:100%;height:auto;max-height:480px;margin-bottom:var(--sp-4)}
+.grn rect{fill:var(--surface-2);stroke:var(--border-strong)}.grn text{fill:var(--fg);font:11px var(--mono)}.grn.touched rect{stroke:var(--warn)}.grn.center rect{stroke:var(--focus);stroke-width:2}.grn.gside{cursor:pointer}.grn.gside:focus{outline:none}.grn.gside:focus rect{stroke:var(--focus);stroke-width:2}
+.grl{stroke:var(--border-strong);stroke-width:1;fill:none}.grl.t,.grl.tt{stroke-dasharray:4 3}.grmore{fill:var(--fg-muted);font:11px var(--mono)}
+.gcols{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-4)}@media(min-width:900px){.gcols{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.gcol h3{margin:0 0 var(--sp-3);font:700 var(--fs-sm) var(--mono);text-transform:uppercase;letter-spacing:.04em}.gcol .gitem{margin-bottom:var(--sp-1)}
+@media(max-width:700px){.grsvg{display:none}}
 </style>
 </head>
 <body>
@@ -408,6 +425,7 @@ button:hover{color:var(--fg);background:var(--surface-2)}
       <button role="tab" id="tab-guard" aria-controls="p-guard" data-tab="guard"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-shield"/></svg><span data-i="tab-guard"></span><span class="cnt warn" id="nav-guard-n" hidden></span></button>
       <button role="tab" id="tab-evidence" aria-controls="p-evidence" data-tab="evidence"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-check"/></svg><span data-i="tab-evidence"></span><span class="cnt" id="nav-evidence-n" hidden></span></button>
       <button role="tab" id="tab-agents" aria-controls="p-agents" data-tab="agents"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-team"/></svg><span data-i="tab-agents"></span><span class="cnt" id="nav-agents-n" hidden></span></button>
+      <button role="tab" id="tab-graph" aria-controls="p-graph" data-tab="graph"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-tree"/></svg><span data-i="tab-graph"></span></button>
     </nav>
   </aside>
   <div class="maincol">
@@ -583,6 +601,27 @@ button:hover{color:var(--fg);background:var(--surface-2)}
       </aside>
     </div>
   </div>
+  <div class="tabpanel" id="p-graph" role="tabpanel" aria-labelledby="tab-graph" hidden>
+    <div class="phead" id="gr-head">
+      <h2 class="phead-t"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-tree"/></svg><span data-i="gr-title"></span></h2>
+      <span class="mc" id="gr-state"></span>
+      <p class="phead-sub" data-i="gr-sub"></p>
+    </div>
+    <p class="panel" id="gr-body" role="status"></p>
+    <div class="grgrid">
+      <div class="panel" id="gr-side" hidden>
+        <input type="search" id="gr-q" autocomplete="off" spellcheck="false" aria-label="search files">
+        <div class="grcats" role="group" aria-label="category">
+          <button type="button" id="gr-cat-all" aria-pressed="true" data-i="gr-all"></button>
+          <button type="button" id="gr-cat-source" aria-pressed="false" data-i="gr-source"></button>
+          <button type="button" id="gr-cat-test" aria-pressed="false" data-i="gr-test"></button>
+          <button type="button" id="gr-cat-config" aria-pressed="false" data-i="gr-config"></button>
+        </div>
+        <div class="grlist" id="gr-list"></div>
+      </div>
+      <div class="panel" id="gr-main" hidden><div id="gr-center"></div></div>
+    </div>
+  </div>
   <div class="tabpanel" id="p-agents" role="tabpanel" aria-labelledby="tab-agents" hidden>
     <div class="phead" id="t-head">
       <h2 class="phead-t"><svg class="ic" aria-hidden="true" focusable="false"><use href="#i-team"/></svg><span data-i="t-title"></span></h2>
@@ -680,6 +719,8 @@ var DICT = {
   'tl-q-ph': ['search · tool:Bash -policy:allow "npm test" ms:>500 is:fail', '검색 · tool:Bash -policy:allow "npm test" ms:>500 is:fail'], 'tl-crit-l': ['◆ critical path', '◆ 임계 경로'], 'tl-zoom-l': ['reset zoom', '확대 해제'],
   'h-title': ['Keyboard and search', '키보드와 검색'], 'h-keys': ['Keys', '단축키'], 'h-query': ['Search words (Timeline)', '검색어 (타임라인)'], 'h-off': ['Turn off single-key shortcuts', '한 글자 단축키 끄기'], 'h-close': ['Close', '닫기'],
   'h-note': ['Shortcuts do nothing while you type in a field or hold Ctrl, Alt or ⌘.', '입력창에 글을 쓰는 중이거나 Ctrl·Alt·⌘를 누른 동안에는 단축키가 동작하지 않습니다.'],
+  'tab-graph': ['Files', '파일'], 'gr-title': ['File graph', '파일 그래프'], 'gr-sub': ['Which files import which, from the JS/TS sources of the project. Pick a file to see what it uses, what uses it and its tests. Secret and generated files are never read.', '프로젝트 JS/TS 소스의 import 관계입니다. 파일을 고르면 그 파일이 쓰는 파일, 그 파일을 쓰는 파일, 테스트가 보입니다. 비밀·생성 파일은 읽지 않습니다.'],
+  'gr-all': ['All', '전체'], 'gr-source': ['Source', '소스'], 'gr-test': ['Tests', '테스트'], 'gr-config': ['Config', '설정'], 'gr-q-ph': ['Search files…', '파일 검색…'],
   'app-status': ['Status & settings', '상태·설정'], 't-title': ['Team mode', '팀 모드'], 't-sub': ['The advisor designs and reviews, the lead builds, the explorer reads. Context is spent only where it is needed.', '조언자가 설계하고 검토하며, 리드가 구현하고, 탐색 담당이 읽습니다. 컨텍스트는 필요한 곳에만 씁니다.'], 't-t-adv': ['Advisor runs', '조언자 실행'], 't-t-exp': ['Explorer runs', '탐색 실행'], 't-t-gates': ['Safety gates raised', '발생한 안전 게이트'], 't-t-codex': ['Codex runs', 'Codex 실행'], 't-matrix': ['Agent roles', '역할별 에이전트'], 'g-title': ['Run & guard', '실행·가드'], 'g-t-ask': ['Pending questions', '대기 중인 확인'], 'g-t-rules': ['Guard file rules', '가드 파일 규칙'], 'g-t-block': ['Blocked or stopped', '차단·중단'], 'g-t-allow': ['Allowed', '허용'], 'g-order': ['Rule order', '규칙 순서'], 'g-order-note': ['The rule list is not in the live feed. Open Status & settings in the desktop app to see and edit the guard file.', '규칙 목록은 실시간 피드에 없습니다. 데스크톱 앱의 상태·설정에서 가드 파일을 보고 고칠 수 있습니다.'], 'g-open-status': ['Open Status & settings', '상태·설정 열기'], 'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Run & guard', '실행·가드'], 'tab-agents': ['Team mode', '팀 모드'],
   'g-queue': ['Needs attention', '확인이 필요한 것'], 'g-cats': ['Decisions by category', '범주별 판정'], 'g-table': ['Decisions', '판정 목록'],
   'a-kinds': ['By kind of agent', '에이전트 종류별'], 'a-runs': ['Agent runs', '에이전트 실행'], 'a-wf': ['Workflows', '워크플로'], 'a-codex': ['Codex runs', 'Codex 실행'],
@@ -1849,7 +1890,7 @@ function queueTl(){ tl.dirty = true; if (tab === 'timeline' && !tlQueued) { tlQu
 var viewQueued = false;
 function queueView(){
   if (tab === 'timeline') { queueTl(); return; }
-  if ((tab === 'guard' || tab === 'agents' || tab === 'intent' || tab === 'evidence') && !viewQueued) { viewQueued = true; requestAnimationFrame(function(){ viewQueued = false; safe(tab, function(){ withFocus(function(){ if (tab === 'guard') drawGuard(); else if (tab === 'agents') drawAgents(); else if (tab === 'intent') drawIntent(); else if (tab === 'evidence') drawEvidence(); }); }); }); }
+  if ((tab === 'guard' || tab === 'agents' || tab === 'intent' || tab === 'evidence' || tab === 'graph') && !viewQueued) { viewQueued = true; requestAnimationFrame(function(){ viewQueued = false; safe(tab, function(){ withFocus(function(){ if (tab === 'guard') drawGuard(); else if (tab === 'agents') drawAgents(); else if (tab === 'intent') drawIntent(); else if (tab === 'evidence') drawEvidence(); else if (tab === 'graph') drawGraph(); }); }); }); }
 }
 function isFail(sp){ var st = statusOf(sp); return st === 'error' || st === 'blocked' || st === 'declined'; }
 function whoOf(sp){
@@ -2243,7 +2284,7 @@ function openItem(key){
 }
 var keysOff = stored('swb-keys') === 'off';
 var HELP_KEYS = [
-  ['1 2 3 4 5 6', 'go to Live, Intent, Guard, Evidence, Team, or the flow section', '실시간, 의도, 가드, 증거, 팀 화면이나 흐름 구역으로 이동'],
+  ['1 2 3 4 5 6 7', 'go to Live, Intent, Guard, Evidence, Team, the flow section, or the file graph', '실시간, 의도, 가드, 증거, 팀 화면, 흐름 구역, 파일 그래프로 이동'],
   ['j / k  ↑ / ↓', 'next / previous call', '다음 / 이전 호출'],
   ['→ / ←', 'open / close the calls under a row', '행 아래 호출 펼치기 / 접기'],
   ['Enter', 'open the details of the selected call', '선택한 호출의 상세 열기'],
@@ -2282,7 +2323,7 @@ function helpBuild(){
     if (e.key === '?') { e.preventDefault(); open(); return; }
     if (keysOff) return;
     var n = Number(e.key);
-    var keyTabs = ['timeline', 'intent', 'guard', 'evidence', 'agents', 'flow'];
+    var keyTabs = ['timeline', 'intent', 'guard', 'evidence', 'agents', 'flow', 'graph'];
     if (n >= 1 && n <= keyTabs.length) { e.preventDefault(); showTab(keyTabs[n - 1], true); }
     else if (e.key === 't') { $('theme').click(); }
     else if (e.key === 'p') { setPaused(!paused); }
@@ -2318,6 +2359,7 @@ function timelineBuild(){
   };
   $('tl-crit').onclick = function(){ tlq.crit = !tlq.crit; queueTl(); };
   $('tl-q').placeholder = T('tl-q-ph');
+  $('gr-q').placeholder = T('gr-q-ph');
   $('tl-q').addEventListener('input', function(){ if (tab !== 'timeline') showTab('timeline'); setQuery($('tl-q').value); });
   $('tl-q').addEventListener('keydown', function(e){
     if (e.key === 'Enter') { e.preventDefault(); jumpHit(e.shiftKey ? -1 : 1); }
@@ -2788,8 +2830,252 @@ function drawSrv(){
 }
 setInterval(pollInfo, 10000);
 
+// ---- graph tab: the import graph of the session's project (GET /graph), read only ----
+var GR = { auto: true, centerPath: null, data: null, ix: null, err: null, loading: false, center: -1, q: '', cat: '', depth: 1, back: [], key: '', owner: null, builtAt: 0 };
+// graph:begin
+function graphData(raw){
+  // The answer is not trusted to be well formed: every field is given a fixed shape here, and anything that is not version 1 is refused.
+  if (!raw || typeof raw !== 'object' || raw.v !== 1 || !Array.isArray(raw.nodes) || !Array.isArray(raw.edges)) return null;
+  var nodes = raw.nodes.slice(0, 5000).map(function(n){
+    n = n && typeof n === 'object' ? n : {};
+    return { p: clean(n.p, 300), c: /^(source|test|config|docs)$/.test(String(n.c)) ? String(n.c) : 'source', l: /^(ts|tsx|js)$/.test(String(n.l)) ? String(n.l) : 'js', s: Number(n.s) || 0, big: n.big === 1, ext: Number(n.ext) || 0 };
+  });
+  var edges = [];
+  raw.edges.slice(0, 20000).forEach(function(e){
+    if (Array.isArray(e) && Number.isInteger(e[0]) && Number.isInteger(e[1]) && e[0] >= 0 && e[1] >= 0 && e[0] < nodes.length && e[1] < nodes.length && /^[irdt]$/.test(String(e[2]))) edges.push([e[0], e[1], String(e[2])]);
+  });
+  var tr = raw.truncated && typeof raw.truncated === 'object' ? Object.keys(raw.truncated).filter(function(k){ return /^(files|depth|bytes|time|edges)$/.test(k); }) : [];
+  return { nodes: nodes, edges: edges, builtAt: Number(raw.builtAt) || 0, truncated: tr, unresolved: Number(raw.unresolved) || 0 };
+}
+function graphIndex(d){
+  var out = [], inn = [], byPath = Object.create(null);
+  d.nodes.forEach(function(n, i){ out.push([]); inn.push([]); byPath[n.p] = i; });
+  d.edges.forEach(function(e){ out[e[0]].push([e[1], e[2]]); inn[e[1]].push([e[0], e[2]]); });
+  return { out: out, inn: inn, byPath: byPath };
+}
+// The files a file leans on, the files that lean on it, and the tests that name or import it. Depth 2 adds what those lean on, each with the one it came through.
+function graphNeighbors(d, ix, i, depth){
+  var res = { imports: [], by: [], tests: [] };
+  function walk(start, dir, keep, list){
+    var seen = Object.create(null); seen[i] = true;
+    var level = [[start, -1]];
+    for (var step = 1; step <= depth; step++) {
+      var next = [];
+      level.forEach(function(item){
+        (dir === 'out' ? ix.out[item[0]] : ix.inn[item[0]]).forEach(function(e){
+          if (seen[e[0]] || !keep(e, item[0], step)) return;
+          seen[e[0]] = true;
+          var via = step === 1 ? -1 : item[0];
+          list.push({ i: e[0], kind: e[1], via: via, step: step });
+          next.push([e[0], via]);
+        });
+      });
+      level = next;
+    }
+  }
+  walk(i, 'out', function(e, from, step){ return step === 1 || d.nodes[e[0]].c !== 'test'; }, res.imports);
+  walk(i, 'inn', function(e){ return d.nodes[e[0]].c !== 'test'; }, res.by);
+  ix.inn[i].forEach(function(e){ if (d.nodes[e[0]].c === 'test') res.tests.push({ i: e[0], kind: e[1], via: -1, step: 1 }); });
+  return res;
+}
+function graphMatches(d, ix, q, cat){
+  var needle = String(q || '').trim().toLowerCase(), rows = [];
+  d.nodes.forEach(function(n, i){
+    if (cat && n.c !== cat) return;
+    if (needle && n.p.toLowerCase().indexOf(needle) < 0) return;
+    rows.push(i);
+  });
+  rows.sort(function(a, b){ var da = ix.out[a].length + ix.inn[a].length, db = ix.out[b].length + ix.inn[b].length; return db - da || (d.nodes[a].p < d.nodes[b].p ? -1 : 1); });
+  return rows;
+}
+// graph:end
+// The files the session read or changed, newest last: a path named in the summary of a Read / Edit / Write call that is one of the nodes.
+function graphTouched(d, ix){
+  var found = Object.create(null), order = [];
+  TR.spans.forEach(function(sp){
+    if (!/^(Read|Edit|Write|MultiEdit|NotebookEdit)$/.test(sp.tool)) return;
+    String(sp.summary || '').split(/\s+/).forEach(function(tok){
+      tok = tok.replace(/^["'`(]+|["'`),:]+$/g, '');
+      if (!tok) return;
+      var at = tok.charAt(0) === '/' || /^[A-Za-z]:[\\/]/.test(tok) ? -1 : 0, hit = -1;
+      for (var k = at; k < tok.length && hit < 0; k++) {
+        if (k >= 0 && k > 0 && tok.charAt(k - 1) !== '/' && tok.charAt(k - 1) !== '\\') continue;
+        var cand = tok.slice(Math.max(k, 0)).replace(/\\/g, '/');
+        if (ix.byPath[cand] !== undefined) hit = ix.byPath[cand];
+      }
+      if (hit < 0) return;
+      var edit = sp.tool !== 'Read';
+      if (!found[hit]) { found[hit] = { edit: edit, at: sp.at }; order.push(hit); }
+      else { found[hit].at = Math.max(found[hit].at, sp.at); found[hit].edit = found[hit].edit || edit; }
+    });
+  });
+  return { by: found, order: order.sort(function(a, b){ return found[a].at - found[b].at; }) };
+}
+function graphSize(n){ return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+function graphNote(text){ var n = $('gr-state'); n.textContent = text; }
+function loadGraph(force){
+  var owner = hub ? curId : '';
+  if (GR.loading) return;
+  if (hub && !curId) { GR.err = L('Pick a session first.', '세션을 먼저 고르세요.'); drawGraph(); return; }
+  if (GR.owner !== owner) { GR.data = null; GR.ix = null; GR.center = -1; GR.back = []; GR.key = ''; GR.auto = true; GR.owner = owner; }
+  GR.loading = true;
+  var url = (hub ? '/graph?session=' + encodeURIComponent(curId) : '/graph') + (force ? (hub ? '&' : '?') + 'fresh=1' : '');
+  fetch(url, { cache: 'no-store' }).then(function(r){
+    if (r.status === 403) throw new Error(L('The graph is off for a shared address (set SWB_LIVE_GRAPH=1 on the server).', '공유 주소에서는 그래프가 꺼져 있습니다(서버에 SWB_LIVE_GRAPH=1을 설정하세요).'));
+    if (r.status === 404) throw new Error(L('This session is not running.', '이 세션은 실행 중이 아닙니다.'));
+    if (!r.ok) throw new Error(L('The graph could not be built.', '그래프를 만들지 못했습니다.'));
+    return r.json();
+  }).then(function(raw){
+    var d = graphData(raw);
+    if (!d) throw new Error(L('The graph is in a form this page does not know.', '이 페이지가 모르는 형식의 그래프입니다.'));
+    if (GR.owner !== (hub ? curId : '')) return;
+    var changed = !GR.data || GR.data.builtAt !== d.builtAt;
+    GR.data = d; GR.ix = graphIndex(d); GR.err = null;
+    if (GR.center < 0 || GR.center >= d.nodes.length || (GR.centerPath && GR.ix.byPath[GR.centerPath] === undefined)) GR.center = graphStart();
+    else if (GR.centerPath && GR.ix.byPath[GR.centerPath] !== undefined) GR.center = GR.ix.byPath[GR.centerPath];
+    if (changed) GR.key = '';
+  }).catch(function(e){ GR.err = e && e.message ? e.message : String(e); }).then(function(){ GR.loading = false; drawGraph(); });
+}
+function graphStart(){
+  var d = GR.data, ix = GR.ix;
+  if (!d || !d.nodes.length) return -1;
+  var t = graphTouched(d, ix);
+  if (t.order.length) return t.order[t.order.length - 1];
+  var best = 0, bd = -1;
+  d.nodes.forEach(function(n, i){ var deg = ix.out[i].length + ix.inn[i].length; if (n.c !== 'test' && deg > bd) { bd = deg; best = i; } });
+  return best;
+}
+function graphGo(i, pushBack){
+  if (!GR.data || i < 0 || i >= GR.data.nodes.length) return;
+  if (pushBack && GR.center >= 0 && GR.center !== i) { GR.back.push(GR.center); if (GR.back.length > 30) GR.back.shift(); }
+  GR.center = i; GR.centerPath = GR.data.nodes[i].p; GR.key = ''; GR.auto = false;
+  drawGraph(true);
+}
+var GR_KIND = { i: ['import', 'import'], r: ['re-export', '재수출'], d: ['dynamic', '동적'], t: ['test of', '테스트 대상'] };
+function graphItem(i, extra, touched){
+  var n = GR.data.nodes[i];
+  var b = el('button', 'gitem' + (touched.by[i] ? ' touched' : ''));
+  b.type = 'button';
+  b.title = n.p;
+  b.dataset.fk = 'gr-i-' + i;
+  b.appendChild(el('span', 'gp', n.p));
+  if (touched.by[i]) b.appendChild(el('span', 'gt', touched.by[i].edit ? L('edited', '수정함') : L('read', '읽음')));
+  if (extra) b.appendChild(el('span', 'gx', extra));
+  b.onclick = function(){ graphGo(i, true); };
+  return b;
+}
+function graphColumn(title, list, touched, sub){
+  var col = el('div', 'gcol');
+  var h = el('h3', null, title + ' · ' + list.length);
+  col.appendChild(h);
+  if (!list.length) { col.appendChild(el('p', 'muted', L('none', '없음'))); return col; }
+  list.slice(0, 60).forEach(function(x){
+    var extra = x.step > 1 ? L('via ', '경유 ') + GR.data.nodes[x.via].p.split('/').pop() : (sub && GR_KIND[x.kind] ? L(GR_KIND[x.kind][0], GR_KIND[x.kind][1]) : '');
+    col.appendChild(graphItem(x.i, extra, touched));
+  });
+  if (list.length > 60) col.appendChild(el('p', 'muted', '+' + (list.length - 60)));
+  return col;
+}
+function graphShort(p, n){ return p.length > n ? '…' + p.slice(p.length - n + 1) : p; }
+function graphSvg(c, nb, touched){
+  var NS = 'http://www.w3.org/2000/svg', MAXN = 12, RH = 26, W = 720, BW = 200;
+  var left = nb.by.filter(function(x){ return x.step === 1; }), right = nb.imports.filter(function(x){ return x.step === 1; }).concat(nb.tests.map(function(x){ return { i: x.i, kind: 'tt', step: 1 }; }));
+  var rows = Math.max(Math.min(left.length, MAXN), Math.min(right.length, MAXN), 1) + 1;
+  var H = rows * RH + 10;
+  var svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.setAttribute('class', 'grsvg'); svg.setAttribute('role', 'group');
+  svg.setAttribute('aria-label', L('Neighbours of the selected file', '선택한 파일의 이웃'));
+  function node(i, x, y, cls){
+    var g = document.createElementNS(NS, 'g');
+    g.setAttribute('class', 'grn ' + cls + (touched.by[i] ? ' touched' : ''));
+    g.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+    if (cls !== 'center') { g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button'); g.dataset.fk = 'gr-s-' + i; g.onclick = function(){ graphGo(i, true); }; g.onkeydown = function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); graphGo(i, true); } }; }
+    var r = document.createElementNS(NS, 'rect'); r.setAttribute('width', BW); r.setAttribute('height', RH - 6); r.setAttribute('rx', 3); g.appendChild(r);
+    var t = document.createElementNS(NS, 'text'); t.setAttribute('x', 8); t.setAttribute('y', 14); t.textContent = graphShort(GR.data.nodes[i].p, 27); g.appendChild(t);
+    var ti = document.createElementNS(NS, 'title'); ti.textContent = GR.data.nodes[i].p; g.appendChild(ti);
+    return g;
+  }
+  function line(x1, y1, x2, y2, cls){ var l = document.createElementNS(NS, 'line'); l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2); l.setAttribute('class', 'grl ' + (cls || '')); return l; }
+  var cy = (rows * RH) / 2, cx = (W - BW) / 2;
+  function side(list, x, toCenter){
+    list.slice(0, MAXN).forEach(function(it, k){
+      var y = 5 + k * RH;
+      svg.appendChild(toCenter ? line(x + BW, y + 10, cx, cy, it.kind) : line(cx + BW, cy, x, y + 10, it.kind));
+    });
+    list.slice(0, MAXN).forEach(function(it, k){ svg.appendChild(node(it.i, x, 5 + k * RH, 'gside')); });
+    if (list.length > MAXN) { var more = document.createElementNS(NS, 'text'); more.setAttribute('x', x + 8); more.setAttribute('y', 5 + MAXN * RH + 12); more.setAttribute('class', 'grmore'); more.textContent = '+' + (list.length - MAXN); svg.appendChild(more); }
+  }
+  side(left, 0, true);
+  side(right, W - BW, false);
+  svg.appendChild(node(c, cx, cy - 10, 'center'));
+  return svg;
+}
+function drawGraph(refocus){
+  var box = $('gr-body');
+  if (!GR.data) {
+    $('gr-main').hidden = true; $('gr-side').hidden = true;
+    box.hidden = false; box.textContent = GR.err || (GR.loading ? L('Reading the project…', '프로젝트를 읽는 중…') : L('No graph yet.', '아직 그래프가 없습니다.'));
+    graphNote('');
+    return;
+  }
+  var d = GR.data, ix = GR.ix, t = graphTouched(d, ix);
+  // Until a file is picked by hand, the view follows the file the session touched last.
+  if (GR.auto && t.order.length && t.order[t.order.length - 1] !== GR.center) { GR.center = t.order[t.order.length - 1]; GR.centerPath = d.nodes[GR.center].p; }
+  var key = [d.builtAt, GR.center, GR.q, GR.cat, GR.depth, GR.back.length, t.order.length, lang].join('|');
+  graphNote(d.nodes.length + L(' files · ', '개 파일 · ') + d.edges.length + L(' links', '개 연결') + (d.truncated.length ? ' · ' + L('cut short', '일부만') : ''));
+  box.hidden = !GR.err; if (GR.err) box.textContent = GR.err;
+  $('gr-main').hidden = false; $('gr-side').hidden = false;
+  if (key === GR.key) return;
+  GR.key = key;
+  // the side list
+  var list = $('gr-list'); list.textContent = '';
+  var rows = graphMatches(d, ix, GR.q, GR.cat);
+  if (!GR.q && !GR.cat && t.order.length) rows = t.order.slice().reverse().concat(rows.filter(function(i){ return !t.by[i]; }));
+  rows.slice(0, 200).forEach(function(i){ var b = graphItem(i, '', t); if (i === GR.center) b.setAttribute('aria-current', 'true'); list.appendChild(b); });
+  if (!rows.length) list.appendChild(el('p', 'muted', L('No file matches.', '맞는 파일이 없습니다.')));
+  if (rows.length > 200) list.appendChild(el('p', 'muted', L('Showing 200 of ', '200개만 표시 / 전체 ') + rows.length));
+  ['', 'source', 'test', 'config'].forEach(function(c){ $('gr-cat-' + (c || 'all')).setAttribute('aria-pressed', GR.cat === c ? 'true' : 'false'); });
+  // the centre
+  var c = GR.center, main = $('gr-center'); main.textContent = '';
+  if (c < 0) { main.appendChild(el('p', 'muted', L('This project has no JS/TS files.', '이 프로젝트에는 JS/TS 파일이 없습니다.'))); return; }
+  var nb = graphNeighbors(d, ix, c, GR.depth), n = d.nodes[c];
+  var head = el('div', 'grhead');
+  var title = el('h3', 'grpath', n.p); title.tabIndex = -1; title.id = 'gr-center-h'; head.appendChild(title);
+  var meta = el('div', 'grmeta');
+  meta.appendChild(chip(n.c, '', 'file')); meta.appendChild(chip(graphSize(n.s) + (n.big ? ' · ' + L('too big to read', '너무 커서 읽지 않음') : ''), '', null));
+  meta.appendChild(chip(L('imports ', '가져옴 ') + ix.out[c].filter(function(e){ return e[1] !== 't'; }).length, '', null));
+  meta.appendChild(chip(L('imported by ', '가져옴(역) ') + ix.inn[c].filter(function(e){ return d.nodes[e[0]].c !== 'test'; }).length, '', null));
+  meta.appendChild(chip(L('tests ', '테스트 ') + nb.tests.length, nb.tests.length ? 'ok' : '', null));
+  if (n.ext) meta.appendChild(chip(n.ext + L(' packages', '개 외부 패키지'), '', null));
+  head.appendChild(meta);
+  var bar = el('div', 'grbar');
+  var back = el('button', null, L('Back', '뒤로')); back.type = 'button'; back.disabled = !GR.back.length; back.dataset.fk = 'gr-back';
+  back.onclick = function(){ var p = GR.back.pop(); if (p !== undefined) graphGo(p, false); };
+  var dep = el('button', null, GR.depth === 1 ? L('Depth 1', '깊이 1') : L('Depth 2', '깊이 2')); dep.type = 'button'; dep.dataset.fk = 'gr-depth';
+  dep.setAttribute('aria-pressed', GR.depth === 2 ? 'true' : 'false'); dep.onclick = function(){ GR.depth = GR.depth === 1 ? 2 : 1; GR.key = ''; drawGraph(); };
+  var cp = el('button', null, L('Copy path', '경로 복사')); cp.type = 'button'; cp.dataset.fk = 'gr-copy';
+  cp.onclick = function(){ try { navigator.clipboard.writeText(n.p); cp.textContent = L('Copied', '복사됨'); } catch (e) { cp.textContent = n.p; } };
+  var rf = el('button', null, L('Refresh', '새로고침')); rf.type = 'button'; rf.dataset.fk = 'gr-refresh'; rf.onclick = function(){ loadGraph(true); };
+  [back, dep, cp, rf].forEach(function(b){ bar.appendChild(b); });
+  head.appendChild(bar);
+  main.appendChild(head);
+  main.appendChild(graphSvg(c, nb, t));
+  var cols = el('div', 'gcols');
+  cols.appendChild(graphColumn(L('Imports', '가져오는 파일'), nb.imports, t, true));
+  cols.appendChild(graphColumn(L('Imported by', '가져가는 파일'), nb.by, t, false));
+  cols.appendChild(graphColumn(L('Tests', '테스트'), nb.tests, t, true));
+  main.appendChild(cols);
+  if (refocus) { var h = $('gr-center-h'); if (h) h.focus({ preventScroll: true }); }
+}
+function graphInit(){
+  $('gr-q').oninput = function(){ GR.q = this.value; GR.key = ''; drawGraph(); };
+  [['all', ''], ['source', 'source'], ['test', 'test'], ['config', 'config']].forEach(function(p){ $('gr-cat-' + p[0]).onclick = function(){ GR.cat = p[1]; GR.key = ''; drawGraph(); }; });
+  // While the tab is open the graph is asked for again now and then (the server builds only what changed).
+  setInterval(function(){ if (tab === 'graph' && !document.hidden) loadGraph(false); }, 8000);
+}
+
 // ---- tabs: roving tabindex, the choice kept in the address and in storage ----
-var TABS = ['timeline', 'intent', 'guard', 'evidence', 'agents'], tab = 'timeline';
+var TABS = ['timeline', 'intent', 'guard', 'evidence', 'agents', 'graph'], tab = 'timeline';
 function showTab(name, focusIt){
   // flow is no longer a view of its own: the address, the saved choice and the key still lead to its section
   var toFlow = name === 'flow';
@@ -2806,6 +3092,7 @@ function showTab(name, focusIt){
   syncHash();
   if (name === 'timeline') queueLayout();
   if (toFlow) $('p-flow').scrollIntoView({ block: 'start' });
+  if (name === 'graph') loadGraph(false);
   queueView();
   if (focusIt) $('tab-' + name).focus(toFlow ? { preventScroll: true } : undefined);
 }
@@ -2825,6 +3112,7 @@ function tabsBuild(){
   $('k-ask').onclick = function(){ showTab('guard'); };
   // Only the desktop app's own window has this call (a preload of its own); in a browser the button stays hidden.
   if (window.swbApp && typeof window.swbApp.openStatus === 'function') { var openApp = function(){ window.swbApp.openStatus(); }; $('appstatus').hidden = false; $('appstatus').onclick = openApp; $('g-open-status').hidden = false; $('g-open-status').onclick = openApp; }
+  graphInit();
   $('theme').onclick = function(){ theme = theme === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', theme); store('swb-theme', theme); translate(); };
 }
 function translate(){

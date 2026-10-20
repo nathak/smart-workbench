@@ -560,7 +560,7 @@ const dict = new Function(`return {${dictBody}}`)()
 check(Object.keys(dict).length > 20 && Object.entries(dict).every(([, v]) => Array.isArray(v) && v.length === 2 && v[0] && v[1]), 'every DICT entry has an English and a Korean text')
 const usedKeys = [...page.matchAll(/data-i="([^"]+)"/g)].map(m => m[1]).concat([...page.matchAll(/\bT\('([^']+)'\)/g)].map(m => m[1]))
 const missingKeys = [...new Set(usedKeys)].filter(key => !(key in dict))
-const dynamicKeys = ['ok', 'error', 'blocked', 'declined', 'aborted', 'running', 'bg', 'ask'].map(one => `s-${one}`).concat(['timeline', 'guard', 'agents', 'flow'].map(one => `tab-${one}`))
+const dynamicKeys = ['ok', 'error', 'blocked', 'declined', 'aborted', 'running', 'bg', 'ask'].map(one => `s-${one}`).concat(['timeline', 'guard', 'agents', 'flow', 'graph'].map(one => `tab-${one}`))
 const missingDynamic = dynamicKeys.filter(key => !(key in dict))
 check(missingDynamic.length === 0, `the keys built at run time (statuses and tabs) are in DICT${missingDynamic.length ? ' (missing ' + missingDynamic.join(', ') + ')' : ''}`)
 check(missingKeys.length === 0, `every data-i and T() key is in DICT${missingKeys.length ? ' (missing ' + missingKeys.join(', ') + ')' : ''}`)
@@ -824,6 +824,26 @@ const G = await import('./live-graph.mjs')
   check(['.env', 'a/.env.local', 'x/server.pem', 'id_rsa', 'a/credentials.json'].every(p => G.kindOfPath(p) === 'secret') && G.kindOfPath('.env.example') !== 'secret' && G.kindOfPath('dist/x.js') === 'generated' && G.kindOfPath('src/a.test.ts') === 'test', 'the path rules agree with the secret and generated rules')
   const rules = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'files.ts'), 'utf8')
   check(rules.includes(G.SECRET.source) && rules.includes(G.GENERATED.source), 'the secret and generated rules are the same text as in hooks/files.ts')
+}
+
+
+// ---- the page's side of the graph: the answer is re-shaped, and the neighbours of a file come out as drawn
+{
+  const graphCode = page.slice(page.indexOf('// graph:begin'), page.indexOf('// graph:end'))
+  const P = new Function(`${modelCode}\n${graphCode}\nreturn { graphData, graphIndex, graphNeighbors, graphMatches }`)()
+  check(P.graphData({ v: 2, nodes: [], edges: [] }) === null && P.graphData(null) === null && P.graphData({ v: 1, nodes: 'x', edges: [] }) === null, 'a graph that is not version 1 or not well formed is refused')
+  const raw = { v: 1, builtAt: 5, truncated: { time: true, evil: true }, nodes: [{ p: 'a.ts', c: 'source', l: 'ts', s: 10 }, { p: 'b.ts', c: 'weird', l: 'x', s: 'NaN' }, { p: 'a.test.ts', c: 'test', l: 'ts', s: 1 }, { p: 'c.ts', c: 'source', l: 'ts', s: 1 }, null], edges: [[0, 1, 'i'], [2, 0, 't'], [2, 1, 'i'], [1, 3, 'r'], [0, 99, 'i'], [-1, 0, 'i'], [0, 1, 'x'], 'no', [1.5, 0, 'i']] }
+  const d = P.graphData(raw)
+  check(d.nodes.length === 5 && d.nodes[1].c === 'source' && d.nodes[1].l === 'js' && d.nodes[1].s === 0 && d.nodes[4].p === '' && d.edges.length === 4 && d.truncated.join() === 'time', 'every node and edge is given a fixed shape, and an edge outside the nodes is dropped')
+  const ix = P.graphIndex(d)
+  const nbA = P.graphNeighbors(d, ix, 0, 1)
+  check(nbA.imports.map(x => x.i).join() === '1' && nbA.by.length === 0 && nbA.tests.map(x => x.i).join() === '2', 'a file lists what it imports, what imports it, and the tests that name or import it')
+  const nbB = P.graphNeighbors(d, ix, 1, 1)
+  check(nbB.by.map(x => x.i).join() === '0' && nbB.tests.map(x => x.i).join() === '2' && nbB.imports.map(x => x.i).join() === '3', 'a test is a test, not an importer')
+  const nbA2 = P.graphNeighbors(d, ix, 0, 2)
+  check(nbA2.imports.map(x => x.i + ':' + x.step + ':' + x.via).join() === '1:1:-1,3:2:1', 'depth 2 adds what the neighbours import, with the file each came through')
+  check(P.graphMatches(d, ix, 'B.T', '').join() === '1' && P.graphMatches(d, ix, '', 'test').join() === '2' && P.graphMatches(d, ix, 'zzz', '').length === 0, 'the search is by path part without case, and the category narrows it')
+  check(page.includes('id="p-graph"') && /\bTABS = \[[^\]]*'graph'\]/.test(page) && page.includes("'flow', 'graph'") && !/graph[^\n]{0,80}innerHTML/.test(page.slice(page.indexOf('// ---- graph tab'), page.indexOf('// ---- tabs: roving'))), 'the graph tab is in the tab list and the key list, and its code draws no markup from text')
 }
 
 process.exit(failed === 0 ? 0 : 1)
