@@ -8,6 +8,7 @@ import * as loop from './loop'
 import { LEDGER_TEXT_MAX, LEDGER_VERSION, editedTurns, isGitCommit, isOwnCommit, ledgerLine, locate, commitBase, frameData, isSharedEvent, maskPersonal, mergeLedgers, mergeNote, mergeNotes, parseLedger, parseSearch, personalHits, publishEvents, pushOutcome, searchLedger, sessionNote, sharedPaths, turnReport, whyTarget, wikiMerge, wikiPage, wikiProject, wikiTarget, type Found, type LedgerEvent } from './ledger'
 import { editPolicy, isPolicyEditOp, type PolicyEditOp } from './policy-edit'
 import { applyOps, feedStateOf, isSettingOp, needsAnswer, rateWindowsOf, snapshotText, type AskView, type DeskOp, type SettingOp } from './desktop'
+import { GRAPH_DESCRIPTION, GRAPH_TOOL, graphAnswer, graphDataOf, queryPath, type GraphData } from './graph'
 import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
@@ -1099,6 +1100,62 @@ const CHECK_KINDS: readonly EvidenceKind[] = ['test', 'build', 'typecheck', 'lin
 
 // Claude's side of a contract change: recorded as an open proposal for the person.
 // The tool's result is a string: the engine checks plugin tool results against a text output.
+// The import graph the last import_graph call built, kept with the engine's cache so the next build reads only what changed.
+let graphMemo: { root: string; at: number; data: GraphData; cacheJson: string } | undefined
+let graphRunning: { root: string; startedAt: number; promise: Promise<GraphData | undefined> } | undefined
+
+async function graphFor($: $, root: string, lastEditAt: number): Promise<GraphData | undefined> {
+  const now = await $.clock.now()
+  if (graphMemo && graphMemo.root === root && now - graphMemo.at < 5000 && lastEditAt <= graphMemo.at) return graphMemo.data
+  // Calls made together share one build, if it is for this project and started after the last edit; any other waits for it and builds again.
+  if (graphRunning && graphRunning.root === root && lastEditAt <= graphRunning.startedAt) return graphRunning.promise
+  if (graphRunning) await graphRunning.promise.catch(() => undefined)
+  if (graphMemo && graphMemo.root === root && now - graphMemo.at < 5000 && lastEditAt <= graphMemo.at) return graphMemo.data
+  const previous = graphMemo?.root === root ? graphMemo.cacheJson : ''
+  const promise = (async () => {
+    const ran = await $.process.run(['node', `${$.plugin.root}/tools/graph-build.mjs`, root], { stdin: previous, timeoutMs: 10000 }).catch(() => undefined)
+    if (!ran || ran.exitCode !== 0 || ran.isStdoutTruncated) return undefined
+    try {
+      const out = JSON.parse(ran.stdout) as { graph?: unknown; cache?: unknown }
+      const data = graphDataOf(out.graph)
+      if (data) graphMemo = { root, at: now, data, cacheJson: out.cache ? JSON.stringify(out.cache) : '' }
+
+      return data ?? undefined
+    } catch {
+      return undefined
+    }
+  })()
+  const mine = { root, startedAt: now, promise }
+  graphRunning = mine
+  void promise.finally(() => {
+    if (graphRunning === mine) graphRunning = undefined
+  })
+
+  return promise
+}
+
+// The import_graph tool: read-only, answers from the graph of the project's JS/TS files and what this session knows about each file.
+async function importGraph($: $, input: Record<string, unknown>): Promise<{ result: string }> {
+  try {
+    return await importGraphAnswer($, input)
+  } catch {
+    return { result: 'import_graph: the graph is not available right now' }
+  }
+}
+
+async function importGraphAnswer($: $, input: Record<string, unknown>): Promise<{ result: string }> {
+  const root = await $.session.root()
+  const asked = queryPath(input.file, root)
+  if (!asked.ok) return { result: `import_graph: ${asked.reason}` }
+  const wb = await read($, wbAtom)
+  const lastEditAt = Math.max(0, ...Object.values(wb.changed.edits ?? {}))
+  const data = await graphFor($, root, lastEditAt)
+  if (!data) return { result: 'import_graph: the graph is not available right now' }
+  const direction = input.direction === 'imports' || input.direction === 'importers' ? input.direction : 'both'
+
+  return { result: graphAnswer(data, asked.rel, input.depth === 2 ? 2 : 1, direction, wb, root) }
+}
+
 async function propose($: $, input: Record<string, unknown>): Promise<{ result: string }> {
   const change = CHANGES.find(one => one === input.change)
   const text = typeof input.text === 'string' ? input.text.trim() : ''
@@ -3153,6 +3210,8 @@ export const register: Register = on => {
     feedMissed = 0
     isFeedNoted = false
     treeRoot = undefined
+    graphMemo = undefined
+    graphRunning = undefined
     ledger = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
     const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|scope|notify|why|policy|ci|issue|share|pickup|audit|clear]'
@@ -3176,6 +3235,19 @@ export const register: Register = on => {
         required: ['change', 'reason'],
       },
     }).catch(error => $.ui.log(`SmartWorkbench: could not register propose_contract_change: ${String(error)}`, { to: 'debug' }))
+    await $.tool.register({
+      name: 'import_graph',
+      description: GRAPH_DESCRIPTION,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file: { type: 'string', description: 'Project-relative path of a JS/TS file (an absolute path inside the project also works)' },
+          depth: { type: 'integer', enum: [1, 2], description: '1 = direct neighbours (default); 2 = also what those lean on or are leaned on by' },
+          direction: { type: 'string', enum: ['both', 'imports', 'importers'] },
+        },
+        required: ['file'],
+      },
+    }).catch(error => $.ui.log(`SmartWorkbench: could not register import_graph: ${String(error)}`, { to: 'debug' }))
     const sessionId = await $.session.id().catch(() => undefined)
     if (sessionId) await setLive($, live => ({ ...live, sessionId }))
     isAskable = e.isInteractive !== false
@@ -3295,6 +3367,10 @@ export const register: Register = on => {
     }
     if (e.tool === PROPOSE_TOOL) {
       return propose($, e as unknown as Record<string, unknown>)
+    }
+    // Read-only and answered from paths the graph accepted: like the proposal tool it is not a call the guard classifies or the feed shows.
+    if (e.tool === GRAPH_TOOL) {
+      return importGraph($, e as unknown as Record<string, unknown>)
     }
     const hookStart = await $.clock.now()
     const isTeam = (await read($, wbAtom)).team?.enabled === true
@@ -3757,7 +3833,7 @@ export const register: Register = on => {
     const row = await next(e)
     const id = e.props.tool_use_id
     const text = (await read($, badgesAtom))[id]
-    const isFailed = e.props.isErrored && !e.props.isRunning && !e.props.isInterrupted && e.props.tool !== PROPOSE_TOOL
+    const isFailed = e.props.isErrored && !e.props.isRunning && !e.props.isInterrupted && e.props.tool !== PROPOSE_TOOL && e.props.tool !== GRAPH_TOOL
 
     if (text === undefined && !isFailed) {
       return row

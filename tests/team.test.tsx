@@ -53,6 +53,8 @@ type WorldOptions = {
   agentId?: string
   // What the engine reports as the session's context use; the default is only the window.
   context?: { tokens?: number; window: number; percent?: number }
+  // What tools/graph-build.mjs prints (the graph, and a cache to hand back), and its exit code; unset, the script is not run.
+  graph?: { stdout: string; exitCode?: number }
   // The rate-limit windows the engine reports; the default is none (not a subscription).
   rateLimits?: Array<{ kind: string; percentUsed: number; resetsAt?: string }>
   // Leaves the scope unset, so the default (per session) applies; the tests of the shared workbench start on `project`.
@@ -110,6 +112,9 @@ function world(on: On, options: WorldOptions = {}) {
       const code = forced ?? (hash === e.argv[3] ? 0 : 3)
       if (code === 0) files[name ?? path] = e.init?.stdin ?? ''
       return { value: { exitCode: code, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (String(e.argv[1] ?? '').endsWith('tools/graph-build.mjs') && options.graph) {
+      return { value: { exitCode: options.graph.exitCode ?? 0, stdout: options.graph.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (String(e.argv[1] ?? '').endsWith('tools/desktop-channel.mjs') && e.argv[2] === 'take') {
       const out = JSON.stringify({ commands: [], rejected: [], ...options.taken })
@@ -1497,6 +1502,69 @@ test('the rate-limit windows reach the state line, not the turn line; a measure 
   expect(states().length).toBe(before + 1)
   await measure(61, ['rateLimits'])
   expect(states().length).toBe(before + 1)
+})
+
+const GRAPH_TOOL = 'mcp__smartworkbench__import_graph'
+const GRAPH_OUT = JSON.stringify({
+  graph: { v: 1, builtAt: 1, truncated: false, skipped: { secret: 0, generated: 0, big: 0, link: 0 }, unresolved: 0, nodes: [{ p: 'src/a.ts', c: 'source', l: 'ts', s: 5, ext: 0 }, { p: 'src/b.ts', c: 'source', l: 'ts', s: 5, ext: 0 }], edges: [[0, 1, 'i']] },
+  cache: { v: 1, cache: [] },
+})
+
+test('the import_graph tool answers from the graph build, builds once for calls close together, and is not a guarded call', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const { workbench } = world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, graph: { stdout: GRAPH_OUT } })
+  await $.session.start(start)
+  const builds = () => writes.filter(one => String(one.argv[1]).endsWith('tools/graph-build.mjs')).length
+
+  const first = JSON.stringify(await $.tool.call({ tool: GRAPH_TOOL, file: 'src/a.ts' }))
+  expect(first).toContain('imports (1): src/b.ts')
+  const second = JSON.stringify(await $.tool.call({ tool: GRAPH_TOOL, file: 'src/b.ts', direction: 'importers' }))
+  expect(second).toContain('imported by (1): src/a.ts')
+  expect(builds()).toBe(1)
+  expect(workbench()?.execution?.recentCalls ?? []).toHaveLength(0)
+
+  expect(JSON.stringify(await $.tool.call({ tool: GRAPH_TOOL, file: '../secret.ts' }))).toContain('outside the project')
+  expect(JSON.stringify(await $.tool.call({ tool: GRAPH_TOOL, file: 'src/.env' }))).toContain('not in the graph')
+  expect(builds()).toBe(1)
+})
+
+test('calls made together share one graph build; an edit, a change of project or the cache coming back are told apart', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const cacheOut = JSON.stringify({ ...JSON.parse(GRAPH_OUT), cache: { v: 1, cache: [['src/a.ts', { size: 5, mtimeMs: 1, specs: [], big: false, stale: false }]] } })
+  const { clock } = world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, graph: { stdout: cacheOut } })
+  await $.session.start(start)
+  const builds = () => writes.filter(one => String(one.argv[1]).endsWith('tools/graph-build.mjs'))
+
+  await Promise.all([$.tool.call({ tool: GRAPH_TOOL, file: 'src/a.ts' }), $.tool.call({ tool: GRAPH_TOOL, file: 'src/b.ts' })])
+  expect(builds()).toHaveLength(1)
+  expect(builds()[0]?.stdin ?? '').toBe('')
+
+  // An edit after the build makes the next answer a new build, which is handed the cache the first one returned.
+  await clock.set(Date.UTC(2026, 9, 8, 1, 0, 1))
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/a.ts`, old_string: 'a', new_string: 'b' })
+  await $.tool.call({ tool: GRAPH_TOOL, file: 'src/a.ts' })
+  expect(builds()).toHaveLength(2)
+  expect(builds()[1]?.stdin).toContain('"src/a.ts"')
+
+  // Past the memo's five seconds it builds again, though nothing was edited.
+  await clock.set(Date.UTC(2026, 9, 8, 1, 0, 20))
+  await $.tool.call({ tool: GRAPH_TOOL, file: 'src/a.ts' })
+  expect(builds()).toHaveLength(3)
+})
+
+for (const [name, stdout] of [['a cut answer', '{"graph":'], ['an unknown version', '{"graph":{"v":2,"nodes":[],"edges":[]}}'], ['text that is not JSON', 'not json']] as const) {
+  test(`${name} from the graph build is a refusal to answer, not a graph`, async ($, on) => {
+    world(on, { files: FEED_FILES, commands: FEED_RUNS, graph: { stdout } })
+    await $.session.start(start)
+    expect(JSON.stringify(await $.tool.call({ tool: GRAPH_TOOL, file: 'src/a.ts' }))).toContain('the graph is not available right now')
+  })
+}
+
+test('when the graph build fails the tool says so and does not throw', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, graph: { stdout: '', exitCode: 1 } })
+  await $.session.start(start)
+  expect(JSON.stringify(await $.tool.call({ tool: GRAPH_TOOL, file: 'src/a.ts' }))).toContain('the graph is not available right now')
 })
 
 test('the Team tab names the version an alias usually stands for and leaves other values alone', () => {

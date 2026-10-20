@@ -10,7 +10,7 @@ A mod runs with your own user rights and is not sandboxed. This page lists every
 
 | Hook | Why | If the hook fails |
 |---|---|---|
-| `session.start` | register `/smartworkbench`, `/swb`, `/workbench` and the `propose_contract_change` tool; restore the project's state; read the guard file | the rest of the session runs without the mod |
+| `session.start` | register `/smartworkbench`, `/swb`, `/workbench` and the `propose_contract_change` and `import_graph` tools; restore the project's state; read the guard file | the rest of the session runs without the mod |
 | `prompt.submit` | add the locked contract and pins as model-only context; `requireContract` may hold a prompt back; a prompt you type ends a running `/swb loop` | the prompt goes through unchanged |
 | `tool.call` | record each call, apply guard rules (allow, ask, block), collect check results | high-risk calls are refused, the rest run normally (fail closed for high risk only) |
 | `turn.complete` | completion summary, `git diff -U0 HEAD`, context usage | skipped; the turn is unaffected |
@@ -57,6 +57,7 @@ It reads no environment variable except `CLAUDE_CONFIG_DIR` and `HOME` (through 
 | `git --no-optional-locks status --porcelain=v1 -z -uall`, `git rev-parse --show-toplevel`, and `node -e <statSync of the listed paths>` (the paths go in on stdin) | before and after a Codex image run; at the start and end of each pass of an `inf` loop |
 | `node -e <process.kill(pid, 0)> -- <host> <pid>`, `node -e <rmSync> -- <feed> <pid file>` | `/swb live`, `/swb live stop`: tells a running view from a leftover one, and removes a leftover (after a stop too, since on Windows ending the server runs none of its own clean-up) |
 | `node -e <appendFileSync>` | live feed writes, only where `tee` is missing or fails |
+| `node <plugin>/tools/graph-build.mjs <project>` (the previous run's cache goes in on stdin; prints the import graph) | when Claude calls the read-only `import_graph` tool: it reads the project's JS/TS files the way the live Files view does (never secret, generated, linked or large files), writes nothing, and answers with project paths only; the call itself is answered before the guard, like `propose_contract_change`, so the project's rules and pause do not apply to it |
 | `gh issue view …` | `/swb issue #n` |
 | `tee -a <project>/.claude/smartworkbench-live.jsonl` (the line goes in on stdin) | each event, only while the live feed file exists |
 | `node <plugin>/tools/live.mjs <project> --join --session <id> --port <n> [--auto] --watch-parent` (owns the feed and writes the note; registers the session in `<home>/.claude/smartworkbench-live/<port>/<id>.json`, mode 600, and keeps it fresh; starts the hub below if none runs). The hub: `node <plugin>/tools/live.mjs --hub --port <n>`, started detached by the first session, outlives it, reads the registrations and each project's own feed (only if the project's note names that session and neither the feed nor `.claude` is a link), serves the page, and ends about 30 s after the last session leaves. The single-project form: `node <plugin>/tools/live.mjs <project> --port <n> --watch-parent` (writes `.claude/smartworkbench-live.pid`, "<host> <pid>", beside the feed and removes both on exit; with `--watch-parent` it ends when the session that started it is gone) | `/swb live`; kept as a child and ended by `/swb live stop`, the end of the session or a reload. Where signals do not reach node (Windows) it is ended hard and the plugin removes the files |
@@ -81,7 +82,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 | Hook | 용도 | hook이 실패하면 |
 |---|---|---|
-| `session.start` | `/smartworkbench`·`/swb`·`/workbench` 명령과 `propose_contract_change` 툴 등록, 프로젝트 상태 복원, Guard 파일 읽기 | 이 세션은 Mod 없이 진행 |
+| `session.start` | `/smartworkbench`·`/swb`·`/workbench` 명령과 `propose_contract_change`·`import_graph` 툴 등록, 프로젝트 상태 복원, Guard 파일 읽기 | 이 세션은 Mod 없이 진행 |
 | `prompt.submit` | 잠긴 계약과 Pin을 Claude만 읽는 컨텍스트로 추가, `requireContract`면 프롬프트 보류, 직접 입력한 프롬프트는 실행 중인 `/swb loop`를 종료 | 프롬프트는 그대로 전송 |
 | `tool.call` | 호출 기록, Guard 규칙 적용(허용·질문·차단), 검증 결과 수집 | 고위험 호출만 거부, 나머지는 정상 실행 |
 | `turn.complete` | 완료 요약, `git diff -U0 HEAD`, 컨텍스트 사용량 | 건너뜀(턴에는 영향 없음) |
@@ -125,6 +126,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 | `git rev-parse --abbrev-ref HEAD` | `/swb new`(목표 초안) |
 | `git config user.name` | 세션 시작, 감사 로그가 켜졌을 때만 |
 | `git rev-parse HEAD`, `git status --porcelain`, `gh run list …` | `/swb ci`, Check CI |
+| `node <plugin>/tools/graph-build.mjs <프로젝트>`(이전 실행의 캐시는 stdin으로 전달, import 그래프를 출력) | Claude가 읽기 전용 `import_graph` 툴을 부를 때: 라이브 파일 화면과 같은 규칙으로 프로젝트의 JS/TS 파일을 읽고(비밀·생성·링크·큰 파일은 읽지 않음) 아무것도 쓰지 않으며, 프로젝트 경로만 답함 |
 | `git --no-optional-locks status --porcelain=v1 -z -uall`, `git rev-parse --show-toplevel`, `node -e <나열된 경로의 statSync>`(경로는 stdin으로 전달) | Codex 이미지 실행 전후, `inf` 루프의 시작과 회차 끝 |
 | `node -e <process.kill(pid, 0)> -- <호스트> <pid>`, `node -e <rmSync> -- <피드> <pid 파일>` | `/swb live`, `/swb live stop`: 실행 중인 보기와 남은 파일을 구별하고 남은 것을 지웁니다(Windows에서는 서버를 끝내도 자체 정리가 돌지 않아 stop 뒤에도 지웁니다) |
 | `node -e <appendFileSync>` | 실시간 피드 기록. `tee`가 없거나 실패할 때만 |

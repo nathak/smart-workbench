@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Smoke test for tools/live.mjs using only node built-ins: node tools/live-check.mjs
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { get, request as httpRequest } from 'node:http'
 import { hostname, tmpdir } from 'node:os'
@@ -825,6 +825,18 @@ const G = await import('./live-graph.mjs')
   check(!names.some(n => /\.env|\.pem|node_modules|^dist\//.test(n)) && !text.includes('SECRETSECRET') && graph.skipped.secret >= 2 && graph.skipped.generated >= 2, 'secret and generated files are left out, counted and never named')
   check(!names.includes('src/link.ts') && !names.some(n => n.startsWith('src/loop')) && !text.includes('OUTSIDE_MARKER') && graph.skipped.link >= 1, 'links, to a folder (a loop) or to a file outside the project, are not followed')
   check(graph.nodes[id('src/big.ts')].big === 1 && cache.get('src/big.ts').specs.length === 0 && graph.skipped.big === 1, 'a file over the size limit is a node without being read')
+  // The CLI the mod's import_graph tool runs: the same engine, a cache handed back in, a broken or hostile cache read as none.
+  {
+    const runCli = input => { const r = spawnSync(process.execPath, [join(import.meta.dirname, 'graph-build.mjs'), proj], { input, encoding: 'utf8' }); return { code: r.status, out: r.stdout ? JSON.parse(r.stdout) : null } }
+    const one = runCli('')
+    check(one.code === 0 && one.out.graph.nodes.length === graph.nodes.length && !JSON.stringify(one.out).includes('SECRETSECRET') && !one.out.graph.nodes.some(n => /\.env|\.pem/.test(n.p)), 'the graph CLI builds the same graph and reads no secret')
+    const two = runCli(JSON.stringify(one.out.cache))
+    check(two.code === 0 && JSON.stringify(two.out.graph.edges) === JSON.stringify(one.out.graph.edges), 'the graph CLI given its own cache answers the same')
+    const bad = runCli('{')
+    const hostile = runCli(JSON.stringify({ v: 1, cache: [['src/a.ts', { size: 1, mtimeMs: 1, specs: [['x'.repeat(500), 'i']] }], ['src/b.ts', { size: 'x' }], 'junk', ['src/c.ts', { size: 1, mtimeMs: 1, specs: [['../../etc/passwd', 'q']] }]] }))
+    check(bad.code === 0 && hostile.code === 0 && JSON.stringify(hostile.out.graph.edges) === JSON.stringify(one.out.graph.edges), 'a broken or hostile cache is dropped and the files are read again')
+    check(spawnSync(process.execPath, [join(import.meta.dirname, 'graph-build.mjs')], { encoding: 'utf8' }).status === 2, 'the graph CLI without a root exits with usage')
+  }
   const again = await G.buildGraph(proj, cache)
   check(again.cache.get('src/a.ts') === cache.get('src/a.ts') && JSON.stringify(again.graph.edges) === JSON.stringify(graph.edges) && again.graph.skipped.big === 1, 'a second build reuses what it read before and gives the same edges')
   for (let k = 0; k < 6; k++) put(`many/f${k}.ts`, `import './f${(k + 1) % 6}'\n`)
