@@ -976,6 +976,15 @@ const G = await import('./live-graph.mjs')
   put('tsconfig.json', `{ "extends": "../${outside.split('/').pop()}/base.json" }`)
   const escaped = await G.buildGraph(base)
   check(escaped.graph.nodes.find(n => n.p === 'src/b.ts').ext === 1, 'a config outside the project is not followed')
+  // A folder of the project that is a link to somewhere else is not a way to a config either.
+  const elsewhere = mkdtempSync(join(tmpdir(), 'swb-graph-lnk-'))
+  writeFileSync(join(elsewhere, 'base.json'), '{ "compilerOptions": { "baseUrl": ".", "paths": { "@o/*": ["*"] } } }')
+  try {
+    symlinkSync(elsewhere, join(base, 'linked'))
+    put('tsconfig.json', '{ "extends": "./linked/base" }')
+    const viaLink = await G.buildGraph(base)
+    check(viaLink.graph.nodes.find(n => n.p === 'src/b.ts').ext === 1, 'a config reached through a folder that is a link out of the project is not followed')
+  } catch {}
 }
 
 // Found by running the page in a browser: a state line with missing numbers shows zeros, and the phone layout does not scroll sideways.

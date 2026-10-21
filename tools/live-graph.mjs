@@ -223,6 +223,12 @@ const stripJsonComments = text => {
 // One tsconfig/jsconfig of the project (root-relative path): its baseUrl (root-relative), its paths patterns (null when it has none) and
 // the config it extends. A pattern holds at most one "*".
 async function readConfig(root, rel) {
+  // lstat and O_NOFOLLOW guard the last name only: every folder on the way must be a real folder of the project, not a link out of it.
+  const folders = dirOf(rel).split('/').filter(Boolean)
+  for (let i = 1; i <= folders.length; i++) {
+    const folder = await lstat(join(root, ...folders.slice(0, i)))
+    if (!folder.isDirectory()) return null
+  }
   const path = join(root, rel)
   const info = await lstat(path)
   if (!info.isFile() || info.size > LIMITS.tsconfigBytes) return null
