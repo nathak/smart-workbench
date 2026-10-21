@@ -1,4 +1,4 @@
-import { ANSI, bodyOf, kindOfSegment, MAVEN_TOTAL, segmentsOf, TAIL_LINES } from './evidence'
+import { ANSI, bodyOf, EDIT_BEFORE, FILTER_AFTER, kindOfSegment, MAVEN_TOTAL, maskText, QUIET_BEFORE, segmentsOf, TAIL_LINES, withoutHeredocs } from './evidence'
 import { redact } from './risk'
 import type { DoneCondition, EvidenceRecord, Expectation } from '../types'
 
@@ -53,62 +53,144 @@ const NODE_FAIL = /^(?:# |ℹ )fail (\d+)$/
 const BUN_PASS = /^(\d+) pass$/
 const BUN_FAIL = /^(\d+) fail$/
 
-export function testFactsOf(command: string, streams: readonly string[]): EvidenceRecord['facts'] | undefined {
-  const segments = segmentsOf(command)
-  const runs = segments.filter(one => kindOfSegment(one.text) === 'test')
-  if (runs.length !== 1) return undefined
-  // Only the check itself, set-up before it and a filter after it: another command's lines are not this run's.
-  const at = segments.findIndex(one => kindOfSegment(one.text) === 'test')
-  for (let i = 0; i < at; i += 1) if (!/^(?:|cd(?:\s+\S+)?|(?:export|unset|set)(?:\s+\S+)+)$/.test(bodyOf(segments[i]?.text ?? ''))) return undefined
-  for (let i = at; i < segments.length - 1; i += 1) if (segments[i]?.op !== '|' || !/^(?:tail|head|e?grep|fgrep|tee)(?=\s|$)/.test(bodyOf(segments[i + 1]?.text ?? ''))) return undefined
-  // cargo prints one total per crate, so only a whole stream adds up; behind a filter it would be a part.
-  const isFiltered = segments.length - 1 > at
+// What a test run's own output says: the counts, and (when the exit code cannot be trusted, because a pipe or `;` hides it)
+// whether it passed. Read only for a command of this shape: an edit or set-up step before the run, the run itself (piped only
+// into filters), and later checks that print no test summary. Anything else could put another command's lines in the output.
+export type TestRead = { ok: boolean | null; facts?: EvidenceRecord['facts'] }
+
+const NONE: TestRead = { ok: null }
+// A later command that runs tests, or prints a summary line like one, would add lines that are not this run's.
+const RUNNER = /^(?:npm|pnpm|yarn|bun|make|gradle|\.?\/?gradlew|mvn|\.?\/?mvnw)(?=\s|$)/
+// Summaries that read as all passed while the run still fails.
+const VETO = [/^Errors\s+\d+ errors?$/, /^\d+ errors?$/, /coverage threshold .* not met/i, /Required test coverage of .* not reached/i, /does not meet (?:global )?threshold/i, /^(?:# |ℹ )cancelled [1-9]\d*$/]
+// jest and vitest print the suite (file) totals right before the test totals; a suite that failed to load leaves the test totals clean.
+const SUITES = /^(?:Test Suites:\s+(.*), \d+ total|Test Files\s+(.*) \(\d+\))$/
+// node:test and bun print pass and fail as two lines a few lines apart; a lone pass or fail line may be another command's.
+const PAIR_GAP = 4
+
+function shapeOf(text: string): { tests: number; isLast: boolean; canPass: boolean } | undefined {
+  if (/\$\(|[<>]\(|`/.test(maskText(text))) return undefined
+  const segments = segmentsOf(text)
+  if (segments.some(one => one.op === '||' || one.op === '&')) return undefined
+  let tests = 0
+  let isLast = false
+  // A git command runs hooks, which often run tests of their own: what they print is no proof of this run.
+  let canPass = true
+
+  for (let i = 0; i < segments.length; i += 1) {
+    const head = segments[i]
+    if (!head) continue
+    const isHead = i === 0 || segments[i - 1]?.op !== '|'
+    const body = bodyOf(head.text)
+    if (/^\s*!/.test(head.text)) return undefined
+    if (!isHead) {
+      if (!FILTER_AFTER.test(body)) return undefined
+      continue
+    }
+    const kind = kindOfSegment(head.text)
+    if (kind === 'test') {
+      tests += 1
+      isLast = i === segments.length - 1
+    } else if (body === '' || QUIET_BEFORE.test(body)) {
+      continue
+    } else if (EDIT_BEFORE.test(body) && tests === 0) {
+      if (/^git\s/.test(body)) canPass = false
+      continue
+    } else if (tests > 0 && (kind === 'typecheck' || kind === 'lint' || (kind === 'build' && !RUNNER.test(body)))) {
+      continue
+    } else return undefined
+  }
+
+  return tests > 0 ? { tests, isLast, canPass } : undefined
+}
+
+export function readTestRun(command: string, streams: readonly string[]): TestRead {
+  const text = withoutHeredocs(command)
+  if (text === undefined) return NONE
+  const shape = shapeOf(text)
+  if (!shape) return NONE
 
   let counts: Counts | undefined
   let line: string | undefined
-  let nodePass: number | undefined
-  let nodeFail: number | undefined
-  let bunPass: number | undefined
-  let bunFail: number | undefined
+  let node: { pass?: [number, number, number]; fail?: [number, number, number] } = {}
+  let bun: typeof node = {}
   let cargo: { passed: number; failed: number } | undefined
-  for (const stream of streams) {
+  let hasFailed = false
+  let isVetoed = false
+  let summaries = 0
+  let isSuiteChecked = true
+  for (const [at, stream] of streams.entries()) {
     const all = stream.replace(ANSI, '').split(/\r\n|\r|\n/).map(one => one.trim())
-    if (!isFiltered) {
-      for (const text of all) {
-        const m = CARGO.exec(text)
+    // cargo prints one total per crate, so only a whole stream adds up; behind a filter or before another command it would be a part.
+    if (shape.isLast && shape.tests === 1) {
+      for (const one of all) {
+        const m = CARGO.exec(one)
         if (m) cargo = { passed: (cargo?.passed ?? 0) + Number(m[1]), failed: (cargo?.failed ?? 0) + Number(m[2]) }
       }
     }
     while (all.length > 0 && all[all.length - 1] === '') all.pop()
-    for (const text of all.slice(-TAIL_LINES)) {
-      const got = readLine(text)
+    const tail = all.slice(-TAIL_LINES)
+    for (const [row, one] of tail.entries()) {
+      const suites = SUITES.exec(one)
+      if (suites && (words(suites[1] ?? suites[2] ?? '').failed ?? 0) > 0) hasFailed = true
+      const got = readLine(one)
       if (got) {
         counts = got
-        line = text
+        line = one
+        summaries += 1
+        if ((got.failed ?? 0) > 0) hasFailed = true
+        // jest and vitest: the line before is the suite totals (maven's and pytest's lines stand alone).
+        if (/^Tests[: ]/.test(one)) isSuiteChecked = SUITES.test(tail[row - 1] ?? '')
       }
-      const np = NODE_PASS.exec(text)
-      if (np) nodePass = Number(np[1])
-      const nf = NODE_FAIL.exec(text)
-      if (nf) nodeFail = Number(nf[1])
-      const bp = BUN_PASS.exec(text)
-      if (bp) bunPass = Number(bp[1])
-      const bf = BUN_FAIL.exec(text)
-      if (bf) bunFail = Number(bf[1])
+      const np = NODE_PASS.exec(one)
+      if (np) node = { ...node, pass: [Number(np[1]), at, row] }
+      const nf = NODE_FAIL.exec(one)
+      if (nf) {
+        node = { ...node, fail: [Number(nf[1]), at, row] }
+        if (Number(nf[1]) > 0) hasFailed = true
+      }
+      const bp = BUN_PASS.exec(one)
+      if (bp) bun = { ...bun, pass: [Number(bp[1]), at, row] }
+      const bf = BUN_FAIL.exec(one)
+      if (bf) {
+        bun = { ...bun, fail: [Number(bf[1]), at, row] }
+        if (Number(bf[1]) > 0) hasFailed = true
+      }
+      if (VETO.some(pattern => pattern.test(one))) isVetoed = true
     }
   }
+  const isPaired = (pair: typeof node): boolean => pair.pass !== undefined && pair.fail !== undefined && pair.pass[1] === pair.fail[1] && pair.fail[2] > pair.pass[2] && pair.fail[2] - pair.pass[2] <= PAIR_GAP
+  let isPairedRun = true
   if (cargo) {
     counts = cargo
+    summaries = 1
     line = `test result: ${cargo.passed} passed; ${cargo.failed} failed`
-  } else if (nodePass !== undefined || nodeFail !== undefined) {
-    counts = { passed: nodePass, failed: nodeFail }
-    line = `${nodePass ?? '?'} pass, ${nodeFail ?? '?'} fail`
-  } else if (bunPass !== undefined || bunFail !== undefined) {
-    counts = { passed: bunPass, failed: bunFail }
-    line = `${bunPass ?? '?'} pass, ${bunFail ?? '?'} fail`
+    if (cargo.failed > 0) hasFailed = true
+  } else if (node.pass !== undefined || node.fail !== undefined) {
+    counts = { passed: node.pass?.[0], failed: node.fail?.[0] }
+    line = `${node.pass?.[0] ?? '?'} pass, ${node.fail?.[0] ?? '?'} fail`
+    isPairedRun = isPaired(node)
+    summaries += 1
+  } else if (bun.pass !== undefined || bun.fail !== undefined) {
+    counts = { passed: bun.pass?.[0], failed: bun.fail?.[0] }
+    line = `${bun.pass?.[0] ?? '?'} pass, ${bun.fail?.[0] ?? '?'} fail`
+    isPairedRun = isPaired(bun)
+    summaries += 1
   }
-  if (!counts || (counts.passed === undefined && counts.failed === undefined)) return undefined
+  // Two test runs in one command: no counts to keep (whose are they?), but a failure either printed is still a failure.
+  if (shape.tests > 1) return { ok: hasFailed ? false : null }
+  if (!counts || (counts.passed === undefined && counts.failed === undefined)) return NONE
 
-  return { ...(counts.passed !== undefined ? { passed: counts.passed } : {}), ...(counts.failed !== undefined ? { failed: counts.failed } : {}), ...(counts.total !== undefined ? { total: counts.total } : {}), ...(line ? { line: redact(line).slice(0, 160) } : {}) }
+  const facts = { ...(counts.passed !== undefined ? { passed: counts.passed } : {}), ...(counts.failed !== undefined ? { failed: counts.failed } : {}), ...(counts.total !== undefined ? { total: counts.total } : {}), ...(line ? { line: redact(line).slice(0, 160) } : {}) }
+  // A pass needs both numbers, from one summary, with the failures at zero; a failure needs only itself.
+  // More than one summary in the output (a recursive run over packages, a hook) says nothing about the whole run.
+  const isPass = shape.canPass && summaries === 1 && isSuiteChecked && !hasFailed && !isVetoed && isPairedRun && (counts.passed ?? 0) > 0 && counts.failed === 0
+
+  return { ok: hasFailed ? false : isPass ? true : null, facts }
+}
+
+export function testFactsOf(command: string, streams: readonly string[]): EvidenceRecord['facts'] | undefined {
+  return readTestRun(command, streams).facts
 }
 
 const MAX_COUNT = 100000

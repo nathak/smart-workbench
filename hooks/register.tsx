@@ -14,7 +14,7 @@ import { PROPOSE_TOOL } from './intent'
 import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
 import { checkOutcome, completionOf, evidenceKindsOf, expectText, isStale, judgeOf, latestOf, markOf, outcomeFromOutput, statusOf, turnSummary } from './evidence'
-import { canSet, checkExpectInput, EXPECT_DESCRIPTION, EXPECT_TOOL, expectOf, testFactsOf } from './expect'
+import { canSet, checkExpectInput, EXPECT_DESCRIPTION, EXPECT_TOOL, expectOf, readTestRun } from './expect'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
 import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
@@ -3711,10 +3711,12 @@ export const register: Register = on => {
       if (kinds.length > 0 && e.tool === 'Bash' && ran.deny === undefined) {
         // One record per kind a command runs; the first keeps the call id, which the badge and the counts look up.
         kinds.forEach((kind, i) => {
-          // The exit code decides when it can; a build tool's own closing line decides when a pipe hid it.
-          const ok = isUnsettled ? null : (checkOutcome(e.command, kind, isOk) ?? outcomeFromOutput(e.command, kind, streams, isOk))
+          // The exit code decides when it can; when a pipe hid it, a build tool's closing line or a test run's own summary decides.
+          // A failure either shows wins; a test pass needs both of its numbers (see readTestRun).
+          const read = kind === 'test' && !isUnsettled ? readTestRun(e.command, streams) : undefined
+          const ok = isUnsettled ? null : (checkOutcome(e.command, kind, isOk) ?? (read?.ok === false ? false : (outcomeFromOutput(e.command, kind, streams, isOk) ?? read?.ok ?? null)))
           // The counts the run's own summary line shows, for a test run that finished: what a condition's expectation is judged by.
-          const facts = kind === 'test' && !isUnsettled ? testFactsOf(e.command, streams) : undefined
+          const facts = read?.facts
           const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt, ...(facts ? { facts } : {}) }
           updated = model.addEvidence(updated, record)
           fresh.push(record)

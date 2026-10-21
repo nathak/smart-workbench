@@ -150,6 +150,29 @@ test('a Gradle run piped into tail is recorded from its closing line, and not wh
   await ui.unmount()
 })
 
+test('a test run whose exit code a pipe or `;` hides is recorded from its own summary: a failure shows, a pass needs both numbers', async ($, on) => {
+  const workbench = world(on)
+  let stdout = ' 370 pass\n 0 fail\n'
+  on('tool.call', () => ({ result: { stdout, stderr: '', interrupted: false } }))
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'Fix it' })
+  await ui.input({ key: 'add-condition', text: 'Related tests pass' })
+
+  const edit = "python3 - <<'E'\np='a.ts'; s=open(p).read()  # don't\nE\n"
+  await $.tool.call({ tool: 'Bash', command: `${edit}claude plugin test . 2>&1 | grep -E "^ [0-9]+ (pass|fail)"` })
+  stdout = ' 369 pass\n 1 fail\n'
+  await $.tool.call({ tool: 'Bash', command: 'claude plugin test . 2>&1 | grep -E "^ [0-9]+ (pass|fail)"; claude plugin validate . 2>&1 | tail -1' })
+  // Only the pass line, a second test run, and another command's lines in the output say nothing.
+  stdout = ' 370 pass\n'
+  await $.tool.call({ tool: 'Bash', command: 'claude plugin test . 2>&1 | grep pass' })
+  stdout = ' 370 pass\n 0 fail\n'
+  await $.tool.call({ tool: 'Bash', command: 'claude plugin test . 2>&1 | grep -E "pass|fail"; claude plugin test . 2>&1 | tail -3' })
+  await $.tool.call({ tool: 'Bash', command: 'cat old.log; claude plugin test . 2>&1 | tail -3' })
+  expect(workbench().evidence.filter(one => one.kind === 'test').map(one => one.ok)).toEqual([true, false, null, null, null])
+  expect(workbench().evidence[0]?.facts).toMatchObject({ passed: 370, failed: 0 })
+  await ui.unmount()
+})
+
 const EXPECT = 'mcp__smartworkbench__set_condition_expectation'
 
 test('a condition expecting 12 passed tests is failed by a run that shows 9, holds the finish once, and is verified by one that shows 12', async ($, on) => {

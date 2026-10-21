@@ -40,9 +40,41 @@ const KINDS: readonly { kind: EvidenceKind; pattern: RegExp }[] = [
 ]
 
 // Quoted stretches, escaped characters and comments overwritten, so operators inside them split nothing.
-function maskText(command: string): string {
+export function maskText(command: string): string {
   return command.replace(/\\[\s\S]|'[^']*'|"(?:[^"\\]|\\[\s\S])*"|(?<=^|[\s;&|()])#[^\n]*/g, one => 'x'.repeat(one.length))
 }
+
+// The command without the bodies of its here-documents, which are data for a program and not commands: a body line that starts
+// with `npm test` is no test run, and an odd quote in a script must not swallow the real commands after it. Undefined when a
+// body has no closing line, or when an unquoted body would be expanded (`$(`, backtick), so the caller keeps the whole text.
+export function withoutHeredocs(command: string): string | undefined {
+  const lines = command.split('\n')
+  const kept: string[] = []
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? ''
+    kept.push(line)
+    const masked = maskText(line)
+    const opens: { delim: string; isTabbed: boolean; isQuoted: boolean }[] = []
+    for (const m of line.matchAll(/(?<!<)<<(-?)[ \t]*(['"]?)(\w+)\2/g)) {
+      if (masked.slice(m.index, m.index + 2) === '<<') opens.push({ delim: m[3] ?? '', isTabbed: m[1] === '-', isQuoted: m[2] !== '' })
+    }
+    for (const open of opens) {
+      let closed = false
+      while (!closed) {
+        i += 1
+        if (i >= lines.length) return undefined
+        const body = (lines[i] ?? '').replace(/\r$/, '')
+        if ((open.isTabbed ? body.replace(/^\t+/, '') : body) === open.delim) closed = true
+        else if (!open.isQuoted && /\$\(|`/.test(body)) return undefined
+      }
+    }
+  }
+
+  return kept.join('\n')
+}
+
+const shellOf = (command: string): string => withoutHeredocs(command) ?? command
 
 // Flags that make a tool exit 0 without running its check (version, dry run, list only, format only, skipped tests).
 const NO_CHECK = /(?:^|\s)(?:--version|--help|--init|--showConfig|--no-run|--collect-only|--co|--listTests|--dry-run|--just-print|-DskipTests|-Dmaven\.test\.skip(?:=true)?|--passWithNoTests|-list)(?=\s|=|$)|(?:^|\s)ruff\s+format\b|^make\s+(?:\S+\s+)*-[a-zA-Z]*n\b/
@@ -77,7 +109,7 @@ export function kindOfSegment(text: string): EvidenceKind | undefined {
 }
 
 export function evidenceKindsOf(command: string): EvidenceKind[] {
-  const kinds = segmentsOf(command).map(one => kindOfSegment(one.text))
+  const kinds = segmentsOf(shellOf(command)).map(one => kindOfSegment(one.text))
 
   return kinds.filter((kind, i): kind is EvidenceKind => kind !== undefined && kinds.indexOf(kind) === i)
 }
@@ -218,11 +250,12 @@ export function turnSummary(task: Task, evidence: readonly EvidenceRecord[], las
 // only a success proves it. A check that may not have run (after `||`), a negated one (`! npm test`) and a failure that
 // an earlier check in the same `&&` chain could have caused are unknown.
 export function checkOutcome(command: string, kind: EvidenceKind, isOk: boolean): boolean | null {
-  const segments = segmentsOf(command)
+  const text = shellOf(command)
+  const segments = segmentsOf(text)
   const at = segments.findIndex(one => kindOfSegment(one.text) === kind)
   if (at < 0) return null
   // A check inside $( ), <( ) or backticks reports through another command's exit code.
-  if (/\$\(|[<>]\(|`/.test(maskText(command))) return null
+  if (/\$\(|[<>]\(|`/.test(maskText(text))) return null
   // `!` negates a whole pipeline, so look back to its first segment.
   for (let i = at; i >= 0; i -= 1) {
     if (/^\s*!/.test(segments[i]?.text ?? '')) return null
@@ -251,21 +284,24 @@ export function checkOutcome(command: string, kind: EvidenceKind, isOk: boolean)
 // line (not text the command or the model wrote): a failure line wins, a success line counts only when the call did not end in error.
 // A quiet run, a marker cut off by `tail` and anything odd stay unknown. A barrier against accidents: a command can print the line.
 export const TAIL_LINES = 40
-const QUIET_BEFORE = /^(?:|cd(?:\s+\S+)?|(?:export|unset|set)(?:\s+\S+)+)$/
-const FILTER_AFTER = /^(?:tail|head|e?grep|fgrep|tee)(?=\s|$)/
+export const QUIET_BEFORE = /^(?:|cd(?:\s+\S+)?|(?:export|unset|set)(?:\s+\S+)+)$/
+export const FILTER_AFTER = /^(?:tail|head|e?grep|fgrep|tee)(?=\s|$)/
+// Commands that change files and print nothing a summary could be mistaken for, which may come before a test run.
+export const EDIT_BEFORE = /^(?:(?:cp|mv|rm|mkdir|touch|ln|chmod|sed\s+-i\S*|perl\s+-\w*i\w*|git\s+(?:add|commit|checkout|restore|switch|stash|apply|mv|rm|reset))(?=\s|$)|(?:python3?|node)\s+-\s*<<|cat\s+>>?\s*\S+\s*<<|cat\s+<<-?\s*['"]?\w+['"]?\s*>>?\s*\S+$)/
 const GRADLE_MARK = /^BUILD (SUCCESSFUL|FAILED)(?: in \d+(?:\.\d+)?(?:ms|s|m|h)(?: \d+(?:\.\d+)?(?:ms|s|m|h))*)?$/
 const MAVEN_MARK = /^\[INFO\] BUILD (SUCCESS|FAILURE)$/
 export const MAVEN_TOTAL = /^\[(?:INFO|WARNING|ERROR)\] Tests run: \d+, Failures: (\d+), Errors: (\d+), Skipped: \d+(?:, Flakes: \d+)?$/
 export const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g
 
 export function outcomeFromOutput(command: string, kind: EvidenceKind, streams: readonly string[], isOk: boolean): boolean | null {
-  const segments = segmentsOf(command)
+  const text = shellOf(command)
+  const segments = segmentsOf(text)
   const at = segments.findIndex(one => kindOfSegment(one.text) === kind)
   if (at < 0) return null
   const body = bodyOf(segments[at]?.text ?? '')
   const tool = new RegExp(`^(?:${GRADLE})(?=\\s|$)`).test(body) ? 'gradle' : new RegExp(`^(?:${MAVEN})(?=\\s|$)`).test(body) ? 'maven' : undefined
   if (tool === undefined) return null
-  if (/\$\(|[<>]\(|`/.test(maskText(command))) return null
+  if (/\$\(|[<>]\(|`/.test(maskText(text))) return null
   // One build run only: an earlier or later one leaves markers of its own.
   const runs = segments.filter(one => new RegExp(`^(?:${GRADLE}|${MAVEN})(?=\\s|$)`).test(bodyOf(one.text))).length
   if (runs !== 1) return null

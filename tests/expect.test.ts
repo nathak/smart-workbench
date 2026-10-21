@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { canSet, checkExpectInput, expectOf, testFactsOf } from '../hooks/expect'
+import { canSet, checkExpectInput, expectOf, readTestRun, testFactsOf } from '../hooks/expect'
 import { judgeOf, statusOf } from '../hooks/evidence'
 import type { DoneCondition, EvidenceRecord, Expectation } from '../types'
 
@@ -46,6 +46,103 @@ describe('the counts a test run prints', () => {
     const got = testFactsOf('npx jest', ['Tests:       9 passed, 9 total'])
     expect(got?.line).toBe('Tests:       9 passed, 9 total')
     expect(Object.keys(got ?? {}).sort()).toEqual(['failed', 'line', 'passed', 'total'])
+  })
+})
+
+describe('whether a test run passed, from its own summary', () => {
+  const read = (command: string, ...streams: string[]) => readTestRun(command, streams)
+  const HEREDOC = "python3 - <<'E'\np='a.ts'; s=open(p).read()  # don't\nx = `y` + \"a; npm test | b\"\nE\n"
+
+  test('the summary decides when a filter hides the exit code: a failure shows, a pass needs both numbers', () => {
+    const command = 'claude plugin test . 2>&1 | grep -E "^ [0-9]+ (pass|fail)"'
+    expect(read(command, ' 370 pass\n 0 fail\n')).toMatchObject({ ok: true, facts: { passed: 370, failed: 0 } })
+    expect(read(command, ' 369 pass\n 1 fail\n')).toMatchObject({ ok: false, facts: { passed: 369, failed: 1 } })
+    expect(read(command, ' 5 pass\n').ok).toBeNull()
+    expect(read(command, ' 0 fail\n').ok).toBeNull()
+    expect(read(command, ' 0 pass\n 0 fail\n').ok).toBeNull()
+    expect(read('npx jest 2>&1 | tail -5', 'Test Suites: 3 passed, 3 total\nTests:       9 passed, 9 total').ok).toBe(true)
+    expect(read('npx jest 2>&1 | tail -5', 'Test Suites: 1 failed, 2 passed, 3 total\nTests:       1 failed, 9 passed, 10 total').ok).toBe(false)
+    expect(read('pytest -q | tail -3', '9 passed in 0.12s').ok).toBe(true)
+    expect(read('cargo test', 'test result: ok. 5 passed; 0 failed; 0 ignored').ok).toBe(true)
+    expect(read('mvn test | tail -20', '[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0').ok).toBeNull()
+    expect(read('mvn test | tail -20', '[INFO] Tests run: 12, Failures: 1, Errors: 0, Skipped: 0').ok).toBe(false)
+  })
+
+  test('node and bun need the two lines from one summary, close together', () => {
+    expect(read('bun test | tail', ' 5 pass\n 1 skip\n 0 fail\nRan 6 tests').ok).toBe(true)
+    expect(read('bun test | tail', ' 0 fail\na\nb\nc\nd\n 5 pass').ok).toBeNull()
+    expect(read('bun test | tail', ' 5 pass\na\nb\nc\nd\ne\n 0 fail').ok).toBeNull()
+    expect(read('npm test | tail', '# pass 9\n# fail 0').ok).toBe(true)
+    expect(read('npm test | tail', '# pass 9\n# fail 2').ok).toBe(false)
+  })
+
+  test('a summary that reads all passed while the run still fails is not a pass', () => {
+    expect(read('npx vitest run | tail', ' Test Files  1 passed (1)\n      Tests  9 passed (9)\n      Errors  1 error').ok).toBeNull()
+    expect(read('npx jest --coverage | tail', 'Tests:       9 passed, 9 total\nJest: "global" coverage threshold for lines (90%) not met: 80%').ok).toBeNull()
+    expect(read('npx vitest run | tail', ' Test Files  1 passed (1)\n      Tests  9 passed (9)').ok).toBe(true)
+    expect(read('pytest --cov | tail', 'FAIL Required test coverage of 80% not reached. Total coverage: 70.00%\n5 passed in 1.2s').ok).toBeNull()
+    expect(read('npx vitest run --coverage | tail', ' Test Files  1 passed (1)\n      Tests  9 passed (9)\nERROR: Coverage for lines (70%) does not meet global threshold (80%)').ok).toBeNull()
+    expect(read('node --test | tail', 'ℹ pass 9\nℹ fail 0\nℹ cancelled 1').ok).toBeNull()
+  })
+
+  test('an edit step before the run, and checks after it that print no test summary, are allowed', () => {
+    expect(read(`${HEREDOC}claude plugin test . 2>&1 | tail -5`, ' 5 pass\n 0 fail\n').ok).toBe(true)
+    expect(read(`${HEREDOC}claude plugin test . 2>&1 | tail -5`, ' 5 pass\n 1 fail\n').ok).toBe(false)
+    const jest = 'Test Suites: 1 passed, 1 total\nTests: 9 passed, 9 total'
+    expect(read('sed -i s/a/b/ f && npx jest 2>&1 | tail -5', jest).ok).toBe(true)
+    expect(read('cp a b && mkdir d; npx jest | tail -5', jest).ok).toBe(true)
+    expect(read("cat <<'E' > f\nx\nE\nnpx jest | tail -5", jest).ok).toBe(true)
+    expect(read("cat >> f <<E\nx\nE\nnpx jest | tail -5", jest).ok).toBe(true)
+    expect(read('cd app && npx jest | tail -5', jest).ok).toBe(true)
+    expect(read('claude plugin test . 2>&1 | tail -3; claude plugin validate . 2>&1 | tail -1; tsc --noEmit | tail -2', ' 5 pass\n 0 fail\n').ok).toBe(true)
+  })
+
+  test('a suite that failed to load, a cut suite line, several summaries or a git hook never make a pass', () => {
+    const tests = 'Tests:       10 passed, 10 total'
+    expect(read('npx jest 2>&1 | tail -20', `Test Suites: 1 failed, 3 passed, 4 total\n${tests}\nSnapshots:   0 total`).ok).toBe(false)
+    expect(read('npx vitest run | tail -5', ' Test Files  1 failed | 3 passed (4)\n      Tests  10 passed (10)').ok).toBe(false)
+    expect(read('npx jest | grep Tests', tests).ok).toBeNull()
+    expect(read('npx jest | tail -3', `Test Suites: 4 passed, 4 total\nx\n${tests}`).ok).toBeNull()
+    expect(read('pnpm -r test 2>&1 | tail -30', 'Failed\n5 passed in 0.3s\n6 passed in 0.3s').ok).toBeNull()
+    expect(read('pnpm -r test 2>&1 | tail -30', '1 failed, 2 passed in 0.3s\n6 passed in 0.3s').ok).toBe(false)
+    expect(read('git commit -qm x; npx jest | tail -3', `Test Suites: 1 passed, 1 total\n${tests}`).ok).toBeNull()
+    expect(read('git commit -qm x; npx jest | tail -3', 'Test Suites: 1 passed, 1 total\nTests: 1 failed, 9 passed, 10 total').ok).toBe(false)
+  })
+
+  test('a lint, typecheck or other check before the run, or one that runs scripts after it, leaves it unknown', () => {
+    expect(read('tsc --noEmit | tail -1; npx jest | tail -3', 'Test Suites: 1 passed, 1 total\nTests: 9 passed, 9 total').ok).toBeNull()
+    expect(read('npx jest | tail -3; npm run lint | tail -2', 'Tests: 9 passed, 9 total').ok).toBeNull()
+  })
+
+  test('two test runs give no counts, only a failure either printed', () => {
+    const command = 'claude plugin test . 2>&1 | grep -E "pass|fail"; claude plugin test . 2>&1 | grep -A12 "^(fail)"'
+    expect(read(command, ' 5 pass\n 0 fail\n')).toEqual({ ok: null })
+    expect(read(command, ' 4 pass\n 1 fail\n')).toEqual({ ok: false })
+  })
+
+  test('another command, or a shape the shell could change, leaves the result unknown and keeps no counts', () => {
+    const out = 'Tests: 9 passed, 9 total'
+    for (const command of [
+      'cat old.log; npm test | tail',
+      'git log -1; npm test | tail',
+      'npm test | tail; echo 0 fail',
+      'npm test | sed s/a/b/',
+      '! npm test | tail',
+      'echo $(npm test)',
+      'npm test | tail; mvn package',
+      'npm test | tail; ./gradlew build | tail',
+      'npm test | tail; npm run build',
+      'npm test | tail &',
+      'cp a b || true; npm test | tail',
+      'python3 - <<\'E\'\nprint(1)\nnpm test | tail',
+      'cat > f <<E\n$(date)\nE\nnpm test | tail',
+      'npm test | tail; cp a b',
+    ]) expect(read(command, out)).toEqual({ ok: null })
+  })
+
+  test('the facts a filtered run keeps are the same as before', () => {
+    expect(testFactsOf('claude plugin test . 2>&1 | tail', [' 5 pass\n 0 fail'])).toMatchObject({ passed: 5, failed: 0 })
+    expect(testFactsOf('npm test && npm run test:e2e', ['Tests: 9 passed, 9 total'])).toBeUndefined()
   })
 })
 

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { EvidenceRecord, Task } from '../types'
 import { parsePinSpec, sliceLines } from '../hooks/context'
 import * as evidence from '../hooks/evidence'
-import { completionOf, evidenceKindOf, guessLink, statusOf } from '../hooks/evidence'
+import { checkOutcome, completionOf, evidenceKindOf, evidenceKindsOf, guessLink, statusOf, withoutHeredocs } from '../hooks/evidence'
 import { serializeContract } from '../hooks/intent'
 
 const task: Task = {
@@ -215,5 +215,31 @@ describe('which command counts as a check', () => {
     evidenceKindsOf(`npm ${'-w '.repeat(60)}x`)
     evidenceKindsOf(`make ${'-C '.repeat(60)}x`)
     expect(performance.now() - start).toBeLessThan(1500)
+  })
+})
+
+describe('here-documents', () => {
+  test('the body and closing line are dropped, whatever the delimiter looks like', () => {
+    expect(withoutHeredocs("python3 - <<'E'\nnpm test\nE\nls")).toBe("python3 - <<'E'\nls")
+    expect(withoutHeredocs('cat <<"END"\na\nEND\nls')).toBe('cat <<"END"\nls')
+    expect(withoutHeredocs('cat <<-EOF\n\ta\n\tEOF\nls')).toBe('cat <<-EOF\nls')
+    expect(withoutHeredocs('cat <<A; cat <<B\n1\nA\n2\nB\nls')).toBe('cat <<A; cat <<B\nls')
+    expect(withoutHeredocs('cat <<< "a b"\nls')).toBe('cat <<< "a b"\nls')
+    expect(withoutHeredocs("echo '<<E'\nls")).toBe("echo '<<E'\nls")
+    expect(withoutHeredocs('ls')).toBe('ls')
+  })
+
+  test('a body that never closes or that the shell would expand is left for the caller to treat whole', () => {
+    expect(withoutHeredocs("python3 - <<'E'\nnpm test")).toBeUndefined()
+    expect(withoutHeredocs('cat <<E\n$(npm test)\nE')).toBeUndefined()
+    expect(withoutHeredocs('cat <<E\n`npm test`\nE')).toBeUndefined()
+    expect(withoutHeredocs("cat <<'E'\n$(npm test)\nE")).toBe("cat <<'E'")
+  })
+
+  test('a script body runs no check, and an odd quote in it does not hide the real one', () => {
+    expect(evidenceKindsOf("python3 - <<'E'\nnpm test\nE")).toEqual([])
+    expect(evidenceKindsOf("python3 - <<'E'\n# don't\nE\nnpm test")).toEqual(['test'])
+    expect(checkOutcome("python3 - <<'E'\n`x`\nE\nnpm test", 'test', true)).toBe(true)
+    expect(checkOutcome("python3 - <<'E'\nE\nnpm test | tail", 'test', true)).toBeNull()
   })
 })
