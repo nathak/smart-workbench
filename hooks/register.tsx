@@ -3532,7 +3532,7 @@ export const register: Register = on => {
     const codexConfig = codex.codexOf(wb.team)
     const isCodexUse = isTeam && codexConfig.enabled && codexRun !== undefined
     const heldTrack = live.track ?? crew.EMPTY_TRACK
-    if (isCodexUse && verdict.category === 'codex-send' && !codexRun.write && (codexRun.op === 'task' ? codex.hasTaskedThisTurn(heldTrack) : codex.hasReviewedThisTurn(heldTrack))) {
+    if (isCodexUse && verdict.category === 'codex-send' && !codexRun.write && (codexRun.op === 'task' ? codex.hasTaskedThisTurn(heldTrack) : codex.hasReviewedThisTurn(heldTrack, codexRun.base))) {
       await audit($, 'team.codex-repeat')
 
       return { deny: 'SmartWorkbench team mode: Codex already ran this turn; use its findings instead of running it again.' }
@@ -3764,7 +3764,7 @@ export const register: Register = on => {
       await updateTrack($, track => (isImageRun ? track : codex.codexTasked(track, endedAt)))
     }
     if (isTeam && isOk && codexRun && (codexRun.op === 'review' || codexRun.op === 'adversarial-review')) {
-      await updateTrack($, track => codex.codexRan(track, endedAt))
+      await updateTrack($, track => codex.codexRan(track, endedAt, codexRun.base))
       await audit($, 'team.codex-review', { id: call.id })
     }
 
@@ -3946,11 +3946,13 @@ export const register: Register = on => {
         if (running?.continuing) await setLive($, current => ({ ...current, loop: current.loop && { ...current.loop, continuing: false } }))
         await audit($, 'team.final-check-required')
 
-        const wantsCodex = codex.isCodexOn(wb.team) && codex.codexOf(wb.team).review && !!live.codexPath && !running && !codex.hasReviewedThisTurn(track)
-
+        const canCodex = codex.isCodexOn(wb.team) && codex.codexOf(wb.team).review && !!live.codexPath && !running
         // Work committed within the turn leaves a clean tree: the review then compares against the commit the turn started from.
-        const nowHead = wantsCodex && track.turnHead ? (await gitOut($, ['rev-parse', 'HEAD']))?.trim() : undefined
-        const codexBase = wantsCodex && track.turnHead && nowHead && nowHead !== track.turnHead && live.codexPath ? { path: live.codexPath, sha: track.turnHead } : undefined
+        const nowHead = canCodex && track.turnHead ? (await gitOut($, ['rev-parse', 'HEAD']))?.trim() : undefined
+        const isCommitted = nowHead !== undefined && nowHead !== track.turnHead
+        // A plain review already run this turn may have seen an empty diff: the review of the commits is still asked for, once.
+        const wantsCodex = canCodex && (!codex.hasReviewedThisTurn(track) || (isCommitted && !codex.hasReviewedThisTurn(track, true)))
+        const codexBase = wantsCodex && track.turnHead && isCommitted && live.codexPath ? { path: live.codexPath, sha: track.turnHead } : undefined
 
         return leave(`${crew.finalCheckReason(wb.task.goal, wb.task.doneConditions.map(one => one.text), wantsCodex, codexBase)}${heldText ? ` ${heldText}` : ''}`, false)
       }

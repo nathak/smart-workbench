@@ -275,6 +275,7 @@ export type Track = {
   advisorRuns: number
   // The last Codex review this session and how many ran.
   codexAt?: number
+  codexBaseAt?: number
   // HEAD when the turn started: what a Codex review of work that was committed in the turn compares against (--base).
   turnHead?: string
   codexRuns?: number

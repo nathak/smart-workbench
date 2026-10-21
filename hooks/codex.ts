@@ -21,7 +21,7 @@ export const CODEX_CONSENT =
   'Codex sends the diff and the files it reads in this repository to OpenAI under your Codex account, billed and rate-limited there. SmartWorkbench does not filter secrets out of it. Turn on?'
 
 export type CodexOp = 'review' | 'adversarial-review' | 'task' | 'transfer' | 'status' | 'result' | 'cancel' | 'setup'
-export type CodexCall = { op: CodexOp; write: boolean; background: boolean }
+export type CodexCall = { op: CodexOp; write: boolean; background: boolean; base: boolean }
 
 const OPS: readonly string[] = ['review', 'adversarial-review', 'task', 'transfer', 'status', 'result', 'cancel', 'setup']
 
@@ -35,7 +35,7 @@ export function codexCall(command: string): CodexCall | undefined {
   }
   if (!hit || !OPS.includes(hit[1] ?? '')) return undefined
 
-  return { op: hit[1] as CodexOp, write: /(?:^|[\s"'])--?w\\?r\\?i\\?t\\?e\b/.test(command), background: /\s--background\b/.test(command) }
+  return { op: hit[1] as CodexOp, base: /\s--base\s+[0-9a-f]{7,40}(?=\s|$)/.test(command), write: /(?:^|[\s"'])--?w\\?r\\?i\\?t\\?e\b/.test(command), background: /\s--background\b/.test(command) }
 }
 
 // The one shape the team setting may allow unasked: node <the detected script> <op> with plain flags and quoted text only.
@@ -163,8 +163,10 @@ export function codexContext(path: string, config: CodexConfig): string {
 }
 
 // One Codex review per turn, so a loop of reviews cannot run on the person's account.
-export function hasReviewedThisTurn(track: Track): boolean {
-  return (track.codexAt ?? -1) >= (track.turnStartedAt ?? 0)
+// A review of the commit the turn started from (--base) is one more, so a plain review that saw an empty diff (the work was committed)
+// does not use up the one that can see the work; after a --base review no other runs.
+export function hasReviewedThisTurn(track: Track, isBase = false): boolean {
+  return ((isBase ? track.codexBaseAt : track.codexAt) ?? -1) >= (track.turnStartedAt ?? 0)
 }
 
 export function hasTaskedThisTurn(track: Track): boolean {
@@ -175,6 +177,6 @@ export function codexTasked(track: Track, at: number): Track {
   return { ...track, codexTaskAt: at }
 }
 
-export function codexRan(track: Track, at: number): Track {
-  return { ...track, codexAt: at, codexRuns: (track.codexRuns ?? 0) + 1 }
+export function codexRan(track: Track, at: number, isBase = false): Track {
+  return { ...track, codexAt: at, ...(isBase ? { codexBaseAt: at } : {}), codexRuns: (track.codexRuns ?? 0) + 1 }
 }

@@ -1988,6 +1988,12 @@ test('with Codex on in team mode: the prompt carries the Codex brief, a review r
   expect(ran).toContain(REVIEW)
   const second = await $.tool.call({ tool: 'Bash', command: REVIEW })
   expect(JSON.stringify(second)).toContain('Codex already ran this turn')
+  // A plain review may have seen an empty diff (the work was committed): the review against the commit the turn started from is one more, once.
+  const base = `${REVIEW} --base 0123abc`
+  await $.tool.call({ tool: 'Bash', command: base })
+  expect(ran).toContain(base)
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: base }))).toContain('Codex already ran this turn')
+  expect(JSON.stringify(await $.tool.call({ tool: 'Bash', command: REVIEW }))).toContain('Codex already ran this turn')
 
   // Image generation needs no question: one plain task with an output file under an asset folder, as many as asked.
   const bin = `node ${CODEX_DIR}/scripts/codex-companion.mjs`
