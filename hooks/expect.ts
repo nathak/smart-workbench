@@ -1,4 +1,4 @@
-import { ANSI, bodyOf, EDIT_BEFORE, FILTER_AFTER, kindOfSegment, MAVEN_TOTAL, maskText, QUIET_BEFORE, segmentsOf, TAIL_LINES, withoutHeredocs } from './evidence'
+import { ANSI, bodyOf, EDIT_BEFORE, FILTER_AFTER, kindOfSegment, maskText, QUIET_BEFORE, segmentsOf, TAIL_LINES, withoutHeredocs } from './evidence'
 import { redact } from './risk'
 import type { DoneCondition, EvidenceRecord, Expectation } from '../types'
 
@@ -6,11 +6,12 @@ import type { DoneCondition, EvidenceRecord, Expectation } from '../types'
 export const EXPECT_TOOL = 'mcp__smartworkbench__set_condition_expectation'
 
 export const EXPECT_DESCRIPTION =
-  "Set what a done condition expects of its check, so the workbench judges it by the run's own numbers: for a condition linked to a test run, a minimum of tests passed (`min`), a limit of tests failed (`failed_max`, usually 0) and/or text the test command must contain (`cmd`, e.g. the package or filter). It can only make the verdict stricter: a condition is never verified by it, only failed or held for a re-run when the numbers fall short. Allowed on an unlocked contract, and on a locked one only for a condition that has a check link and no expectation yet; you cannot replace or remove one the person set, or any on a locked contract (use propose_contract_change). The finish is held once when an expectation is not met."
+  "Set what a done condition expects of its check, so the workbench judges it by the run's own numbers: for a condition linked to a test run, a minimum of tests passed (`min`), a limit of tests failed (`failed_max`, usually 0) and/or text the test command must contain (`cmd`, e.g. the package or filter). It can only make the verdict stricter: a condition is never verified by it, only failed or held for a re-run when the numbers fall short. Allowed on an unlocked contract, and on a locked one only for a condition that has a check link and no expectation yet; you cannot replace or remove one the person set, or any on a locked contract (use propose_contract_change). The finish is held once when an expectation is not met. A test count can be met only if the run's summary line is readable (jest, vitest, pytest, cargo, node:test, bun, Maven failures; one summary, not cut by a filter): a count is refused when the last test run showed none."
 
 // Reads the summary line a test runner prints, as counts. Only the last lines are read (cargo's per-crate lines, all of the stream), only
 // for one plain test run, and the last summary line wins. What is kept is the numbers and one masked, short line, never the output.
-type Counts = { passed?: number; failed?: number; total?: number }
+type Counts = { passed?: number; failed?: number; total?: number; isBuildTool?: boolean }
+const MAVEN_RUN = /^\[(?:INFO|WARNING|ERROR)\] Tests run: (\d+), Failures: (\d+), Errors: (\d+), Skipped: (\d+)(?:, Flakes: \d+)?$/
 
 // "1 failed, 9 passed, 2 skipped" / "1 failed | 9 passed | 1 todo": the numbers by their words.
 function words(text: string): Record<string, number> {
@@ -40,8 +41,15 @@ function readLine(line: string): Counts | undefined {
     return { failed: (w.failed ?? 0) + (w.error ?? 0), passed: w.passed ?? 0 }
   }
   // Maven's total: "[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 1"
-  const maven = MAVEN_TOTAL.exec(line)
-  if (maven) return { failed: Number(maven[1]) + Number(maven[2]) }
+  const maven = MAVEN_RUN.exec(line)
+  if (maven) {
+    const failed = Number(maven[2]) + Number(maven[3])
+
+    return { failed, passed: Math.max(0, Number(maven[1]) - failed - Number(maven[4])), total: Number(maven[1]), isBuildTool: true }
+  }
+  // Gradle prints a count only when tests failed: "12 tests completed, 2 failed, 1 skipped"
+  const gradle = /^(\d+) tests completed, (\d+) failed(?:, (\d+) skipped)?$/.exec(line)
+  if (gradle) return { failed: Number(gradle[2]), passed: Math.max(0, Number(gradle[1]) - Number(gradle[2]) - Number(gradle[3] ?? 0)), total: Number(gradle[1]), isBuildTool: true }
 
   return undefined
 }
@@ -64,9 +72,11 @@ const RUNNER = /^(?:npm|pnpm|yarn|bun|make|gradle|\.?\/?gradlew|mvn|\.?\/?mvnw)(
 // Summaries that read as all passed while the run still fails.
 const VETO = [/^Errors\s+\d+ errors?$/, /^\d+ errors?$/, /coverage threshold .* not met/i, /Required test coverage of .* not reached/i, /does not meet (?:global )?threshold/i, /^(?:# |ℹ )cancelled [1-9]\d*$/]
 // jest and vitest print the suite (file) totals right before the test totals; a suite that failed to load leaves the test totals clean.
-const SUITES = /^(?:Test Suites:\s+(.*), \d+ total|Test Files\s+(.*) \(\d+\))$/
+const SUITES = /^(?:Test Suites:\s+(.*), (?:\d+ of )?\d+ total|Test Files\s+(.*) \(\d+\))$/
 // node:test and bun print pass and fail as two lines a few lines apart; a lone pass or fail line may be another command's.
 const PAIR_GAP = 4
+// Lines scanned for summaries and failures (the numbers themselves come from the last TAIL_LINES).
+const WIDE_LINES = 2000
 
 function shapeOf(text: string): { tests: number; isLast: boolean; canPass: boolean } | undefined {
   if (/\$\(|[<>]\(|`/.test(maskText(text))) return undefined
@@ -74,7 +84,7 @@ function shapeOf(text: string): { tests: number; isLast: boolean; canPass: boole
   if (segments.some(one => one.op === '||' || one.op === '&')) return undefined
   let tests = 0
   let isLast = false
-  // A git command runs hooks, which often run tests of their own: what they print is no proof of this run.
+  // A git command that runs hooks (commit, checkout, switch), which often run tests of their own: what they print is no proof of this run.
   let canPass = true
 
   for (let i = 0; i < segments.length; i += 1) {
@@ -84,7 +94,8 @@ function shapeOf(text: string): { tests: number; isLast: boolean; canPass: boole
     const body = bodyOf(head.text)
     if (/^\s*!/.test(head.text)) return undefined
     if (!isHead) {
-      if (!FILTER_AFTER.test(body)) return undefined
+      // `grep -v` can drop the very lines that say a run failed.
+      if (!FILTER_AFTER.test(body) || /^(?:e?grep|fgrep)\b(?:\s+-\S+)*?\s+(?:-[a-zA-Z]*v[a-zA-Z]*|--invert-match)(?=\s|$)/.test(body)) return undefined
       continue
     }
     const kind = kindOfSegment(head.text)
@@ -94,7 +105,7 @@ function shapeOf(text: string): { tests: number; isLast: boolean; canPass: boole
     } else if (body === '' || QUIET_BEFORE.test(body)) {
       continue
     } else if (EDIT_BEFORE.test(body) && tests === 0) {
-      if (/^git\s/.test(body)) canPass = false
+      if (/^git\s+(?:commit|checkout|switch)(?=\s|$)/.test(body)) canPass = false
       continue
     } else if (tests > 0 && (kind === 'typecheck' || kind === 'lint' || (kind === 'build' && !RUNNER.test(body)))) {
       continue
@@ -119,6 +130,9 @@ export function readTestRun(command: string, streams: readonly string[]): TestRe
   let isVetoed = false
   let summaries = 0
   let isSuiteChecked = true
+  let isBuildRun = false
+  let nodeLines = 0
+  let bunLines = 0
   for (const [at, stream] of streams.entries()) {
     const all = stream.replace(ANSI, '').split(/\r\n|\r|\n/).map(one => one.trim())
     // cargo prints one total per crate, so only a whole stream adds up; behind a filter or before another command it would be a part.
@@ -129,32 +143,45 @@ export function readTestRun(command: string, streams: readonly string[]): TestRe
       }
     }
     while (all.length > 0 && all[all.length - 1] === '') all.pop()
-    const tail = all.slice(-TAIL_LINES)
-    for (const [row, one] of tail.entries()) {
+    // The numbers come from the last lines; summaries, failures and vetoes are counted over a wider stretch, so a recursive run whose first
+    // package failed far above the last one's summary cannot pass for it.
+    const wide = all.slice(-WIDE_LINES)
+    const tailFrom = wide.length - TAIL_LINES
+    for (const [row, one] of wide.entries()) {
+      const isTail = row >= tailFrom
       const suites = SUITES.exec(one)
       if (suites && (words(suites[1] ?? suites[2] ?? '').failed ?? 0) > 0) hasFailed = true
       const got = readLine(one)
       if (got) {
-        counts = got
-        line = one
         summaries += 1
         if ((got.failed ?? 0) > 0) hasFailed = true
-        // jest and vitest: the line before is the suite totals (maven's and pytest's lines stand alone).
-        if (/^Tests[: ]/.test(one)) isSuiteChecked = SUITES.test(tail[row - 1] ?? '')
+        if (got.isBuildTool) isBuildRun = true
+        if (isTail) {
+          counts = got
+          line = one
+          // jest and vitest: the line before is the suite totals (maven's and pytest's lines stand alone).
+          if (/^Tests[: ]/.test(one)) isSuiteChecked = SUITES.test(wide[row - 1] ?? '')
+        }
       }
       const np = NODE_PASS.exec(one)
-      if (np) node = { ...node, pass: [Number(np[1]), at, row] }
+      if (np) {
+        nodeLines += 1
+        if (isTail) node = { ...node, pass: [Number(np[1]), at, row] }
+      }
       const nf = NODE_FAIL.exec(one)
       if (nf) {
-        node = { ...node, fail: [Number(nf[1]), at, row] }
         if (Number(nf[1]) > 0) hasFailed = true
+        if (isTail) node = { ...node, fail: [Number(nf[1]), at, row] }
       }
       const bp = BUN_PASS.exec(one)
-      if (bp) bun = { ...bun, pass: [Number(bp[1]), at, row] }
+      if (bp) {
+        bunLines += 1
+        if (isTail) bun = { ...bun, pass: [Number(bp[1]), at, row] }
+      }
       const bf = BUN_FAIL.exec(one)
       if (bf) {
-        bun = { ...bun, fail: [Number(bf[1]), at, row] }
         if (Number(bf[1]) > 0) hasFailed = true
+        if (isTail) bun = { ...bun, fail: [Number(bf[1]), at, row] }
       }
       if (VETO.some(pattern => pattern.test(one))) isVetoed = true
     }
@@ -170,21 +197,24 @@ export function readTestRun(command: string, streams: readonly string[]): TestRe
     counts = { passed: node.pass?.[0], failed: node.fail?.[0] }
     line = `${node.pass?.[0] ?? '?'} pass, ${node.fail?.[0] ?? '?'} fail`
     isPairedRun = isPaired(node)
-    summaries += 1
+    summaries += Math.max(1, nodeLines)
   } else if (bun.pass !== undefined || bun.fail !== undefined) {
     counts = { passed: bun.pass?.[0], failed: bun.fail?.[0] }
     line = `${bun.pass?.[0] ?? '?'} pass, ${bun.fail?.[0] ?? '?'} fail`
     isPairedRun = isPaired(bun)
-    summaries += 1
+    summaries += Math.max(1, bunLines)
   }
   // Two test runs in one command: no counts to keep (whose are they?), but a failure either printed is still a failure.
   if (shape.tests > 1) return { ok: hasFailed ? false : null }
   if (!counts || (counts.passed === undefined && counts.failed === undefined)) return NONE
+  // Several summaries (a run over packages, a repeated run): the last one is only a part, so no counts are kept; a failure anywhere is still one.
+  if (summaries > 1) return { ok: hasFailed ? false : null }
 
   const facts = { ...(counts.passed !== undefined ? { passed: counts.passed } : {}), ...(counts.failed !== undefined ? { failed: counts.failed } : {}), ...(counts.total !== undefined ? { total: counts.total } : {}), ...(line ? { line: redact(line).slice(0, 160) } : {}) }
   // A pass needs both numbers, from one summary, with the failures at zero; a failure needs only itself.
   // More than one summary in the output (a recursive run over packages, a hook) says nothing about the whole run.
-  const isPass = shape.canPass && summaries === 1 && isSuiteChecked && !hasFailed && !isVetoed && isPairedRun && (counts.passed ?? 0) > 0 && counts.failed === 0
+  // A build tool's totals are not a verdict on the build (a later step can still fail): its own closing line decides that.
+  const isPass = shape.canPass && !isBuildRun && summaries === 1 && isSuiteChecked && !hasFailed && !isVetoed && isPairedRun && (counts.passed ?? 0) > 0 && counts.failed === 0
 
   return { ok: hasFailed ? false : isPass ? true : null, facts }
 }
@@ -214,11 +244,13 @@ export function checkExpectInput(raw: Record<string, unknown>): { ok: true; valu
 
 // Whether Claude may set an expectation on this condition now. The person's own is never touched; a locked contract only takes a first one
 // on a condition with a check link (a test count only on a test link); an expectation never loosens what the person decided.
-export function canSet(isLocked: boolean, condition: DoneCondition | undefined, input: ExpectInput): { ok: true } | { ok: false; reason: string } {
+export function canSet(isLocked: boolean, condition: DoneCondition | undefined, input: ExpectInput, latest?: EvidenceRecord): { ok: true } | { ok: false; reason: string } {
   if (!condition) return { ok: false, reason: 'no such done condition' }
   if (condition.manual) return { ok: false, reason: 'the person has marked this condition themselves' }
   if (!condition.link) return { ok: false, reason: 'the condition has no check link, so there is nothing to judge a run by' }
   if (input.tests && condition.link !== 'test') return { ok: false, reason: 'test counts apply only to a condition linked to a test run' }
+  // A count that the last run's output never gave could not be met: the condition would stay unverified until the person clears it.
+  if (input.tests && latest && latest.facts?.passed === undefined && latest.facts?.failed === undefined) return { ok: false, reason: 'the last test run showed no test count the workbench can read (a filtered or repeated summary, or a runner it does not read), so a count could never be met; run the tests with their summary in view first, or expect only the command text (cmd)' }
   if (condition.expect?.setBy === 'user') return { ok: false, reason: 'the person set this expectation; ask for a change with propose_contract_change' }
   if (isLocked && condition.expect) return { ok: false, reason: 'the contract is locked; an expectation already set can be changed only by the person' }
 

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { canSet, checkExpectInput, expectOf, readTestRun, testFactsOf } from '../hooks/expect'
-import { judgeOf, statusOf } from '../hooks/evidence'
+import { judgeOf, statusOf, turnSummary } from '../hooks/evidence'
+import * as model from '../hooks/model'
 import type { DoneCondition, EvidenceRecord, Expectation } from '../types'
 
 describe('the counts a test run prints', () => {
@@ -114,6 +115,29 @@ describe('whether a test run passed, from its own summary', () => {
     expect(read('npx jest | tail -3; npm run lint | tail -2', 'Tests: 9 passed, 9 total').ok).toBeNull()
   })
 
+  test('several summaries in one output keep no counts, and a failure far above the last summary is still seen', () => {
+    const suite = (n: number) => `Test Suites: 1 passed, 1 total\nTests:       ${n} passed, ${n} total`
+    expect(read('npm test --workspaces', `${suite(30)}\n${suite(20)}`)).toEqual({ ok: null })
+    expect(read('npm test --workspaces 2>&1 | tail -80', `Test Suites: 1 failed, 1 total\nTests:       2 failed, 3 passed, 5 total\n${'noise\n'.repeat(60)}${suite(20)}`)).toEqual({ ok: false })
+    expect(read('npx jest | tail -5', 'Test Suites: 2 skipped, 1 passed, 1 of 3 total\nTests:       4 skipped, 9 passed, 13 total').ok).toBe(true)
+  })
+
+  test('maven and gradle counts are read, but a build tool\'s totals do not make a pass', () => {
+    expect(read('mvn test | tail -20', '[INFO] Tests run: 12, Failures: 1, Errors: 1, Skipped: 2')).toMatchObject({ ok: false, facts: { passed: 8, failed: 2, total: 12 } })
+    expect(read('mvn test | tail -20', '[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 2')).toMatchObject({ ok: null, facts: { passed: 10, failed: 0 } })
+    expect(read('./gradlew test | tail -20', '12 tests completed, 2 failed, 1 skipped')).toMatchObject({ ok: false, facts: { passed: 9, failed: 2, total: 12 } })
+  })
+
+  test('grep -v can drop the failing line, and only the git commands that run hooks lose the pass', () => {
+    const tests = 'Test Suites: 1 passed, 1 total\nTests:       9 passed, 9 total'
+    expect(read('npx jest | grep -v warn', tests)).toEqual({ ok: null })
+    expect(read('npx jest | grep -nv warn', tests)).toEqual({ ok: null })
+    expect(read('npx jest | grep -E "Tests|Suites"', tests).ok).toBe(true)
+    expect(read('git add -A; npx jest | tail -3', tests).ok).toBe(true)
+    expect(read('git stash && npx jest | tail -3', tests).ok).toBe(true)
+    expect(read('git checkout x; npx jest | tail -3', tests).ok).toBeNull()
+  })
+
   test('two test runs give no counts, only a failure either printed', () => {
     const command = 'claude plugin test . 2>&1 | grep -E "pass|fail"; claude plugin test . 2>&1 | grep -A12 "^(fail)"'
     expect(read(command, ' 5 pass\n 0 fail\n')).toEqual({ ok: null })
@@ -149,6 +173,30 @@ describe('whether a test run passed, from its own summary', () => {
 const cond = (expectation?: Expectation, extra: Partial<DoneCondition> = {}): DoneCondition => ({ id: 'dc-1', text: 'Tests pass', link: 'test', ...(expectation ? { expect: expectation } : {}), ...extra })
 const claude = (extra: Partial<Expectation> = {}): Expectation => ({ setBy: 'claude', at: 1, ...extra })
 const run = (ok: boolean | null, facts?: EvidenceRecord['facts'], command = 'npm test', at = 10): EvidenceRecord => ({ id: `e${at}`, kind: 'test', command, ok, at, ...(facts ? { facts } : {}) })
+
+describe('what Claude may expect, and what a link change keeps', () => {
+  const input = { tests: { min: 5 }, reason: 'x' }
+  test('a test count is refused when the last test run showed none the workbench can read', () => {
+    expect(canSet(false, cond(), input, run(true)).ok).toBe(false)
+    expect(canSet(false, cond(), input, run(true, { passed: 9, failed: 0 })).ok).toBe(true)
+    expect(canSet(false, cond(), input, undefined)).toEqual({ ok: true })
+    expect(canSet(false, cond(), { cmd: 'src/', reason: 'x' }, run(true)).ok).toBe(true)
+  })
+
+  test('linking a condition to what it already has keeps Claude\'s expectation; a different link drops it', () => {
+    const wb = model.emptyWorkbench()
+    const withCond = { ...wb, task: { ...wb.task, doneConditions: [cond(claude({ tests: { min: 5 } }))] } }
+    expect(model.linkCondition(withCond, 'dc-1', 'test').task.doneConditions[0]?.expect).toBeDefined()
+    expect(model.linkCondition(withCond, 'dc-1', 'build').task.doneConditions[0]?.expect).toBeUndefined()
+  })
+
+  test('the turn summary says what was expected and what the run showed', () => {
+    const wb = model.emptyWorkbench()
+    const task = { ...wb.task, goal: 'g', doneConditions: [cond(claude({ tests: { min: 12 } }))] }
+    expect(turnSummary(task, [run(true, { passed: 9, failed: 0 })])).toContain('· expects ≥12 passed, got 9 passed')
+    expect(turnSummary(task, [run(true, { passed: 12, failed: 0 })])).not.toContain('expects')
+  })
+})
 
 describe('an expectation judges a run by its numbers', () => {
   test('too few tests passed fails the condition and says what it saw; enough keeps it verified', () => {

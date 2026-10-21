@@ -1210,13 +1210,15 @@ async function setConditionExpectation($: $, input: Record<string, unknown>): Pr
   if (!checked.ok) return { result: `rejected: ${checked.reason}.` }
   const id = typeof input.id === 'string' ? input.id.trim() : ''
   const wb = await read($, wbAtom)
-  const allowed = canSet(wb.task.locked, wb.task.doneConditions.find(one => one.id === id), checked.value)
+  const target = wb.task.doneConditions.find(one => one.id === id)
+  const allowed = canSet(wb.task.locked, target, checked.value, target?.link ? latestOf(wb.evidence, target.link) : undefined)
   if (!allowed.ok) return { result: `rejected: ${allowed.reason}.` }
   const expect = expectOf(checked.value, await $.clock.now())
   // Checked again on the state the write sees: the person may have locked the contract or changed the condition meanwhile.
   let refused = ''
   await mutate($, current => {
-    const again = canSet(current.task.locked, current.task.doneConditions.find(one => one.id === id), checked.value)
+    const now = current.task.doneConditions.find(one => one.id === id)
+    const again = canSet(current.task.locked, now, checked.value, now?.link ? latestOf(current.evidence, now.link) : undefined)
     if (!again.ok) {
       refused = again.reason
       return current
@@ -3032,7 +3034,7 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
         const judged = judgeOf(one, wb.evidence, lastEdit)
         const status = judged.status
         const latest = one.link ? latestOf(wb.evidence, one.link) : undefined
-        const expectLine = one.expect ? `expects ${judged.expected ?? expectText(one.expect)}${judged.got ? ` · got ${judged.got}` : ''} · set by ${one.expect.setBy}` : ''
+        const expectLine = one.expect ? `expects ${judged.expected ?? expectText(one.expect)}${judged.got ? ` · got ${judged.got}` : ''} · set by ${one.expect.setBy}${one.manual || !one.link ? ' · not applied (no check link, or marked by hand)' : ''}` : ''
         const detail = one.manual
           ? `manual ${one.manual.status}: ${one.manual.note}`
           : latest
@@ -3063,7 +3065,7 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
                 label="Evidence"
                 value={one.link ?? 'none'}
                 options={LINKS.map(value => ({ value }))}
-                onSelect={value => void mutate($, wb => model.linkCondition(wb, one.id, value as EvidenceKind | 'none'))}
+                onSelect={value => void mutate($, wb => model.linkCondition(wb, one.id, value as EvidenceKind | 'none')).then(() => emitState($))}
               />
               {one.expect && (
                 <Button
@@ -3072,7 +3074,7 @@ function evidenceTab($: $, { els, wb, width }: View): RenderElement {
                   dimColor
                   label="Clear expectation"
                   onPress={() => {
-                    void mutate($, current => model.clearExpectation(current, one.id))
+                    void mutate($, current => model.clearExpectation(current, one.id)).then(() => emitState($))
                     void audit($, 'contract.expect-cleared', { id: one.id, by: 'user' })
                   }}
                 />
@@ -3929,7 +3931,8 @@ export const register: Register = on => {
         await setLive($, current => ({ ...current, expectHoldOnly: undefined }))
       }
 
-      return block === undefined ? result : { ...result, block }
+      // A reason the inner handlers already gave stays: the two are told together.
+      return block === undefined ? result : { ...result, block: typeof result.block === 'string' && result.block !== '' ? `${result.block} ${block}` : block }
     }
 
     if (wb.team?.enabled) {

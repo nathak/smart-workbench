@@ -174,6 +174,8 @@ export function removeCondition(wb: Workbench, id: string): Workbench {
 export function linkCondition(wb: Workbench, id: string, link: EvidenceKind | 'none'): Workbench {
   const doneConditions = wb.task.doneConditions.map(one => {
     if (one.id !== id) return one
+    // The same link again changes nothing, and so keeps what Claude expects of it.
+    if (link === (one.link ?? 'none')) return one
     const { link: _old, ...kept } = one
     // Claude's expectation was meant for the old check; the person's stays unless its test counts no longer apply.
     const drops = kept.expect?.setBy === 'claude' || (kept.expect?.tests !== undefined && link !== 'test')

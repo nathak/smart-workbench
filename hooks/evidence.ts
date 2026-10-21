@@ -161,6 +161,9 @@ export function expectText(expect: Expectation): string {
   return parts.join(', ')
 }
 
+// What a run shows when no count could be read from it: a filter cut the summary, there were several summaries, or the runner prints none.
+const NO_COUNT = 'no single test count could be read from the output (a cut or repeated summary, or a runner that prints none)'
+
 // The verdict with what was expected and what the run showed. An expectation can only lower a verified verdict (to failed or observed);
 // it never raises one, and a person's mark or a condition without a check link is left as it is. The counts are read from the run's own
 // summary line (see hooks/expect.ts); a command can print such a line, so this is no defence against a command that means to.
@@ -180,10 +183,10 @@ export function judgeOf(condition: DoneCondition, evidence: readonly EvidenceRec
   if (tests?.failedMax !== undefined && facts?.failed !== undefined && facts.failed > tests.failedMax) return { status: 'failed', expected, got: `${facts.failed} failed` }
   if (status !== 'verified') return { status, expected }
   if (tests?.min !== undefined) {
-    if (facts?.passed === undefined) return { status: 'observed', expected, got: 'no test count in the output (run it unfiltered)' }
+    if (facts?.passed === undefined) return { status: 'observed', expected, got: NO_COUNT }
     if (facts.passed < tests.min) return { status: 'failed', expected, got: `${facts.passed} passed` }
   }
-  if (tests?.failedMax !== undefined && facts?.failed === undefined) return { status: 'observed', expected, got: 'no test count in the output (run it unfiltered)' }
+  if (tests?.failedMax !== undefined && facts?.failed === undefined) return { status: 'observed', expected, got: NO_COUNT }
   // The stored command is cut at 200 characters: a longer one cannot be judged by its text.
   if (typeof expect.cmd === 'string' && expect.cmd !== '' && latest.command.length < 200 && !latest.command.includes(expect.cmd)) return { status: 'observed', expected, got: `latest run: ${latest.command.slice(0, 60)}` }
   const got = [facts?.passed !== undefined ? `${facts.passed} passed` : '', facts?.failed !== undefined ? `${facts.failed} failed` : ''].filter(Boolean).join(', ')
@@ -233,12 +236,16 @@ export function markOf(status: ConditionStatus): string {
 export function turnSummary(task: Task, evidence: readonly EvidenceRecord[], lastEditAt?: number): string {
   const { isComplete } = completionOf(task, evidence, lastEditAt)
   const lines = task.doneConditions.map(one => {
-    const status = statusOf(one, evidence, lastEditAt)
+    const judged = judgeOf(one, evidence, lastEditAt)
+    const status = judged.status
     const latest = one.link ? latestOf(evidence, one.link) : undefined
     const stale = !one.manual && isStale(latest, lastEditAt) ? ' (code changed since; re-run)' : ''
     const detail = one.manual ? ` (manual: ${one.manual.note})` : latest ? ` · ${latest.command.slice(0, 50)}${stale}` : ''
 
-    return `${markOf(status)} ${one.text}${detail}`
+    // What the condition expected and what the run showed, when an expectation is what holds it back.
+    const expects = judged.expected && judged.got && status !== 'verified' ? ` · expects ${judged.expected}, got ${judged.got}` : ''
+
+    return `${markOf(status)} ${one.text}${detail}${expects}`
   })
 
   return [`WORKBENCH · ${isComplete ? 'COMPLETE' : 'INCOMPLETE'}`, ...lines].join('\n')
