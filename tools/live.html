@@ -3094,6 +3094,13 @@ function graphNeighbors(d, ix, i, depth){
   walk(i, 'out', function(e, from, step){ return step === 1 || d.nodes[e[0]].c !== 'test'; }, res.imports);
   walk(i, 'inn', function(e){ return d.nodes[e[0]].c !== 'test'; }, res.by);
   ix.inn[i].forEach(function(e){ if (d.nodes[e[0]].c === 'test') res.tests.push({ i: e[0], kind: e[1], via: -1, step: 1 }); });
+  // A test that imports a barrel which re-exports the file covers it too.
+  var seenT = {};
+  res.tests.forEach(function(x){ seenT[x.i] = 1; });
+  ix.inn[i].forEach(function(e){
+    if (e[1] !== 'r' || d.nodes[e[0]].c === 'test') return;
+    ix.inn[e[0]].forEach(function(f){ if (d.nodes[f[0]].c === 'test' && !seenT[f[0]]) { seenT[f[0]] = 1; res.tests.push({ i: f[0], kind: f[1], via: e[0], step: 2 }); } });
+  });
   return res;
 }
 function graphMatches(d, ix, q, cat){

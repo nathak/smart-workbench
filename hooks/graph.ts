@@ -104,6 +104,16 @@ function neighborsOf(d: GraphData, ix: Index, start: number, depth: 1 | 2): { im
   walk('out', (to, step) => step === 1 || d.nodes[to]?.c !== 'test', res.imports)
   walk('inn', to => d.nodes[to]?.c !== 'test', res.by)
   for (const [from] of ix.inn[start] ?? []) if (d.nodes[from]?.c === 'test') res.tests.push({ i: from, via: -1, step: 1 })
+  // A test that imports a barrel which re-exports the file covers it too (shown with the barrel it came through).
+  const known = new Set(res.tests.map(one => one.i))
+  for (const [barrel, kind] of ix.inn[start] ?? []) {
+    if (kind !== 'r' || d.nodes[barrel]?.c === 'test') continue
+    for (const [from] of ix.inn[barrel] ?? []) {
+      if (d.nodes[from]?.c !== 'test' || known.has(from)) continue
+      known.add(from)
+      res.tests.push({ i: from, via: barrel, step: 2 })
+    }
+  }
 
   return res
 }

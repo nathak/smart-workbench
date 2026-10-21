@@ -220,25 +220,50 @@ const stripJsonComments = text => {
   return out.replace(/,(\s*[}\]])/g, '$1')
 }
 
-// baseUrl and paths of the root tsconfig.json (extends is not followed); a pattern holds at most one "*".
+// One tsconfig/jsconfig of the project (root-relative path): its baseUrl (root-relative), its paths patterns (null when it has none) and
+// the config it extends. A pattern holds at most one "*".
+async function readConfig(root, rel) {
+  const path = join(root, rel)
+  const info = await lstat(path)
+  if (!info.isFile() || info.size > LIMITS.tsconfigBytes) return null
+  const json = JSON.parse(stripJsonComments((await readSmall(path, info)) ?? '{}'))
+  const options = json.compilerOptions ?? {}
+  const dir = dirOf(rel)
+  const baseUrl = typeof options.baseUrl === 'string' ? normalize(`${dir}/${options.baseUrl}`) : null
+  let paths = null
+  if (options.paths && typeof options.paths === 'object') {
+    paths = []
+    for (const [pattern, targets] of Object.entries(options.paths)) {
+      if (pattern.split('*').length > 2 || !Array.isArray(targets)) continue
+      const at = pattern.indexOf('*')
+      paths.push({ wild: at >= 0, prefix: at < 0 ? pattern : pattern.slice(0, at), suffix: at < 0 ? '' : pattern.slice(at + 1), targets: targets.filter(one => typeof one === 'string' && one.split('*').length <= 2).slice(0, 5) })
+    }
+  }
+
+  return { dir, baseUrl, paths, extends: typeof json.extends === 'string' ? json.extends : null }
+}
+
+// baseUrl and paths of the root tsconfig.json (else jsconfig.json), with the one config it extends when that is a relative path inside the
+// project (a longer chain, a package name and anything outside the project are not followed). The child's own values win.
 async function readAliases(root) {
   const none = { baseUrl: null, pathsBase: '', paths: [] }
   try {
-    const path = join(root, 'tsconfig.json')
-    const info = await lstat(path)
-    if (!info.isFile() || info.size > LIMITS.tsconfigBytes) return none
-    const options = JSON.parse(stripJsonComments((await readSmall(path, info)) ?? '{}')).compilerOptions ?? {}
-    const baseUrl = typeof options.baseUrl === 'string' ? normalize(options.baseUrl) : null
-    const paths = []
-    if (options.paths && typeof options.paths === 'object') {
-      for (const [pattern, targets] of Object.entries(options.paths)) {
-        if (pattern.split('*').length > 2 || !Array.isArray(targets)) continue
-        const at = pattern.indexOf('*')
-        paths.push({ wild: at >= 0, prefix: at < 0 ? pattern : pattern.slice(0, at), suffix: at < 0 ? '' : pattern.slice(at + 1), targets: targets.filter(one => typeof one === 'string' && one.split('*').length <= 2).slice(0, 5) })
-      }
+    let own = null
+    for (const name of ['tsconfig.json', 'jsconfig.json']) {
+      own = await readConfig(root, name).catch(() => null)
+      if (own) break
     }
+    if (!own) return none
+    let parent = null
+    if (own.extends && /^\.\.?\//.test(own.extends)) {
+      const target = normalize(`${own.dir}/${own.extends}`)
+      if (target) parent = await readConfig(root, /\.json$/.test(target) ? target : `${target}.json`).catch(() => null)
+    }
+    const baseUrl = own.baseUrl ?? parent?.baseUrl ?? null
+    const definer = own.paths !== null ? own : parent?.paths ? parent : null
+    const paths = definer?.paths ?? []
 
-    return { baseUrl, pathsBase: baseUrl ?? '', paths }
+    return { baseUrl, pathsBase: baseUrl ?? definer?.dir ?? '', paths }
   } catch {
     return none
   }

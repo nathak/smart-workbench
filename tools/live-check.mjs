@@ -945,8 +945,37 @@ const G = await import('./live-graph.mjs')
   check(nbB.by.map(x => x.i).join() === '0' && nbB.tests.map(x => x.i).join() === '2' && nbB.imports.map(x => x.i).join() === '3', 'a test is a test, not an importer')
   const nbA2 = P.graphNeighbors(d, ix, 0, 2)
   check(nbA2.imports.map(x => x.i + ':' + x.step + ':' + x.via).join() === '1:1:-1,3:2:1', 'depth 2 adds what the neighbours import, with the file each came through')
+  const bd = { nodes: ['lib.ts', 'index.ts', 'a.test.ts'].map((p, i) => ({ p, c: i === 2 ? 'test' : 'source', l: 'ts', s: 1, big: false, ext: 0 })), edges: [[1, 0, 'r'], [2, 1, 'i']], sig: 'x', builtAt: 0, truncated: [], unresolved: 0 }
+  const nbBarrel = P.graphNeighbors(bd, P.graphIndex(bd), 0, 1)
+  check(nbBarrel.tests.length === 1 && nbBarrel.tests[0].i === 2 && nbBarrel.tests[0].via === 1 && nbBarrel.tests[0].step === 2, 'a test that imports a barrel re-exporting the file is a test of it, through the barrel')
   check(P.graphMatches(d, ix, 'B.T', '').join() === '1' && P.graphMatches(d, ix, '', 'test').join() === '2' && P.graphMatches(d, ix, 'zzz', '').length === 0, 'the search is by path part without case, and the category narrows it')
   check(page.includes('id="p-graph"') && /\bTABS = \[[^\]]*'graph'\]/.test(page) && page.includes("'flow', 'graph'") && !page.slice(page.indexOf('// ---- graph tab'), page.indexOf('// ---- tabs: roving')).includes('innerHTML'), 'the graph tab is in the tab list and the key list, and its code draws no markup from text')
+}
+
+// A tsconfig that extends one relative config, a jsconfig alone, and a test that reaches a file through a barrel.
+{
+  const base = mkdtempSync(join(tmpdir(), 'swb-graph-ext-'))
+  const put = (path, text) => { mkdirSync(dirname(join(base, path)), { recursive: true }); writeFileSync(join(base, path), text) }
+  put('tsconfig.json', '{ "extends": "./config/base" }\n')
+  put('config/base.json', '{ "compilerOptions": { "baseUrl": "..", "paths": { "@x/*": ["lib/*"] } } }\n')
+  put('lib/a.ts', 'export const a = 1\n')
+  put('src/b.ts', "import { a } from '@x/a'\n")
+  const viaExtends = await G.buildGraph(base)
+  const nm = viaExtends.graph.nodes.map(n => n.p)
+  check(viaExtends.graph.edges.some(e => e[0] === nm.indexOf('src/b.ts') && e[1] === nm.indexOf('lib/a.ts')) && viaExtends.graph.nodes[nm.indexOf('src/b.ts')].ext === 0, 'paths and baseUrl from the one config a tsconfig extends are used, relative to that config')
+  const js = mkdtempSync(join(tmpdir(), 'swb-graph-js-'))
+  const putJs = (path, text) => { mkdirSync(dirname(join(js, path)), { recursive: true }); writeFileSync(join(js, path), text) }
+  putJs('jsconfig.json', '{ "compilerOptions": { "baseUrl": "src" } }\n')
+  putJs('src/util.js', 'export const u = 1\n')
+  putJs('src/main.js', "import { u } from 'util'\n")
+  const viaJs = await G.buildGraph(js)
+  const nj = viaJs.graph.nodes.map(n => n.p)
+  check(viaJs.graph.edges.some(e => e[0] === nj.indexOf('src/main.js') && e[1] === nj.indexOf('src/util.js')), 'a jsconfig.json is read when there is no tsconfig.json')
+  const outside = mkdtempSync(join(tmpdir(), 'swb-graph-esc-'))
+  writeFileSync(join(outside, 'base.json'), '{ "compilerOptions": { "baseUrl": ".", "paths": { "@o/*": ["*"] } } }')
+  put('tsconfig.json', `{ "extends": "../${outside.split('/').pop()}/base.json" }`)
+  const escaped = await G.buildGraph(base)
+  check(escaped.graph.nodes.find(n => n.p === 'src/b.ts').ext === 1, 'a config outside the project is not followed')
 }
 
 process.exit(failed === 0 ? 0 : 1)

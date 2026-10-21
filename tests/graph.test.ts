@@ -108,3 +108,14 @@ describe('what the answer does not claim', () => {
     expect(graphAnswer(data(), 'src/auth.test.ts', 1, 'both', run('npx vitest run auth.test.ts'), ROOT)).toContain('in last test run:passed')
   })
 })
+
+describe('tests that reach a file through a barrel', () => {
+  // index re-exports lib; a.test imports index; lib has no direct test.
+  const barrel = () => graphDataOf({ v: 1, truncated: false, skipped: {}, unresolved: 0, nodes: [node('src/lib.ts'), node('src/index.ts'), node('src/a.test.ts', 'test'), node('src/other.ts')], edges: [[1, 0, 'r'], [2, 1, 'i'], [3, 0, 'i']] }) as NonNullable<ReturnType<typeof graphDataOf>>
+
+  test('a test that imports the re-exporting file is listed with the file it came through; a plain importer is not a barrel', () => {
+    const text = graphAnswer(barrel(), 'src/lib.ts', 1, 'both', wb(), ROOT)
+    expect(text).toContain('tests (1): src/a.test.ts (via src/index.ts)')
+    expect(graphAnswer(barrel(), 'src/other.ts', 1, 'both', wb(), ROOT)).toContain('tests (0): -')
+  })
+})
