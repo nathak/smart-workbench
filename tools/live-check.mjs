@@ -978,4 +978,8 @@ const G = await import('./live-graph.mjs')
   check(escaped.graph.nodes.find(n => n.p === 'src/b.ts').ext === 1, 'a config outside the project is not followed')
 }
 
+// Found by running the page in a browser: a state line with missing numbers shows zeros, and the phone layout does not scroll sideways.
+check(/pins: Number\(ev\.pins\) \|\| 0,\s+files: Number\(ev\.files\) \|\| 0,\s+added: Number\(ev\.added\) \|\| 0,\s+removed: Number\(ev\.removed\) \|\| 0/.test(page), 'a state line with no pin or file counts is shown as zeros, not "undefined"')
+check(page.includes('.sidenav nav.tabs{min-width:0;position:relative}') && page.includes('#e-matrix td:nth-child(3)'), 'the tab bar scrolls inside itself on a phone and the condition matrix keeps its short columns whole')
+
 process.exit(failed === 0 ? 0 : 1)

@@ -106,6 +106,8 @@ table.tbl th button{border:0;padding:0;font:inherit;color:inherit;background:non
 table.tbl td{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:anywhere}
 table.tbl tr.clk{cursor:pointer}table.tbl tr.clk:hover{background:var(--surface-2)}
 table.tbl th.num{text-align:right}
+/* The condition matrix has short columns (check, got, time): they keep their words whole, the command column takes the wrapping. */
+#e-matrix td:nth-child(3),#e-matrix td:nth-child(5),#e-matrix td:nth-child(8){white-space:nowrap}#e-matrix td:nth-child(4){overflow-wrap:normal}
 table.tbl td.num{text-align:right;font-family:var(--mono);white-space:nowrap}
 .tblwrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
 .catbar{display:flex;height:10px;border-radius:2px;overflow:hidden;background:var(--bg);min-width:120px}
@@ -239,7 +241,8 @@ nav.stabs .sb.ask::before{content:"? "}
 .statusstrip .grow{margin-left:auto;display:flex;gap:var(--sp-3);align-items:center}
 .statusstrip #tl-q{flex:1 1 220px}
 @media(max-width:1099px){.page{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "nav" "main" "foot"}
-  .sidenav{position:static;height:auto;max-height:none;border-right:0;border-bottom:1px solid var(--border);padding:0}
+  .sidenav{position:static;height:auto;max-height:none;border-right:0;border-bottom:1px solid var(--border);padding:0;min-width:0}
+  .sidenav nav.tabs{min-width:0;position:relative}
   .sidenav h2{display:none}
   .sidenav nav.tabs{flex-direction:row;overflow-x:auto}
   .sidenav nav.tabs button{width:auto;border-left:0;border-bottom:2px solid transparent;text-transform:uppercase;font-size:var(--fs-sm);letter-spacing:.06em}
@@ -873,6 +876,10 @@ function ingest(tr, ev){
         profile: /^(off|permissive|balanced|strict)$/.test(String(ev.profile)) ? String(ev.profile) : 'balanced',
         met: Number(ev.met) || 0,
         total: Number(ev.total) || 0,
+        pins: Number(ev.pins) || 0,
+        files: Number(ev.files) || 0,
+        added: Number(ev.added) || 0,
+        removed: Number(ev.removed) || 0,
         conds: Array.isArray(ev.conds) ? ev.conds.slice(0, 10).filter(function(c){ return c && typeof c === 'object'; }).map(function(c){ return Object.assign({}, c, { id: clean(c.id, 20), t: clean(c.t, 120), s: clean(c.s, 12), link: c.link ? clean(c.link, 20) : null, x: typeof c.x === 'string' ? clean(c.x, 60) : '', g: typeof c.g === 'string' ? clean(c.g, 60) : '', by: c.by === 'u' || c.by === 'c' ? c.by : '' }); }) : [],
         rules: Number(ev.rules) || 0,
         paused: ev.paused === true,
