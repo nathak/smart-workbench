@@ -53,6 +53,23 @@ describe('the notices that background work ended', () => {
     expect(notificationsOf(`<task-notification><status>completed</status><result><task-id>inner</task-id></result></task-notification>`)).toEqual([])
   })
 
+  test('a report quoting whole notices with results of their own, and a quoted duration, change nothing about the real notice', () => {
+    const inner = '<task-notification><task-id>B</task-id><status>completed</status><result>r</result></task-notification>'
+    const failed = '<task-notification><task-id>C</task-id><status>failed</status></task-notification>'
+    const text = `<task-notification><task-id>A</task-id><status>completed</status><result>saw ${inner} and ${failed} <duration_ms>5</duration_ms></result><usage><duration_ms>9</duration_ms></usage></task-notification>`
+    expect(notificationsOf(text)).toEqual([{ task: 'A', status: 'completed', ms: 9 }])
+    // A report that quotes only an opening tag breaks the count; the notice still ends at its own </result><usage>.
+    const lone = `<task-notification><task-id>A</task-id><status>completed</status><result>see <task-notification><task-id>B</task-id></result><usage><duration_ms>9</duration_ms></usage></task-notification> <task-notification><task-id>N</task-id><status>failed</status></task-notification>`
+    expect(notificationsOf(lone).map(one => one.task)).toEqual(['A', 'N'])
+  })
+
+  test('a failure or a stop word is not a neutral end', () => {
+    const word = (status: string) => notificationsOf(note(`<task-id>a1</task-id><status>${status}</status>`))[0]?.status
+    expect(['error', 'timeout', 'timed_out', 'Failed'].map(word)).toEqual(['failed', 'failed', 'failed', 'failed'])
+    expect(['cancelled', 'canceled', 'stopped', 'killed'].map(word)).toEqual(['killed', 'killed', 'killed', 'killed'])
+    expect(['running', 'progress', ''].map(word)).toEqual(['other', 'other', 'other'])
+  })
+
   test('hostile fields: a bad id drops the block, a negative or text duration is ignored, and the summary is one short line', () => {
     expect(notificationsOf(note('<task-id>../x</task-id><status>completed</status>'))).toEqual([])
     const odd = notificationsOf(note('<task-id>a1</task-id><status>completed</status><duration_ms>-5</duration_ms><summary>line one\n\nline   two</summary>'))[0]

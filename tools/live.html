@@ -810,6 +810,11 @@ function ingest(tr, ev){
   tr.events++;
   tr.lastAt = Math.max(tr.lastAt, at);
   if (ev.session) tr.sessions[String(ev.session).slice(0, 12)] = 1;
+  // A background agent that is still making calls is alive: its quiet time counts from its last event, not from its start.
+  if (typeof ev.agent === 'string' && ev.kind !== 'bg.start' && ev.kind !== 'bg.end' && tr.bgTask.has(ev.agent)) {
+    var live = tr.bg.get(tr.bgTask.get(ev.agent));
+    if (live && live.endAt === null) live.lastSeen = at;
+  }
   // what the guard, the team, the contract and the session recorded, for the audit lists of the Guard and Team views
   if (/^(guard|team|codex|task|contract|evidence|condition|desktop|session)\./.test(String(ev.kind))) { tr.audit.push({ at: at, kind: String(ev.kind).slice(0, 60), ev: ev }); if (tr.audit.length > 300) tr.audit.shift(); }
   var t, sp, id;
@@ -886,10 +891,13 @@ function ingest(tr, ev){
       var bkey = typeof ev.id === 'string' ? clean(ev.id, 80) : '', btask = typeof ev.task === 'string' ? clean(ev.task, 80) : '';
       if (!bkey) break;
       var open = tr.bg.get(bkey) || (btask && tr.bgTask.has(btask) ? tr.bg.get(tr.bgTask.get(btask)) : null);
-      var item = open || { key: bkey, task: btask, at: at, endAt: null, status: null, ms: null, by: '', orphan: false, summary: '' };
+      // A task id that starts again after its end is a new run, not the old one reopened (an end-only entry is the one that gets its start).
+      if (open && !open.orphan && open.endAt !== null && open.key !== bkey) open = null;
+      var item = open || { key: bkey, task: btask, at: at, endAt: null, lastSeen: 0, status: null, ms: null, by: '', orphan: false, summary: '' };
       item.tool = clean(ev.tool, 40); item.btype = /^(shell|agent|workflow|monitor|other)$/.test(String(ev.btype)) ? String(ev.btype) : 'other';
       item.summary = clean(ev.summary, 120) || item.summary; item.agent = ev.agent ? clean(ev.agent, 40) : '';
-      if (!open) item.at = at; else item.orphan = false;
+      if (!open || item.at === null) item.at = at;
+      if (open) item.orphan = false;
       item.task = btask || item.task;
       tr.bg.set(item.key, item);
       if (item.task) tr.bgTask.set(item.task, item.key);
@@ -901,17 +909,21 @@ function ingest(tr, ev){
       var found = (ekey && tr.bg.get(ekey)) || (etask && tr.bgTask.has(etask) ? tr.bg.get(tr.bgTask.get(etask)) : null);
       if (!found) {
         // The start fell out of the buffer (or was never seen): keep the end, honestly marked.
-        found = { key: ekey || 'task:' + etask, task: etask, at: null, endAt: null, status: null, ms: null, by: '', orphan: true, summary: '', tool: '', btype: 'other', agent: '' };
+        // A turn's end for a task that was never opened is any subagent's ordinary end.
+        if (ev.by === 'turn') break;
+        found = { key: ekey || 'task:' + etask, task: etask, at: null, endAt: null, lastSeen: 0, status: null, ms: null, by: '', orphan: true, summary: '', tool: '', btype: 'other', agent: '' };
         if (!found.key || found.key === 'task:') break;
         tr.bg.set(found.key, found);
         if (etask) tr.bgTask.set(etask, found.key);
       }
+      var st = /^(completed|failed|killed|other)$/.test(String(ev.status)) ? String(ev.status) : 'other';
+      // A notice whose status is neither an ending nor a stop (a progress report) proves the work alive, not finished.
+      if (ev.by === 'note' && st === 'other' && found.endAt === null && !/complet|finish|exit|done|ended/i.test(String(ev.summary || ''))) { found.lastSeen = at; break; }
       // A second end (a notice after another) keeps the first time; a notice's own status wins.
       if (found.endAt === null) found.endAt = at;
-      var st = /^(completed|failed|killed|other)$/.test(String(ev.status)) ? String(ev.status) : 'other';
       if (found.status === null || ev.by === 'note') found.status = st;
       var ems = Number(ev.ms); if (found.ms === null && isFinite(ems) && ems >= 0 && ems <= 7 * 86400000) found.ms = ems;
-      found.by = ev.by === 'turn' ? 'turn' : 'note';
+      if (found.by !== 'note') found.by = ev.by === 'turn' ? 'turn' : 'note';
       if (ev.summary && !found.summary) found.summary = clean(ev.summary, 120);
       bgTrim(tr);
       break;
@@ -1011,6 +1023,8 @@ function kpis(tr, now){
 function rebuild(list, old){
   var tr = newTrace();
   list.forEach(function(ev){ try { ingest(tr, ev); } catch (e) { tr.lastError = e; } });
+  // The last state line may have left the buffer: the goal, the conditions and the limits stay until a newer one comes.
+  if (!tr.wb && old && old.wb) tr.wb = old.wb;
   // Background work whose start the buffer no longer holds is still running: carry it over from the trace being replaced.
   if (old && old.bg) {
     old.bg.forEach(function(b, key){
@@ -1284,9 +1298,14 @@ var BG_MAX = 50, BG_STALE_MS = 30 * 60000;
 // The oldest finished entry goes first when there are too many, else the oldest of all.
 function bgTrim(tr){
   while (tr.bg.size > BG_MAX) {
-    var drop = null;
-    tr.bg.forEach(function(b, key){ if (drop === null && b.endAt !== null) drop = key; });
-    if (drop === null) drop = tr.bg.keys().next().value;
+    // The oldest finished entry (carried-over entries sit at the end of the map, so order of insertion is no age), else the oldest of all.
+    var drop = null, dropAt = Infinity, dropOpen = null, dropOpenAt = Infinity;
+    tr.bg.forEach(function(b, key){
+      var t0 = b.at !== null ? b.at : b.endAt !== null ? b.endAt : 0;
+      if (b.endAt !== null) { if (t0 < dropAt) { drop = key; dropAt = t0; } }
+      else if (t0 < dropOpenAt) { dropOpen = key; dropOpenAt = t0; }
+    });
+    if (drop === null) drop = dropOpen;
     var gone = tr.bg.get(drop);
     tr.bg.delete(drop);
     if (gone && gone.task && tr.bgTask.get(gone.task) === drop) tr.bgTask.delete(gone.task);
@@ -1294,7 +1313,7 @@ function bgTrim(tr){
 }
 // running while no end was seen, no end seen once it has been quiet for BG_STALE_MS (never shown as finished), else how it ended.
 function bgStatus(b, now){
-  if (b.endAt === null) return b.at !== null && now - b.at > BG_STALE_MS ? 'unknown' : 'running';
+  if (b.endAt === null) { var since = Math.max(b.at || 0, b.lastSeen || 0); return since > 0 && now - since > BG_STALE_MS ? 'unknown' : 'running'; }
   return b.status === 'completed' ? 'done' : b.status === 'failed' ? 'failed' : b.status === 'killed' ? 'stopped' : 'ended';
 }
 function bgList(tr, now){
@@ -1697,7 +1716,7 @@ var LIM_KEY = { five_hour: 'lim-5h', seven_day: 'lim-7d', spend_limit: 'lim-spen
 var limSig = '';
 function resetText(at){
   if (at == null) return '';
-  var m = untilOf(at, Date.now());
+  var m = untilOf(at, nowFor());
   if (m == null) return L('passed', '지남');
   if (m < 60) return m + L('m', '분');
   if (m < 2880) return Math.floor(m / 60) + L('h', '시간') + (m % 60) + L('m', '분');
@@ -1707,7 +1726,7 @@ function drawLimits(){
   var box = $('ctx-lim');
   if (!box) return;
   var list = TR && TR.wb && Array.isArray(TR.wb.limits) ? TR.wb.limits : [];
-  var rows = list.map(function(w){ return { key: LIM_KEY[w.kind], pct: w.pct, lvl: w.pct < 75 ? 'allow' : w.pct < 90 ? 'ask' : 'block', text: resetText(w.at) }; });
+  var rows = list.map(function(w){ return { key: LIM_KEY[w.kind], pct: w.pct, lvl: Math.round(w.pct) < 75 ? 'allow' : Math.round(w.pct) < 90 ? 'ask' : 'block', text: resetText(w.at) }; });
   var sig = lang + '|' + rows.map(function(r){ return [r.key, r.pct, r.text].join(':'); }).join('|');
   if (sig === limSig) return;
   limSig = sig;

@@ -1541,6 +1541,26 @@ test('work sent to the background opens a bg.start line, and its notice closes i
   expect(String(ended[0]?.summary)).toContain('completed')
 })
 
+test('a background agent is closed on the live page by the end of its own turn, and an agent that was not opened sends nothing', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes, agentId: 'ag9' })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('process.spawn', async function* () {
+    yield { stream: 'stdout' as const, text: 'SmartWorkbench live: http://127.0.0.1:4400\n' }
+    await new Promise(() => undefined)
+  })
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Agent', description: 'review', prompt: 'look', subagent_type: 'general-purpose', run_in_background: true } as never)
+  expect(feedLines(writes).filter(one => one.kind === 'bg.start')).toMatchObject([{ task: 'ag9', btype: 'agent' }])
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'other' } as never)
+  expect(feedLines(writes).filter(one => one.kind === 'bg.end')).toHaveLength(0)
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'ag9' } as never)
+  expect(feedLines(writes).filter(one => one.kind === 'bg.end')).toMatchObject([{ task: 'ag9', status: 'other', by: 'turn' }])
+  await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer', agentId: 'ag9' } as never)
+  expect(feedLines(writes).filter(one => one.kind === 'bg.end')).toHaveLength(1)
+})
+
 test('a stop held for an expectation alone does not use up the team final check', async ($, on) => {
   const { workbench, clock } = world(on, { bashOut: 'Tests:       9 passed, 9 total\n' })
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))

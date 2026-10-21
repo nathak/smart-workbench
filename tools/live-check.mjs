@@ -636,6 +636,22 @@ check(page.includes('id="ctx-lim"') && page.includes('function drawLimits'), 'th
   check(M.bgList(feedOf([{ kind: 'tool.start', id: 'a', tool: 'Read' }]), 5).length === 0, 'a feed without bg lines has none')
   const c = M.bgCounts(feed([{ kind: 'bg.start', id: 'c1', task: 'c1', tool: 'Bash', btype: 'shell' }, { kind: 'bg.start', id: 'c2', task: 'c2', tool: 'Bash', btype: 'shell' }, { kind: 'bg.end', task: 'c2', status: 'killed', by: 'note' }]), 2000)
   check(c.running === 1 && c.stopped === 1 && c.done === 0, 'the counts tell running from stopped')
+  // A progress notice is no end; a busy agent is not stale; a finished task id that starts again is a new run; a rebuild keeps the state line and drops the oldest.
+  const prog = feed([{ kind: 'bg.start', id: 'p1', task: 'p1', tool: 'Monitor', btype: 'monitor' }, { kind: 'bg.end', task: 'p1', status: 'other', by: 'note', summary: 'line of output' }])
+  check(one(prog).st === 'running' && prog.bg.get('p1').lastSeen > 0, 'a notice that is neither an ending nor a stop leaves the work running')
+  const fin = feed([{ kind: 'bg.start', id: 'p2', task: 'p2', tool: 'Monitor', btype: 'monitor' }, { kind: 'bg.end', task: 'p2', status: 'other', by: 'note', summary: 'Monitor ended' }])
+  check(one(fin).st === 'ended', 'a notice whose summary says it ended closes the work')
+  const busy = feed([{ kind: 'bg.start', id: 'a1', task: 'ag1', tool: 'Agent', btype: 'agent' }, { kind: 'tool.start', id: 'x1', tool: 'Read', agent: 'ag1', gap: M.BG_STALE_MS - 10 }])
+  check(M.bgStatus(busy.bg.get('a1'), busy.lastAt + 1000) === 'running' && M.bgStatus(busy.bg.get('a1'), busy.lastAt + M.BG_STALE_MS + 1000) === 'unknown', 'an agent that is still calling tools is judged quiet from its last call, not from its start')
+  const again = feed([{ kind: 'bg.start', id: 's1', task: 'same', tool: 'Bash', btype: 'shell' }, { kind: 'bg.end', task: 'same', status: 'completed', by: 'note' }, { kind: 'bg.start', id: 's2', task: 'same', tool: 'Bash', btype: 'shell' }])
+  check(again.bg.size === 2 && again.bg.get('s1').status === 'completed' && again.bg.get('s2').endAt === null, 'a finished task id that starts again is a new run, the old one stays done')
+  const lateStart = feed([{ kind: 'bg.end', task: 'o1', status: 'completed', by: 'note' }, { kind: 'bg.start', id: 'o1', task: 'o1', tool: 'Bash', btype: 'shell' }])
+  check(lateStart.bg.get('o1') ? lateStart.bg.get('o1').at !== null : [...lateStart.bg.values()].every(b => b.at !== null), 'an end seen before its start gets the start time when the start comes')
+  check(feed([{ kind: 'bg.end', task: 'nobody', status: 'other', by: 'turn' }]).bg.size === 0, 'a turn end for a task that was never opened is no entry')
+  const withWb = feed([{ kind: 'wb', goal: 'g', conds: [], limits: [{ kind: 'five_hour', pct: 12, at: 9e12 }] }])
+  check(M.rebuild([], withWb).wb !== null, 'a rebuild with no state line in the buffer keeps the last one')
+  const crowd = M.rebuild(Array.from({ length: 49 }, (_, i) => ({ at: 9000 + i, kind: 'bg.start', id: `n${i}`, task: `n${i}`, tool: 'Bash', btype: 'shell' })), feed([{ kind: 'bg.start', id: 'old1', task: 'old1', tool: 'Bash', btype: 'shell' }, { kind: 'bg.end', task: 'old1', status: 'completed', by: 'note' }, { kind: 'bg.start', id: 'old2', task: 'old2', tool: 'Bash', btype: 'shell' }, { kind: 'bg.end', task: 'old2', status: 'completed', by: 'note' }]))
+  check(crowd.bg.size === 50 && !crowd.bg.has('old1') && crowd.bg.has('old2'), 'with too many, the oldest finished entry goes even when it was carried over from the trace being replaced')
   check(page.includes('id="bgchip"') && page.includes('id="a-bg"') && /'a-bg': \[/.test(page), 'the page has the background chip and the list')
 }
 

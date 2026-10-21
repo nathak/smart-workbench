@@ -1115,6 +1115,10 @@ const CHECK_KINDS: readonly EvidenceKind[] = ['test', 'build', 'typecheck', 'lin
 // Claude's side of a contract change: recorded as an open proposal for the person.
 // The tool's result is a string: the engine checks plugin tool results against a text output.
 // The import graph the last import_graph call built, kept with the engine's cache so the next build reads only what changed.
+// Two calls without a tool_use_id that end in the same millisecond must not share an id (the live page pairs a background start by it).
+let callSeq = 0
+// Background agents that were opened on the live page: the end of their own turn closes them even if their notice never comes.
+const bgAgents = new Set<string>()
 let graphMemo: { root: string; at: number; data: GraphData; cacheJson: string } | undefined
 let graphRunning: { root: string; startedAt: number; promise: Promise<GraphData | undefined> } | undefined
 
@@ -3304,6 +3308,7 @@ export const register: Register = on => {
     treeRoot = undefined
     graphMemo = undefined
     graphRunning = undefined
+    bgAgents.clear()
     ledger = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
     const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|scope|notify|why|policy|ci|issue|share|pickup|audit|clear]'
@@ -3553,7 +3558,7 @@ export const register: Register = on => {
     const policy = isCodexAllowed ? 'allow' : decide(verdict, profileOf(wb, live), wb.execution.isPaused)
     const startedAt = await $.clock.now()
     let call: ToolCallRecord = {
-      id: e.tool_use_id ?? `call-${startedAt}`,
+      id: e.tool_use_id ?? `call-${startedAt}-${(callSeq += 1)}`,
       tool: e.tool,
       summary: summarize(e.tool, e),
       risk: verdict.risk,
@@ -3707,6 +3712,10 @@ export const register: Register = on => {
     const isUnsettled = bashResult?.interrupted === true || bashResult?.backgroundTaskId !== undefined
     // The call came back but work goes on: the live view keeps it open until a notice says it ended.
     const bgRun = ran.deny === undefined ? backgroundOf(e.tool, e, ran.result, !ran.isError) : null
+    if (bgRun?.btype === 'agent' && bgRun.task) {
+      bgAgents.add(bgRun.task)
+      if (bgAgents.size > 100) bgAgents.delete(bgAgents.values().next().value as string)
+    }
     if (bgRun) await emit($, 'bg.start', { id: call.id, ...(bgRun.task ? { task: bgRun.task } : {}), tool: e.tool.slice(0, 40), btype: bgRun.btype, summary: model.cut(call.summary, 120), ...(e.agentId ? { agent: e.agentId } : {}) })
 
     const streams = e.tool === 'Bash' && !isUnsettled && kinds.length > 0 ? outputStreams(ran.result, (ran as { text?: unknown }).text) : []
@@ -3833,6 +3842,8 @@ export const register: Register = on => {
         await audit($, 'team.advisor', { id: advisor.id, description: advisor.description, background: true })
       }
       await emit($, 'turn.agent', { agent: e.agentId, ...usageOf(e.usage) })
+      // The agent's own turn is over: a second end signal for the live page's list, which a notice's status overrides when it comes.
+      if (bgAgents.delete(e.agentId)) await emit($, 'bg.end', { task: e.agentId, status: 'other', by: 'turn' })
       if (typeof e.answer === 'string' && e.answer !== '') {
         agentAnswers.set(e.agentId, promptOf(await read($, liveAtom), e.answer, 'output'))
         if (agentAnswers.size > 50) agentAnswers.delete(agentAnswers.keys().next().value as string)
