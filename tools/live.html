@@ -918,10 +918,11 @@ function ingest(tr, ev){
       }
       var st = /^(completed|failed|killed|other)$/.test(String(ev.status)) ? String(ev.status) : 'other';
       // A notice whose status is neither an ending nor a stop (a progress report) proves the work alive, not finished.
-      if (ev.by === 'note' && st === 'other' && found.endAt === null && !/complet|finish|exit|done|ended/i.test(String(ev.summary || ''))) { found.lastSeen = at; break; }
+      if (ev.by === 'note' && st === 'other' && found.endAt === null && !/complet|finish|exit|done|ended|fail|error|kill|stop|cancel|abort|timed? ?out|terminat/i.test(String(ev.summary || ''))) { found.lastSeen = at; break; }
       // A second end (a notice after another) keeps the first time; a notice's own status wins.
       if (found.endAt === null) found.endAt = at;
-      if (found.status === null || ev.by === 'note') found.status = st;
+      // A late progress notice does not overwrite how the work ended.
+      if (found.status === null || (ev.by === 'note' && st !== 'other')) found.status = st;
       var ems = Number(ev.ms); if (found.ms === null && isFinite(ems) && ems >= 0 && ems <= 7 * 86400000) found.ms = ems;
       if (found.by !== 'note') found.by = ev.by === 'turn' ? 'turn' : 'note';
       if (ev.summary && !found.summary) found.summary = clean(ev.summary, 120);
