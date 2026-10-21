@@ -1123,11 +1123,17 @@ async function graphFor($: $, root: string, lastEditAt: number): Promise<GraphDa
   if (graphMemo && graphMemo.root === root && now - graphMemo.at < 5000 && lastEditAt <= graphMemo.at) return graphMemo.data
   // Calls made together share one build, if it is for this project and started after the last edit; any other waits for it and builds again.
   if (graphRunning && graphRunning.root === root && lastEditAt <= graphRunning.startedAt) return graphRunning.promise
-  if (graphRunning) await graphRunning.promise.catch(() => undefined)
-  if (graphMemo && graphMemo.root === root && now - graphMemo.at < 5000 && lastEditAt <= graphMemo.at) return graphMemo.data
+  // Waiters on another build start again from the top when it ends: one of them builds, the rest join it.
+  if (graphRunning) {
+    await graphRunning.promise.catch(() => undefined)
+    return graphFor($, root, lastEditAt)
+  }
   const previous = graphMemo?.root === root ? graphMemo.cacheJson : ''
   const promise = (async () => {
-    const ran = await $.process.run(['node', `${$.plugin.root}/tools/graph-build.mjs`, root], { stdin: previous, timeoutMs: 10000 }).catch(() => undefined)
+    const build = (args: string[], stdin: string) => $.process.run(['node', `${$.plugin.root}/tools/graph-build.mjs`, root, ...args], { stdin, timeoutMs: 10000 }).catch(() => undefined)
+    let ran = await build([], previous)
+    // The cache rides along in the output; a caller's output limit that is smaller than the engine's tolerance would cut it, so ask again without it.
+    if (ran && ran.exitCode === 0 && ran.isStdoutTruncated) ran = await build(['nocache'], '')
     if (!ran || ran.exitCode !== 0 || ran.isStdoutTruncated) return undefined
     try {
       const out = JSON.parse(ran.stdout) as { graph?: unknown; cache?: unknown }

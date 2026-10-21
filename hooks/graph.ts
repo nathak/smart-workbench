@@ -108,6 +108,9 @@ function neighborsOf(d: GraphData, ix: Index, start: number, depth: 1 | 2): { im
   return res
 }
 
+// A file name counts only as a whole word of the command (`graph.test.ts` is not in `live-graph.test.ts`).
+const namedIn = (command: string, name: string): boolean => new RegExp(`(?:^|[\\s/'"=])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s'"])`).test(command)
+
 // What the session knows about one file, as short tags in a fixed order. Only recorded facts, never a guess.
 function marksOf(wb: Workbench, rel: string, root: string, isTest: boolean): string[] {
   const marks: string[] = []
@@ -121,7 +124,7 @@ function marksOf(wb: Workbench, rel: string, root: string, isTest: boolean): str
     // Checks are recorded per command, not per file: a result is tied to a test file only when its command names the file.
     const run = latestOf(wb.evidence, 'test')
     const name = rel.slice(rel.lastIndexOf('/') + 1)
-    if (run && run.ok !== null && (run.command.includes(rel) || run.command.includes(name))) marks.push(`in last test run:${run.ok ? 'passed' : 'failed'}`)
+    if (run && run.ok !== null && (run.command.includes(rel) || namedIn(run.command, name))) marks.push(`in last test run:${run.ok ? 'passed' : 'failed'}`)
   }
 
   return marks
@@ -132,7 +135,7 @@ export function graphAnswer(d: GraphData, rel: string, depth: 1 | 2, direction: 
   const ix = indexOf(d)
   const at = ix.byPath.get(rel)
   if (at === undefined) {
-    return `import_graph ${rel}: not in the graph (${d.truncated.length ? `graph partial: ${d.truncated.join(', ')}; it may exist` : 'no such JS/TS file, or skipped as big or linked'})`
+    return `import_graph ${rel}: not in the graph (${d.truncated.length ? `graph partial: ${d.truncated.join(', ')}; it may exist` : 'no such JS/TS file, or a secret, generated or linked file'})`
   }
   const node = d.nodes[at] as GraphNode
   const tag = (i: number) => {
@@ -152,7 +155,9 @@ export function graphAnswer(d: GraphData, rel: string, depth: 1 | 2, direction: 
   const lines = [`import_graph ${rel} (${node.l}, ${node.c})${own.length ? ` [${own.join(', ')}]` : ''}`]
   const run = latestOf(wb.evidence, 'test')
   if (run && run.ok !== null) lines.push(`session: last test run ${run.ok ? 'passed' : 'failed'}`)
-  if (direction !== 'importers') lines.push(`imports (${near.imports.length}${depth === 2 ? ', 2 steps' : ''}): ${list(near.imports) || '-'}`)
+  // A big file was not read: no import is known, which is not the same as none.
+  if (node.big) lines.push('not read: over 256 KB, so what it imports is unknown')
+  if (direction !== 'importers') lines.push(`imports (${node.big ? 'unknown' : near.imports.length}${depth === 2 ? ', 2 steps' : ''}): ${node.big ? '?' : list(near.imports) || '-'}`)
   if (direction !== 'imports') lines.push(`imported by (${near.by.length}${depth === 2 ? ', 2 steps' : ''}): ${list(near.by) || '-'}`)
   lines.push(`tests (${near.tests.length}): ${list(near.tests) || '-'}`)
   const notes = [

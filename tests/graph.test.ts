@@ -92,3 +92,19 @@ describe('the engine answer is not trusted', () => {
     expect(graphDataOf({ v: 1, nodes: Array.from({ length: 6000 }, (_, i) => node(`f${i}.ts`)), edges: [] })?.nodes).toHaveLength(5000)
   })
 })
+
+describe('what the answer does not claim', () => {
+  test('a big file was not read: its imports are unknown, not none', () => {
+    const big = graphDataOf({ ...raw, nodes: [...raw.nodes, node('src/huge.ts', 'source', { big: 1 })] }) as NonNullable<ReturnType<typeof graphDataOf>>
+    const text = graphAnswer(big, 'src/huge.ts', 1, 'both', wb(), ROOT)
+    expect(text).toContain('not read: over 256 KB')
+    expect(text).toContain('imports (unknown): ?')
+    expect(graphAnswer(big, 'src/none.ts', 1, 'both', wb(), ROOT)).not.toContain('skipped as big')
+  })
+
+  test('a test file counts as in the last run only when the command names it as a whole word', () => {
+    const run = (command: string) => ({ ...wb(), evidence: [{ id: 'e', kind: 'test' as const, command, ok: true, at: 1 }] })
+    expect(graphAnswer(data(), 'src/auth.test.ts', 1, 'both', run('npx vitest run src/live-auth.test.ts'), ROOT)).not.toContain('in last test run')
+    expect(graphAnswer(data(), 'src/auth.test.ts', 1, 'both', run('npx vitest run auth.test.ts'), ROOT)).toContain('in last test run:passed')
+  })
+})

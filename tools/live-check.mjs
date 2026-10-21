@@ -823,6 +823,14 @@ const G = await import('./live-graph.mjs')
   check(r('src/a.ts', './b') === 'src/b.tsx' && r('src/a.ts', './dir') === 'src/dir/index.ts' && r('src/a.ts', './b.js') === 'src/b.tsx' && r('src/a.ts', './c.js') === 'src/c.js' && r('src/a.ts', '../lib/x') === 'lib/x.ts', 'a relative specifier resolves with an extension, a .js that names a .ts, or an index file')
   check(r('src/a.ts', '../../outside') === null && r('src/a.ts', '../../../etc/passwd') === null && r('src/a.ts', 'react') === null && r('src/a.ts', './missing') === null, 'a specifier that leaves the project, names a package or names nothing resolves to nothing')
   check(r('src/a.ts', '@app/x', { baseUrl: '', paths: [{ prefix: '@app/', suffix: '', targets: ['lib/*'] }] }) === 'lib/x.ts' && r('src/a.ts', 'lib/x', { baseUrl: '', paths: [] }) === 'lib/x.ts' && r('src/a.ts', 'lib/x', { baseUrl: null, paths: [] }) === null, 'tsconfig paths and baseUrl name files inside the project, and without them a bare name is a package')
+  {
+    const decl = new Set(['types/index.d.ts', 'src/a.ts', 'src/utils/index.ts', 'index.ts', 'src/own/x.ts', 'config.ts'])
+    const d = (from, spec, al) => G.resolveSpec(from, spec, decl, al)
+    check(d('src/a.ts', '../types') === 'types/index.d.ts' && G.resolveSpec('src/a.ts', '../types.js', new Set(['types.d.ts'])) === 'types.d.ts', 'a declaration file (.d.ts) is what `../types` and `../types.js` name')
+    check(d('src/a.ts', 'utils-merge', { baseUrl: null, pathsBase: '', paths: [{ wild: false, prefix: 'utils', suffix: '', targets: ['src/utils'] }] }) === null && d('src/a.ts', 'utils', { baseUrl: null, pathsBase: '', paths: [{ wild: false, prefix: 'utils', suffix: '', targets: ['src/utils'] }] }) === 'src/utils/index.ts', 'a tsconfig path without a star matches that specifier exactly, not any that starts with it')
+    check(d('src/a.ts', 'config', { baseUrl: null, pathsBase: '', paths: [{ wild: true, prefix: '@/', suffix: '', targets: ['src/*'] }] }) === null && d('src/a.ts', '@/own/x', { baseUrl: null, pathsBase: '', paths: [{ wild: true, prefix: '@/', suffix: '', targets: ['src/*'] }] }) === 'src/own/x.ts', 'paths without a baseUrl do not make a bare name a file of the project')
+    check(G.resolveSpec('a.ts', '.', new Set(['a.ts', 'index.ts'])) === 'index.ts', 'a dot specifier at the project root is its index file')
+  }
 }
 {
   const proj = mkdtempSync(join(tmpdir(), 'swb-graph-'))

@@ -22,7 +22,7 @@ function cacheFrom(text) {
     const one = pair[1]
     if (!one || typeof one !== 'object' || !Number.isFinite(one.size) || !Number.isFinite(one.mtimeMs) || !Array.isArray(one.specs) || one.specs.length > MAX_SPECS) continue
     if (!one.specs.every(s => Array.isArray(s) && typeof s[0] === 'string' && s[0].length <= 400 && /^[ird]$/.test(String(s[1])))) continue
-    out.set(pair[0], { size: one.size, mtimeMs: one.mtimeMs, specs: one.specs.map(s => [s[0], s[1]]), big: one.big === true, stale: one.stale === true })
+    out.set(pair[0], { size: one.size, mtimeMs: one.mtimeMs, ctimeMs: Number.isFinite(one.ctimeMs) ? one.ctimeMs : undefined, ino: Number.isFinite(one.ino) ? one.ino : undefined, specs: one.specs.map(s => [s[0], s[1]]), big: one.big === true, stale: one.stale === true })
   }
 
   return out
@@ -42,7 +42,7 @@ try {
   // The cache rides along only while the whole answer stays small (the caller reads a bounded stdout); without it the next run reads every file again.
   const graphText = JSON.stringify(graph)
   const cacheText = JSON.stringify({ v: 1, cache: entries })
-  if (Buffer.byteLength(cacheText) <= MAX_CACHE_BYTES && Buffer.byteLength(graphText) + Buffer.byteLength(cacheText) <= MAX_OUT_BYTES) out.cache = { v: 1, cache: entries }
+  if (process.argv[3] !== 'nocache' && Buffer.byteLength(cacheText) <= MAX_CACHE_BYTES && Buffer.byteLength(graphText) + Buffer.byteLength(cacheText) <= MAX_OUT_BYTES) out.cache = { v: 1, cache: entries }
   process.stdout.write(JSON.stringify(out))
 } catch {
   process.stderr.write('graph build failed\n')

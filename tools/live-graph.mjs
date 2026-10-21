@@ -12,8 +12,8 @@ export const GRAPH_VERSION = 1
 export const LIMITS = { files: 5000, depth: 20, fileBytes: 256 * 1024, totalBytes: 32 * 1024 * 1024, edges: 20000, ms: 1500, tsconfigBytes: 64 * 1024 }
 
 const CODE_EXT = /\.(?:[cm]?[jt]s|[jt]sx)$/
-const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']
-const JS_TO_TS = { '.js': ['.ts', '.tsx'], '.jsx': ['.tsx'], '.mjs': ['.mts'], '.cjs': ['.cts'] }
+const EXTENSIONS = ['.ts', '.tsx', '.d.ts', '.mts', '.d.mts', '.cts', '.d.cts', '.js', '.jsx', '.mjs', '.cjs']
+const JS_TO_TS = { '.js': ['.ts', '.tsx', '.d.ts'], '.jsx': ['.tsx'], '.mjs': ['.mts', '.d.mts'], '.cjs': ['.cts', '.d.cts'] }
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'out', 'coverage', '.next', 'target', 'vendor', '.claude'])
 
 // The category rules of hooks/files.ts (a test keeps the two in step): a file is read only if it is none of secret and generated.
@@ -164,9 +164,15 @@ function normalize(path) {
 }
 
 /** The scanned file a specifier names, or null. `files` is a Set of root-relative posix paths; `aliases` comes from the tsconfig. */
-export function resolveSpec(fromPath, spec, files, aliases = { baseUrl: null, paths: [] }) {
+export function resolveSpec(fromPath, spec, files, aliases = { baseUrl: null, pathsBase: '', paths: [] }) {
   const tryBase = base => {
-    if (base === null || base === '') return null
+    if (base === null) return null
+    // The project root itself (`import x from '.'`) is its index file.
+    if (base === '') {
+      for (const ext of EXTENSIONS) if (files.has(`index${ext}`)) return `index${ext}`
+
+      return null
+    }
     if (files.has(base)) return base
     for (const ext of EXTENSIONS) if (files.has(base + ext)) return base + ext
     const ext = /\.[cm]?jsx?$/.exec(base)?.[0]
@@ -180,10 +186,11 @@ export function resolveSpec(fromPath, spec, files, aliases = { baseUrl: null, pa
   }
   if (spec.startsWith('./') || spec.startsWith('../') || spec === '.' || spec === '..') return tryBase(normalize(`${dirOf(fromPath)}/${spec}`))
   for (const alias of aliases.paths) {
-    if (!spec.startsWith(alias.prefix) || !spec.endsWith(alias.suffix) || spec.length < alias.prefix.length + alias.suffix.length) continue
-    const middle = spec.slice(alias.prefix.length, spec.length - alias.suffix.length)
+    // A pattern without a "*" names one specifier exactly; the base of the targets is the baseUrl, else the tsconfig's own folder.
+    if (alias.wild === false ? spec !== alias.prefix : !spec.startsWith(alias.prefix) || !spec.endsWith(alias.suffix) || spec.length < alias.prefix.length + alias.suffix.length) continue
+    const middle = alias.wild === false ? '' : spec.slice(alias.prefix.length, spec.length - alias.suffix.length)
     for (const target of alias.targets) {
-      const got = tryBase(normalize(`${aliases.baseUrl ?? ''}/${target.replace('*', middle)}`))
+      const got = tryBase(normalize(`${aliases.pathsBase ?? aliases.baseUrl ?? ''}/${target.replace('*', middle)}`))
       if (got) return got
     }
   }
@@ -215,7 +222,7 @@ const stripJsonComments = text => {
 
 // baseUrl and paths of the root tsconfig.json (extends is not followed); a pattern holds at most one "*".
 async function readAliases(root) {
-  const none = { baseUrl: null, paths: [] }
+  const none = { baseUrl: null, pathsBase: '', paths: [] }
   try {
     const path = join(root, 'tsconfig.json')
     const info = await lstat(path)
@@ -227,11 +234,11 @@ async function readAliases(root) {
       for (const [pattern, targets] of Object.entries(options.paths)) {
         if (pattern.split('*').length > 2 || !Array.isArray(targets)) continue
         const at = pattern.indexOf('*')
-        paths.push({ prefix: at < 0 ? pattern : pattern.slice(0, at), suffix: at < 0 ? '' : pattern.slice(at + 1), targets: targets.filter(one => typeof one === 'string' && one.split('*').length <= 2).slice(0, 5) })
+        paths.push({ wild: at >= 0, prefix: at < 0 ? pattern : pattern.slice(0, at), suffix: at < 0 ? '' : pattern.slice(at + 1), targets: targets.filter(one => typeof one === 'string' && one.split('*').length <= 2).slice(0, 5) })
       }
     }
 
-    return { baseUrl: baseUrl ?? (paths.length ? '' : null), paths }
+    return { baseUrl, pathsBase: baseUrl ?? '', paths }
   } catch {
     return none
   }
@@ -290,7 +297,7 @@ export async function buildGraph(root, prev = new Map(), now = Date.now) {
       if (found.length >= LIMITS.files) return void (truncated.files = true)
       try {
         const info = await lstat(join(dir, entry.name))
-        if (info.isFile()) found.push({ p: path, c: kind, size: info.size, mtimeMs: info.mtimeMs, ino: info.ino })
+        if (info.isFile()) found.push({ p: path, c: kind, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino })
       } catch {
         // gone while walking
       }
@@ -303,13 +310,14 @@ export async function buildGraph(root, prev = new Map(), now = Date.now) {
   let bytes = 0
   for (const file of found) {
     const old = prev.get(file.p)
-    if (old && !old.stale && old.size === file.size && old.mtimeMs === file.mtimeMs) {
+    if (old && !old.stale && old.size === file.size && old.mtimeMs === file.mtimeMs && old.ctimeMs === file.ctimeMs && old.ino === file.ino) {
       cache.set(file.p, old)
       if (old.big) skipped.big++
       continue
     }
     // `stale` marks a file that was not read this time (out of budget, unreadable): the next build tries it again.
-    const entry = { size: file.size, mtimeMs: file.mtimeMs, specs: [], big: false, stale: false }
+    // ctime and inode too: a copy that keeps the size and the modification time (cp -p, rsync -t) still changes them.
+    const entry = { size: file.size, mtimeMs: file.mtimeMs, ctimeMs: file.ctimeMs, ino: file.ino, specs: [], big: false, stale: false }
     if (file.size > LIMITS.fileBytes) {
       entry.big = true
       skipped.big++
@@ -350,7 +358,10 @@ export async function buildGraph(root, prev = new Map(), now = Date.now) {
     for (const [spec, kind] of cache.get(file.p).specs) {
       const target = resolveSpec(file.p, spec, files, aliases)
       if (target) add(from, index.get(target), kind)
-      else if (spec.startsWith('.')) unresolved++
+      else if (spec.startsWith('.')) {
+        // A stylesheet, an image or data file is no source file: only a specifier that names code (or no extension) is a miss.
+        if (!/\.[A-Za-z0-9]+(?:\?.*)?$/.test(spec.slice(spec.lastIndexOf('/') + 1)) || CODE_EXT.test(spec.replace(/\?.*$/, ''))) unresolved++
+      }
       else nodes[from].ext++
     }
   }
@@ -391,7 +402,11 @@ export function graphService(build = buildGraph, keep = 4) {
     const running = build(root, slot?.cache).then(({ graph, cache }) => {
       slots.delete(root)
       slots.set(root, { graph, cache, at: Date.now() })
-      while (slots.size > keep) slots.delete(slots.keys().next().value)
+      // A slot whose build is still running stays, so the next call joins it instead of starting another.
+      for (const [key, one] of slots) {
+        if (slots.size <= keep) break
+        if (key !== root && !one.running) slots.delete(key)
+      }
 
       return graph
     }, error => {

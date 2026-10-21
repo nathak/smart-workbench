@@ -3041,7 +3041,8 @@ function graphData(raw){
     if (Array.isArray(e) && Number.isInteger(e[0]) && Number.isInteger(e[1]) && e[0] >= 0 && e[1] >= 0 && e[0] < nodes.length && e[1] < nodes.length && /^[irdt]$/.test(String(e[2]))) edges.push([e[0], e[1], String(e[2])]);
   });
   var tr = raw.truncated && typeof raw.truncated === 'object' ? Object.keys(raw.truncated).filter(function(k){ return /^(files|depth|bytes|time|edges)$/.test(k); }) : [];
-  var sig = nodes.length + '/' + edges.length + '/' + nodes.reduce(function(a, n){ return a + n.s; }, 0);
+  // The edge sum tells a file re-pointed at another one (same sizes, same counts) from an unchanged graph.
+  var sig = nodes.length + '/' + edges.length + '/' + nodes.reduce(function(a, n){ return a + n.s; }, 0) + '/' + edges.reduce(function(a, e, i){ return (a + (e[0] * 7919 + e[1]) * (i % 97 + 1)) % 1000000007; }, 0);
   return { nodes: nodes, edges: edges, sig: sig, builtAt: Number(raw.builtAt) || 0, truncated: tr, unresolved: Number(raw.unresolved) || 0 };
 }
 function graphIndex(d){
