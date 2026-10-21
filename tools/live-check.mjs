@@ -978,7 +978,8 @@ const G = await import('./live-graph.mjs')
   check(escaped.graph.nodes.find(n => n.p === 'src/b.ts').ext === 1, 'a config outside the project is not followed')
   // A folder of the project that is a link to somewhere else is not a way to a config either.
   const elsewhere = mkdtempSync(join(tmpdir(), 'swb-graph-lnk-'))
-  writeFileSync(join(elsewhere, 'base.json'), '{ "compilerOptions": { "baseUrl": ".", "paths": { "@o/*": ["*"] } } }')
+  // The same aliases the project's own config would give: if the link were followed, `@x/a` would turn into lib/a.ts.
+  writeFileSync(join(elsewhere, 'base.json'), '{ "compilerOptions": { "baseUrl": "..", "paths": { "@x/*": ["lib/*"] } } }')
   try {
     symlinkSync(elsewhere, join(base, 'linked'))
     put('tsconfig.json', '{ "extends": "./linked/base" }')
