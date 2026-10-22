@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-22
+
 ### Fixed
 - The import graph's reading of an extended tsconfig followed a folder that is a link out of the project (`lstat` and `O_NOFOLLOW` guard only the last name); every folder on the way must now be a real folder of the project. Found by the Codex cross-review run against the turn's commits.
 - Live page, found by running it in a browser: the tab bar no longer makes the whole page scroll sideways on a phone (it scrolls inside itself), the condition matrix keeps the check, got and time columns whole instead of breaking a word at the end of a letter, and a state line without pin or file counts shows zeros instead of `undefined`.
