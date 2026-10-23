@@ -372,12 +372,13 @@ button:hover{color:var(--fg);background:var(--surface-2)}
 .grlist{display:flex;flex-direction:column;gap:var(--sp-1);max-height:60vh;overflow:auto}
 .gitem{display:flex;gap:var(--sp-3);align-items:baseline;width:100%;text-align:left;padding:var(--sp-2) var(--sp-3);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);color:var(--fg);font:var(--fs-sm) var(--mono)}
 .gitem .gp{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}.gitem .gt,.gitem .gx{color:var(--fg-muted);font-size:var(--fs-xs);white-space:nowrap}
-.gitem.touched{border-left:3px solid var(--warn)}.gitem[aria-current=true]{border-color:var(--focus)}
+.gitem.touched{border-left:3px solid var(--warn)}.gitem.recent{flex-wrap:wrap}.gitem .gs{flex-basis:100%;color:var(--fg-muted);font-size:var(--fs-xs)}.gitem.edited{border-left-color:var(--bad)}.gitem.out{border-style:dashed;border-left:1px dashed var(--border)}.gitem.out .gp{direction:ltr}.gitem.unseen{border-left:3px dashed var(--bad)}.gitem .gt.warn{color:var(--bad)}.gitem.step{align-items:baseline}.glink{background:none;border:0;padding:0;color:var(--focus);font:var(--fs-xs) var(--mono);text-decoration:underline;cursor:pointer}
+.gusage{margin-bottom:var(--sp-4)}.gusage h3,.gtrail summary{margin:0 0 var(--sp-2);font:700 var(--fs-sm) var(--mono)}.gvisits,.gsteps{list-style:none;margin:var(--sp-2) 0;padding:0;display:flex;flex-direction:column;gap:var(--sp-1)}.gimpact{margin:var(--sp-2) 0;font-size:var(--fs-sm)}.gimpact.warn{color:var(--bad)}.gtrail{margin-top:var(--sp-4)}.gtrail summary{cursor:pointer}.gitem.step .gx{white-space:normal}.gitem.step .gp{direction:ltr}@media(max-width:640px){.gitem.step{flex-wrap:wrap}.gitem.step .gp{flex-basis:100%}}.gitem[aria-current=true]{border-color:var(--focus)}
 .grhead{display:flex;flex-direction:column;gap:var(--sp-3);margin-bottom:var(--sp-4)}.grpath{margin:0;font:700 var(--fs-lg)/1.3 var(--mono);word-break:break-all}
 .grmeta,.grbar{display:flex;flex-wrap:wrap;gap:var(--sp-2)}
 .grsvg{width:100%;height:auto;max-height:480px;margin-bottom:var(--sp-4)}
-.grn rect{fill:var(--surface-2);stroke:var(--border-strong)}.grn text{fill:var(--fg);font:11px var(--mono)}.grn.touched rect{stroke:var(--warn)}.grn.center rect{stroke:var(--focus);stroke-width:2}.grn.gside{cursor:pointer}.grn.gside:focus{outline:none}.grn.gside:focus rect{stroke:var(--focus);stroke-width:2}
-.grl{stroke:var(--border-strong);stroke-width:1;fill:none}.grl.t,.grl.tt{stroke-dasharray:4 3}.grmore{fill:var(--fg-muted);font:11px var(--mono)}
+.grn rect{fill:var(--surface-2);stroke:var(--border-strong)}.grn text{fill:var(--fg);font:11px var(--mono)}.grn.touched rect{stroke:var(--warn)}.grn.edited rect{stroke:var(--bad);stroke-width:2}.grn.unseen rect{stroke-dasharray:3 2}.grn.center rect{stroke:var(--focus);stroke-width:2}.grn.gside{cursor:pointer}.grn.gside:focus{outline:none}.grn.gside:focus rect{stroke:var(--focus);stroke-width:2}
+.grl{stroke:var(--border-strong);stroke-width:1;fill:none}.grl.walked{stroke:var(--focus);stroke-width:2}.grl.t,.grl.tt{stroke-dasharray:4 3}.grmore{fill:var(--fg-muted);font:11px var(--mono)}
 .gcols{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-4)}@media(min-width:900px){.gcols{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .gcol h3{margin:0 0 var(--sp-3);font:700 var(--fs-sm) var(--mono);text-transform:uppercase;letter-spacing:.04em}.gcol .gitem{margin-bottom:var(--sp-1)}
 @media(max-width:700px){.grsvg{display:none}}
@@ -625,7 +626,8 @@ button:hover{color:var(--fg);background:var(--surface-2)}
       <div class="panel" id="gr-side" hidden>
         <input type="search" id="gr-q" autocomplete="off" spellcheck="false" aria-label="search files">
         <div class="grcats" role="group" aria-label="category">
-          <button type="button" id="gr-cat-all" aria-pressed="true" data-i="gr-all"></button>
+          <button type="button" id="gr-cat-recent" aria-pressed="false" data-i="gr-recent"></button>
+          <button type="button" id="gr-cat-all" aria-pressed="false" data-i="gr-all"></button>
           <button type="button" id="gr-cat-source" aria-pressed="false" data-i="gr-source"></button>
           <button type="button" id="gr-cat-test" aria-pressed="false" data-i="gr-test"></button>
           <button type="button" id="gr-cat-config" aria-pressed="false" data-i="gr-config"></button>
@@ -733,8 +735,8 @@ var DICT = {
   'tl-q-ph': ['search · tool:Bash -policy:allow "npm test" ms:>500 is:fail', '검색 · tool:Bash -policy:allow "npm test" ms:>500 is:fail'], 'tl-crit-l': ['◆ critical path', '◆ 임계 경로'], 'tl-zoom-l': ['reset zoom', '확대 해제'],
   'h-title': ['Keyboard and search', '키보드와 검색'], 'h-keys': ['Keys', '단축키'], 'h-query': ['Search words (Timeline)', '검색어 (타임라인)'], 'h-off': ['Turn off single-key shortcuts', '한 글자 단축키 끄기'], 'h-close': ['Close', '닫기'],
   'h-note': ['Shortcuts do nothing while you type in a field or hold Ctrl, Alt or ⌘.', '입력창에 글을 쓰는 중이거나 Ctrl·Alt·⌘를 누른 동안에는 단축키가 동작하지 않습니다.'],
-  'tab-graph': ['Files', '파일'], 'gr-title': ['File graph', '파일 그래프'], 'gr-sub': ['Which files import which, from the JS/TS sources of the project. Pick a file to see what it uses, what uses it and its tests. Secret and generated files are never read.', '프로젝트 JS/TS 소스의 import 관계입니다. 파일을 고르면 그 파일이 쓰는 파일, 그 파일을 쓰는 파일, 테스트가 보입니다. 비밀·생성 파일은 읽지 않습니다.'],
-  'gr-all': ['All', '전체'], 'gr-source': ['Source', '소스'], 'gr-test': ['Tests', '테스트'], 'gr-config': ['Config', '설정'], 'gr-q-ph': ['Search files…', '파일 검색…'],
+  'tab-graph': ['Files', '파일'], 'gr-title': ['File graph', '파일 그래프'], 'gr-sub': ['The files this session touched, newest first, and how it moved between them: which file led to which (an import, a caller, a test), and what an edit left unchecked. Pick a file to see what it uses, what uses it and its tests. Secret and generated files are never read.', '이 세션이 건드린 파일을 최근 순으로 보여 주고, AI가 파일 사이를 어떻게 움직였는지(가져오는 파일, 가져가는 파일, 테스트)와 수정 뒤 확인하지 않은 파일을 표시합니다. 파일을 고르면 그 파일이 쓰는 파일, 그 파일을 쓰는 파일, 테스트가 보입니다. 비밀·생성 파일은 읽지 않습니다.'],
+  'gr-recent': ['Recent', '최근'], 'gr-all': ['All', '전체'], 'gr-source': ['Source', '소스'], 'gr-test': ['Tests', '테스트'], 'gr-config': ['Config', '설정'], 'gr-q-ph': ['Search files…', '파일 검색…'],
   'app-status': ['Status & settings', '상태·설정'], 't-title': ['Team mode', '팀 모드'], 't-sub': ['The advisor designs and reviews, the lead builds, the explorer reads. Context is spent only where it is needed.', '조언자가 설계하고 검토하며, 리드가 구현하고, 탐색 담당이 읽습니다. 컨텍스트는 필요한 곳에만 씁니다.'], 't-t-adv': ['Advisor runs', '조언자 실행'], 't-t-exp': ['Explorer runs', '탐색 실행'], 't-t-gates': ['Safety gates raised', '발생한 안전 게이트'], 't-t-codex': ['Codex runs', 'Codex 실행'], 't-matrix': ['Agent roles', '역할별 에이전트'], 'g-title': ['Run & guard', '실행·가드'], 'g-t-ask': ['Pending questions', '대기 중인 확인'], 'g-t-rules': ['Guard file rules', '가드 파일 규칙'], 'g-t-block': ['Blocked or stopped', '차단·중단'], 'g-t-allow': ['Allowed', '허용'], 'g-order': ['Rule order', '규칙 순서'], 'g-order-note': ['The rule list is not in the live feed. Open Status & settings in the desktop app to see and edit the guard file.', '규칙 목록은 실시간 피드에 없습니다. 데스크톱 앱의 상태·설정에서 가드 파일을 보고 고칠 수 있습니다.'], 'g-open-status': ['Open Status & settings', '상태·설정 열기'], 'tab-flow': ['Flow', '흐름'], 'tab-guard': ['Run & guard', '실행·가드'], 'tab-agents': ['Team mode', '팀 모드'],
   'g-queue': ['Needs attention', '확인이 필요한 것'], 'g-cats': ['Decisions by category', '범주별 판정'], 'g-table': ['Decisions', '판정 목록'],
   'a-bg': ['Background work', '백그라운드 작업'], 'nav-bg': ['running in the background', '백그라운드 실행 중'],
@@ -832,7 +834,7 @@ function ingest(tr, ev){
     case 'tool.start':
       id = String(ev.id);
       t = curTurn(tr, at);
-      sp = { id: id, tool: clean(ev.tool, 60), summary: clean(ev.summary, 300), at: at, end: null, ms: null, outcome: null, policy: clean(ev.policy || 'allow', 12), risk: clean(ev.risk, 12), category: clean(ev.category, 40),
+      sp = { id: id, tool: clean(ev.tool, 60), summary: clean(ev.summary, 300), path: typeof ev.path === 'string' ? clean(ev.path, 400) : '', at: at, end: null, ms: null, outcome: null, policy: clean(ev.policy || 'allow', 12), risk: clean(ev.risk, 12), category: clean(ev.category, 40),
         agent: ev.agent ? clean(ev.agent, 40) : null, subagent: clean(ev.subagent, 80), codex: clean(ev.codex, 20), turn: t.n, parent: null, est: false, guard: null, output: '', workflowBg: false, agentRun: null, ev: ev, order: ++tr.order, kids: [] };
       tr.spans.set(id, sp);
       t.spans.push(sp);
@@ -3054,7 +3056,7 @@ function drawSrv(){
 setInterval(pollInfo, 10000);
 
 // ---- graph tab: the import graph of the session's project (GET /graph), read only ----
-var GR = { auto: true, centerPath: null, data: null, ix: null, err: null, loading: false, center: -1, q: '', cat: '', depth: 1, back: [], key: '', owner: null, builtAt: 0 };
+var GR = { auto: true, centerPath: null, data: null, ix: null, err: null, loading: false, center: -1, q: '', cat: '', catPicked: false, depth: 1, back: [], key: '', owner: null, builtAt: 0, tc: null, rc: null, rcSig: '', trailOpen: true };
 // graph:begin
 function graphData(raw){
   // The answer is not trusted to be well formed: every field is given a fixed shape here, and anything that is not version 1 is refused.
@@ -3120,35 +3122,209 @@ function graphMatches(d, ix, q, cat){
   rows.sort(function(a, b){ var da = ix.out[a].length + ix.inn[a].length, db = ix.out[b].length + ix.inn[b].length; return db - da || (d.nodes[a].p < d.nodes[b].p ? -1 : 1); });
   return rows;
 }
-// graph:end
-// The files the session read or changed, newest last: a path named in the summary of a Read / Edit / Write call that is one of the nodes.
-function graphTouched(d, ix){
-  var found = Object.create(null), order = [];
-  TR.spans.forEach(function(sp){
-    if (!/^(Read|Edit|Write|MultiEdit|NotebookEdit)$/.test(sp.tool)) return;
-    String(sp.summary || '').split(/\s+/).forEach(function(tok){
-      tok = tok.replace(/^["'`(]+|["'`),:]+$/g, '');
-      if (!tok) return;
-      var at = tok.charAt(0) === '/' || /^[A-Za-z]:[\\/]/.test(tok) ? -1 : 0, hit = -1;
-      for (var k = at; k < tok.length && hit < 0; k++) {
-        if (k >= 0 && k > 0 && tok.charAt(k - 1) !== '/' && tok.charAt(k - 1) !== '\\') continue;
-        var cand = tok.slice(Math.max(k, 0)).replace(/\\/g, '/');
-        if (ix.byPath[cand] !== undefined) hit = ix.byPath[cand];
-      }
-      if (hit < 0) return;
-      var edit = sp.tool !== 'Read';
-      if (!found[hit]) { found[hit] = { edit: edit, at: sp.at }; order.push(hit); }
-      else { found[hit].at = Math.max(found[hit].at, sp.at); found[hit].edit = found[hit].edit || edit; }
-    });
+// What the session touched and how it moved between files, read from the calls' summaries (a Read / Edit / Write path, a shell command that names a file).
+// Grep and Glob are not touches: their summary is a pattern, not a path.
+var GR_OP = { Read: 'read', Edit: 'edit', Write: 'edit', MultiEdit: 'edit', NotebookEdit: 'edit', Bash: 'shell' };
+var GR_HUB = 200;
+// A test runner started by name at the start of a command (after && || ; | or a wrapper such as env, timeout, npx). A whole-suite run names no file or folder after it
+// (flags, `.` and `./...` do not); a run that names one is a targeted run, and a word like `test` or a runner's name elsewhere (an echo, a commit message) is not a run.
+var GR_RUNNER = /^(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test|(?:(?:npx|bunx)\s+(?:--no-install\s+)?)?(?:vitest|jest|mocha|pytest)|(?:python3?\s+-m\s+)pytest|playwright\s+test|node\s+--test|claude\s+plugin\s+test|cargo\s+test|go\s+test|node\s+\S*live-check\S*)(?=$|\s)/;
+function graphIsSuite(summary){
+  return String(summary).split(/&&|\|\||[;|(]/).some(function(seg){
+    var cmd = seg.trim().replace(/^(?:(?:env|time|sudo|nohup|exec)\s+|timeout\s+\S+\s+|\w+=\S*\s+)+/, '');
+    var m = GR_RUNNER.exec(cmd);
+    if (!m) return false;
+    var rest = cmd.slice(m[0].length).replace(/\d*>>?\s*\S+/g, ' ').split(/\s+/).filter(Boolean);
+    return !rest.some(function(w){ return w.charAt(0) !== '-' && w !== '.' && !/\.\.\.$/.test(w) && (w.indexOf('/') >= 0 || /\.[A-Za-z0-9]{1,8}$/.test(w)); });
   });
-  return { by: found, order: order.sort(function(a, b){ return found[a].at - found[b].at; }) };
+}
+function graphTokens(summary, whole, exact){
+  var s = String(summary || '').trim();
+  var toks = whole ? [s] : s.split(/\s+/);
+  // The summary is cut at 120 characters: its last word may be half a name (a.tsx cut to a.ts), so it is not matched. A path the feed carries whole (exact) is not cut there.
+  if (s.length >= 120 && !exact) { if (whole) return []; toks.pop(); }
+  return toks.slice(0, 60).map(function(t){ return t.replace(/^["'`(]+|["'`),:;]+$/g, '').replace(/\\/g, '/').replace(/^(?:\.\/)+/, ''); }).filter(Boolean);
+}
+// The node a path names: the longest tail of an absolute path that is a node (pre = the part before it, the root candidate); a relative path must be the whole path.
+function graphResolve(ix, tok){
+  var abs = tok.charAt(0) === '/' || /^[A-Za-z]:\//.test(tok);
+  if (!abs) {
+    var rel = tok.replace(/^(?:\.\.\/)+/, '');
+    return ix.byPath[rel] !== undefined ? { i: ix.byPath[rel], pre: '' } : null;
+  }
+  for (var k = 0; k < tok.length; k++) {
+    if (k > 0 && tok.charAt(k - 1) !== '/') continue;
+    var cand = tok.slice(k);
+    if (ix.byPath[cand] !== undefined) return { i: ix.byPath[cand], pre: tok.slice(0, k) };
+  }
+  return null;
+}
+// The calls that touched a file, oldest first (steps), what each node got (files), newest first (order), the paths that are not nodes (outside), and the shell runs of a whole test suite.
+// `cache` (a Map) keeps what a call's words resolved to, so a rescan after one new event reads only the new call.
+function graphTouches(d, ix, spans, cache){
+  var list = spans instanceof Map ? Array.from(spans.values()) : (Array.isArray(spans) ? spans : []);
+  var byId = Object.create(null);
+  list.forEach(function(sp){ if (sp && typeof sp === 'object' && sp.id != null) byId[sp.id] = sp; });
+  var raw = [], since = 0, votes = Object.create(null), suiteAt = [];
+  list.forEach(function(sp){
+    if (!sp || typeof sp !== 'object') return;
+    var at = Number(sp.at) || 0;
+    if (!since || at < since) since = at;
+    var op = GR_OP[sp.tool];
+    if (!op) return;
+    var summary = String(sp.summary == null ? '' : sp.summary);
+    // The feed carries a file call's whole path (the summary is cut at 120 characters); a path that was itself cut (400 characters, a trailing …) is not trusted, and an older feed has none.
+    var whole = op !== 'shell' && typeof sp.path === 'string' && sp.path !== '' && sp.path.length < 400 && sp.path.charAt(sp.path.length - 1) !== '\u2026' ? sp.path : '';
+    var hit = sp.id != null && cache ? cache.get(sp.id) : null;
+    if (!hit || hit.s !== summary + '\u0000' + whole) {
+      hit = { s: summary + '\u0000' + whole, nodes: [], outside: [] };
+      var seen = Object.create(null);
+      graphTokens(whole || summary, op !== 'shell', !!whole).forEach(function(tok){
+        var r = graphResolve(ix, tok);
+        if (r) { if (!seen[r.i] && hit.nodes.length < 8) { seen[r.i] = 1; hit.nodes.push(r); } }
+        else if (op !== 'shell' && !hit.outside.length && (tok.indexOf('/') >= 0 || /\.[A-Za-z0-9]{1,8}$/.test(tok))) hit.outside.push(tok);
+      });
+      if (cache && sp.id != null) { if (cache.size > 6000) cache.clear(); cache.set(sp.id, hit); }
+    }
+    var st = statusOf(sp);
+    var ok = st === 'running' ? null : !(st === 'error' || st === 'blocked' || st === 'declined' || st === 'aborted');
+    if (op === 'shell' && ok === true && !hit.nodes.length && graphIsSuite(summary)) suiteAt.push(at);
+    var par = sp.agent && sp.parent != null ? byId[sp.parent] : null;
+    var base = { id: String(sp.id), at: at, op: op, actor: sp.agent ? String(sp.agent).slice(0, 40) : 'lead', who: !sp.agent ? 'lead' : par ? agentKind(par) : 'agent', turn: Number(sp.turn) || 0, ok: ok, lead: !sp.agent };
+    var k = 0;
+    hit.nodes.forEach(function(r){
+      raw.push(Object.assign({ i: r.i, pre: r.pre, path: d.nodes[r.i].p, k: k++ }, base));
+      if (r.pre) { var v = votes[r.pre] || (votes[r.pre] = { n: 0, lead: 0 }); v.n++; if (base.lead) v.lead++; }
+    });
+    hit.outside.forEach(function(tok){ raw.push(Object.assign({ i: -1, pre: '', path: tok, k: k++ }, base)); });
+  });
+  // The root the session works in: the folder most absolute paths to nodes start with, a tie going to the lead's.
+  var root = '', best = -1, bestLead = -1;
+  Object.keys(votes).forEach(function(p){ var v = votes[p]; if (v.n > best || (v.n === best && v.lead > bestLead)) { root = p; best = v.n; bestLead = v.lead; } });
+  var steps = [], files = Object.create(null), outMap = Object.create(null), outN = 0, outTouches = 0;
+  function outside(r, shown){
+    var o = outMap[shown];
+    if (!o) { if (outN >= 2000) return; o = outMap[shown] = { path: shown, reads: 0, edits: 0, fails: 0, last: 0, who: Object.create(null) }; outN++; }
+    if (r.ok === false) o.fails++; else if (r.op === 'edit') o.edits++; else o.reads++;
+    outTouches++;
+    if (r.at > o.last) o.last = r.at;
+    o.who[r.who] = (o.who[r.who] || 0) + 1;
+  }
+  raw.forEach(function(r){
+    // An absolute path under another root names the same relative path in another checkout: it is not this project's file.
+    if (r.i >= 0 && r.pre && r.pre !== root) { outside(r, r.pre + r.path); return; }
+    steps.push(r);
+    if (r.i < 0) { outside(r, root && r.path.indexOf(root) === 0 ? r.path.slice(root.length) : r.path); return; }
+    var f = files[r.i] || (files[r.i] = { reads: 0, edits: 0, shells: 0, fails: 0, first: r.at, last: r.at, lastRead: 0, lastShell: 0, lastEdit: 0, who: Object.create(null) });
+    if (r.at < f.first) f.first = r.at;
+    if (r.at > f.last) f.last = r.at;
+    f.who[r.who] = (f.who[r.who] || 0) + 1;
+    if (r.ok === false) f.fails++;
+    else if (r.op === 'read') { f.reads++; if (r.ok === true) f.lastRead = Math.max(f.lastRead, r.at); }
+    else if (r.op === 'edit') { f.edits++; if (r.ok === true) f.lastEdit = Math.max(f.lastEdit, r.at); }
+    else { f.shells++; if (r.ok === true) f.lastShell = Math.max(f.lastShell, r.at); }
+  });
+  steps.sort(function(a, b){ return a.at - b.at; });
+  var order = Object.keys(files).map(Number).sort(function(a, b){ return files[b].last - files[a].last || a - b; });
+  var by = Object.create(null);
+  order.forEach(function(i){ by[i] = { edit: files[i].edits > 0, at: files[i].last }; });
+  var out = Object.keys(outMap).map(function(k){ return outMap[k]; }).sort(function(a, b){ return b.last - a.last; }).slice(0, 200);
+  var loose = steps.reduce(function(a, s){ return a + (s.ok === true ? 0 : s.ok === false ? 1 : 1000); }, 0);
+  return { steps: steps, files: files, order: order, by: by, outside: out, root: root, since: since, suite: suiteAt,
+    sig: steps.length + ':' + (steps.length ? steps[steps.length - 1].at : 0) + ':' + loose + ':' + out.length + ':' + outTouches + ':' + since + ':' + suiteAt.length };
+}
+function graphEdge(ix, a, b, kinds){
+  var o = ix.out[a];
+  for (var k = 0; k < o.length; k++) if (o[k][0] === b && kinds.indexOf(o[k][1]) >= 0) return true;
+  return false;
+}
+// -2: t is not a test of f; -1: it names or imports f; otherwise the barrel it imports that re-exports f.
+function graphTestVia(d, ix, t, f){
+  if (d.nodes[t].c !== 'test' || d.nodes[f].c === 'test') return -2;
+  if (graphEdge(ix, t, f, 'idrt')) return -1;
+  var o = ix.out[t];
+  for (var k = 0; k < o.length; k++) { var x = o[k][0]; if (d.nodes[x].c !== 'test' && graphEdge(ix, x, f, 'r')) return x; }
+  return -2;
+}
+// How a step from file a to file b is related, the first that holds: its test, the file a test covers, a re-export, an import, an importer, a shared neighbour, none.
+function graphRelation(d, ix, a, b){
+  if (a < 0 || b < 0) return { rel: 'outside', via: -1 };
+  if (a === b) return { rel: 'same', via: -1 };
+  var v = graphTestVia(d, ix, b, a);
+  if (v !== -2) return { rel: 'test', via: v };
+  v = graphTestVia(d, ix, a, b);
+  if (v !== -2) return { rel: 'tested', via: v };
+  if (graphEdge(ix, a, b, 'r') || graphEdge(ix, b, a, 'r')) return { rel: 'reexp', via: -1 };
+  if (graphEdge(ix, a, b, 'id')) return { rel: 'dep', via: -1 };
+  if (graphEdge(ix, b, a, 'id')) return { rel: 'caller', via: -1 };
+  var near = Object.create(null);
+  ix.out[a].forEach(function(e){ near[e[0]] = 1; });
+  ix.inn[a].forEach(function(e){ near[e[0]] = 1; });
+  var cand = ix.out[b].concat(ix.inn[b]);
+  for (var k = 0; k < cand.length; k++) {
+    var x = cand[k][0];
+    // A hub (an index everything imports) would make every pair near.
+    if (near[x] && x !== a && x !== b && ix.out[x].length + ix.inn[x].length <= GR_HUB) return { rel: 'near', via: x };
+  }
+  return { rel: 'jump', via: -1 };
+}
+// The steps of each agent in turn (a subagent's calls do not break the lead's chain), the same file again folded into one step, newest first, the newest `cap` kept.
+function graphTrail(d, ix, steps, cap){
+  var last = Object.create(null), entries = [];
+  steps.forEach(function(s){
+    var prev = last[s.actor];
+    var same = prev && (s.i >= 0 ? prev.i === s.i : prev.i < 0 && prev.path === s.path);
+    if (same) { prev.n++; if (prev.ops.indexOf(s.op) < 0) prev.ops.push(s.op); prev.at = s.at; prev.ok = s.ok; prev.failed = prev.failed || s.ok === false; prev.sid = s.id; return; }
+    var e = { i: s.i, path: s.path, at: s.at, at0: s.at, failed: s.ok === false, ops: [s.op], n: 1, who: s.who, actor: s.actor, ok: s.ok, sid: s.id, prev: prev || null, nx: null, rel: '', via: -1, from: prev ? prev.i : -1, sameCall: !!prev && prev.sid === s.id && s.k > 0 };
+    if (prev) prev.nx = e;
+    last[s.actor] = e;
+    entries.push(e);
+  });
+  // A folded step has the time of its last touch, so the order is by that time (the insertion order is by first touch).
+  entries.forEach(function(e, n){ e.n0 = n; });
+  entries.sort(function(a, b){ return a.at - b.at || a.n0 - b.n0; });
+  var keep = entries.slice(-cap).reverse();
+  keep.forEach(function(e){
+    if (!e.prev) return;
+    var r = e.sameCall ? { rel: 'samecall', via: -1 } : graphRelation(d, ix, e.prev.i, e.i);
+    e.rel = r.rel; e.via = r.via;
+  });
+  return keep;
+}
+// After a successful edit of file i: of its tests and importers, those the session looked at or ran afterwards, and whether a whole suite ran. null without an edit.
+function graphImpact(d, ix, T, i){
+  var f = T.files[i];
+  if (!f || !f.lastEdit) return null;
+  var at = f.lastEdit, nb = graphNeighbors(d, ix, i, 1);
+  var res = { at: at, tests: { seen: [], not: [] }, by: { seen: [], not: [] }, suite: T.suite.some(function(t){ return t > at; }) };
+  nb.tests.forEach(function(x){ var g = T.files[x.i]; (g && Math.max(g.lastRead, g.lastShell, g.lastEdit) > at ? res.tests.seen : res.tests.not).push(x.i); });
+  nb.by.forEach(function(x){ var g = T.files[x.i]; (g && Math.max(g.lastRead, g.lastEdit) > at ? res.by.seen : res.by.not).push(x.i); });
+  return res;
+}
+// graph:end
+// The touches are worked out again only when the page's model has changed; what a call's words resolved to is kept in GR.rc until the graph changes.
+function graphT(){
+  var d = GR.data, k = d.sig + '|' + TR.events + '|' + TR.spans.size;
+  if (!GR.tc || GR.tc.k !== k || GR.tc.tr !== TR) {
+    if (GR.rcSig !== d.sig || !GR.rc) { GR.rc = new Map(); GR.rcSig = d.sig; }
+    GR.tc = { k: k, tr: TR, v: graphTouches(d, GR.ix, TR.spans, GR.rc), trail: null };
+  }
+  return GR.tc.v;
+}
+function graphTrailOf(){ var t = graphT(); if (!GR.tc.trail) GR.tc.trail = graphTrail(GR.data, GR.ix, t.steps, 300); return GR.tc.trail; }
+function graphAgo(at){
+  var s = Math.max(0, Math.round((nowFor() - at) / 1000));
+  if (s < 60) return L(s + 's ago', s + '초 전');
+  if (s < 3600) return L(Math.floor(s / 60) + ' min ago', Math.floor(s / 60) + '분 전');
+  if (s < 86400) return L(Math.floor(s / 3600) + ' h ago', Math.floor(s / 3600) + '시간 전');
+  return L(Math.floor(s / 86400) + ' d ago', Math.floor(s / 86400) + '일 전');
 }
 function graphSize(n){ return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
 function graphNote(text){ var n = $('gr-state'); n.textContent = text; }
 function loadGraph(force){
   var owner = hub ? curId : '';
   // Another session than the one the graph was made for: forget it at once, even while a request for the old one is still out.
-  if (GR.owner !== owner) { GR.data = null; GR.ix = null; GR.center = -1; GR.back = []; GR.key = ''; GR.auto = true; GR.owner = owner; }
+  if (GR.owner !== owner) { GR.data = null; GR.ix = null; GR.center = -1; GR.back = []; GR.key = ''; GR.auto = true; GR.owner = owner; GR.tc = null; GR.rc = null; GR.rcSig = ''; GR.catPicked = false; GR.cat = ''; }
   if (hub && !curId) { GR.err = L('Pick a session first.', '세션을 먼저 고르세요.'); drawGraphFocus(); return; }
   if (GR.loading) { GR.again = true; return; }
   GR.loading = true;
@@ -3172,8 +3348,8 @@ function loadGraph(force){
 function graphStart(){
   var d = GR.data, ix = GR.ix;
   if (!d || !d.nodes.length) return -1;
-  var t = graphTouched(d, ix);
-  if (t.order.length) return t.order[t.order.length - 1];
+  var t = graphT();
+  if (t.order.length) return t.order[0];
   var best = 0, bd = -1;
   d.nodes.forEach(function(n, i){ var deg = ix.out[i].length + ix.inn[i].length; if (n.c !== 'test' && deg > bd) { bd = deg; best = i; } });
   return best;
@@ -3185,14 +3361,15 @@ function graphGo(i, pushBack){
   drawGraph(true); // the focus is meant to move to the new centre, so no withFocus here
 }
 var GR_KIND = { i: ['import', 'import'], r: ['re-export', '재수출'], d: ['dynamic', '동적'], t: ['test of', '테스트 대상'] };
-function graphItem(i, extra, touched){
+function graphItem(i, extra, touched, fk){
   var n = GR.data.nodes[i];
-  var b = el('button', 'gitem' + (touched.by[i] ? ' touched' : ''));
+  var b = el('button', 'gitem' + (touched.by[i] ? ' touched' : '') + (touched.unseen && touched.unseen[i] ? ' unseen' : ''));
   b.type = 'button';
   b.title = n.p;
-  b.dataset.fk = 'gr-i-' + i;
+  b.dataset.fk = (fk || 'gr-i-') + i;
   b.appendChild(el('span', 'gp', n.p));
   if (touched.by[i]) b.appendChild(el('span', 'gt', touched.by[i].edit ? L('edited', '수정함') : L('read', '읽음')));
+  if (touched.unseen && touched.unseen[i]) b.appendChild(el('span', 'gt warn', L('not seen after the edit', '수정 후 안 봄')));
   if (extra) b.appendChild(el('span', 'gx', extra));
   b.onclick = function(){ graphGo(i, true); };
   return b;
@@ -3204,7 +3381,7 @@ function graphColumn(title, list, touched, sub){
   if (!list.length) { col.appendChild(el('p', 'muted', L('none', '없음'))); return col; }
   list.slice(0, 60).forEach(function(x){
     var extra = x.step > 1 ? L('via ', '경유 ') + GR.data.nodes[x.via].p.split('/').pop() : (sub && GR_KIND[x.kind] ? L(GR_KIND[x.kind][0], GR_KIND[x.kind][1]) : '');
-    col.appendChild(graphItem(x.i, extra, touched));
+    col.appendChild(graphItem(x.i, extra, touched, 'gr-c-'));
   });
   if (list.length > 60) col.appendChild(el('p', 'muted', '+' + (list.length - 60)));
   return col;
@@ -3220,7 +3397,7 @@ function graphSvg(c, nb, touched){
   svg.setAttribute('aria-label', L('Neighbours of the selected file', '선택한 파일의 이웃'));
   function node(i, x, y, cls){
     var g = document.createElementNS(NS, 'g');
-    g.setAttribute('class', 'grn ' + cls + (touched.by[i] ? ' touched' : ''));
+    g.setAttribute('class', 'grn ' + cls + (touched.by[i] ? ' touched ' + (touched.by[i].edit ? 'edited' : 'read') : '') + (touched.unseen && touched.unseen[i] ? ' unseen' : ''));
     g.setAttribute('transform', 'translate(' + x + ',' + y + ')');
     if (cls !== 'center') { g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button'); g.dataset.fk = 'gr-s-' + i; g.onclick = function(){ graphGo(i, true); }; g.onkeydown = function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); graphGo(i, true); } }; }
     var r = document.createElementNS(NS, 'rect'); r.setAttribute('width', BW); r.setAttribute('height', RH - 6); r.setAttribute('rx', 3); g.appendChild(r);
@@ -3233,7 +3410,8 @@ function graphSvg(c, nb, touched){
   function side(list, x, toCenter){
     list.slice(0, MAXN).forEach(function(it, k){
       var y = 5 + k * RH;
-      svg.appendChild(toCenter ? line(x + BW, y + 10, cx, cy, it.kind) : line(cx + BW, cy, x, y + 10, it.kind));
+      var kind = it.kind + (touched.walk && touched.walk[it.i] ? ' walked' : '');
+      svg.appendChild(toCenter ? line(x + BW, y + 10, cx, cy, kind) : line(cx + BW, cy, x, y + 10, kind));
     });
     list.slice(0, MAXN).forEach(function(it, k){ svg.appendChild(node(it.i, x, 5 + k * RH, 'gside')); });
     if (list.length > MAXN) { var more = document.createElementNS(NS, 'text'); more.setAttribute('x', x + 8); more.setAttribute('y', 5 + MAXN * RH + 12); more.setAttribute('class', 'grmore'); more.textContent = '+' + (list.length - MAXN); svg.appendChild(more); }
@@ -3243,6 +3421,120 @@ function graphSvg(c, nb, touched){
   svg.appendChild(node(c, cx, cy - 10, 'center'));
   return svg;
 }
+var GR_REL = {
+  dep: ['went to a file it imports', '가져오는 파일로 이동'], caller: ['went to a file that imports it', '가져가는 파일로 이동'], test: ['went to its test', '테스트로 이동'],
+  tested: ['went to the file it tests', '테스트 대상으로 이동'], reexp: ['followed a re-export', '재수출을 따라 이동'], jump: ['no link between them', '둘 사이에 연결 없음'],
+  samecall: ['same call', '같은 호출'], outside: ['outside the graph', '그래프 밖']
+};
+function graphRelLabel(rel, via){
+  if (rel === 'near') return L('close, through ', '가까움, 경유 ') + (via >= 0 ? GR.data.nodes[via].p.split('/').pop() : '');
+  var r = GR_REL[rel];
+  var s = r ? L(r[0], r[1]) : '';
+  if ((rel === 'test' || rel === 'tested') && via >= 0) s += L(' (through ', ' (경유 ') + GR.data.nodes[via].p.split('/').pop() + ')';
+  return s;
+}
+var GR_OPN = { read: ['read', '읽기'], edit: ['edit', '수정'], shell: ['shell', '셸'] };
+function graphOps(e){ return e.ops.map(function(o){ return L(GR_OPN[o][0], GR_OPN[o][1]); }).join('+') + (e.n > 1 ? ' ×' + e.n : '') + (e.failed ? ' ⚠' : ''); }
+function graphWho(who){ return Object.keys(who).sort(function(a, b){ return who[b] - who[a]; }).slice(0, 3).join('/'); }
+function graphCountText(o){
+  var parts = [];
+  if (o.last) parts.push(graphAgo(o.last));
+  if (o.reads) parts.push(L('read ', '읽기 ') + o.reads);
+  if (o.edits) parts.push(L('edit ', '수정 ') + o.edits);
+  if (o.shells) parts.push(L('shell ', '셸 ') + o.shells);
+  if (o.fails) parts.push(L('failed ', '실패 ') + o.fails);
+  var w = graphWho(o.who); if (w) parts.push(w);
+  return parts.join(' · ');
+}
+// A file in the "Recent" list: its path, what the session did to it and when.
+function graphRecentItem(i, f){
+  var n = GR.data.nodes[i], text = graphCountText(f);
+  var b = el('button', 'gitem recent touched' + (f.edits ? ' edited' : ''));
+  b.type = 'button'; b.title = n.p; b.dataset.fk = 'gr-i-' + i;
+  b.setAttribute('aria-label', n.p + ' — ' + text);
+  b.appendChild(el('span', 'gp', n.p));
+  b.appendChild(el('span', 'gt', f.edits ? L('edited', '수정함') : f.reads ? L('read', '읽음') : f.shells ? L('shell', '셸') : L('failed', '실패')));
+  b.appendChild(el('span', 'gs', text));
+  b.onclick = function(){ graphGo(i, true); };
+  return b;
+}
+// A path the session touched that is not a node of the graph (not JS/TS, deleted, or in another checkout): listed, not selectable.
+function graphOutsideItem(o){
+  var b = el('div', 'gitem recent out');
+  b.title = o.path + ' — ' + L('not a file of this graph (not JS/TS, deleted, or in another place)', '이 그래프의 파일이 아닙니다(JS/TS가 아니거나, 삭제됐거나, 다른 위치)');
+  b.appendChild(el('span', 'gp', o.path));
+  b.appendChild(el('span', 'gt', L('outside the graph', '그래프 밖')));
+  b.appendChild(el('span', 'gs', graphCountText(o)));
+  return b;
+}
+function graphFileLink(i, text, tag){
+  var b = el('button', 'glink', text); b.type = 'button'; b.dataset.fk = 'gr-u-' + tag; b.onclick = function(){ graphGo(i, true); }; return b;
+}
+function graphBase(p){ return String(p).split('/').pop(); }
+// "How the AI used this file": what was done to it, where the session came from and went on to, and what an edit left unchecked.
+function graphUsage(c, t, trail, impact){
+  var box = el('div', 'gusage');
+  box.appendChild(el('h3', null, L('How the AI used this file', 'AI가 이 파일을 쓴 방식')));
+  var f = t.files[c];
+  if (!f) { box.appendChild(el('p', 'muted', L('The session has not touched this file.', '이 세션은 이 파일을 건드리지 않았습니다.'))); return box; }
+  var line = el('div', 'grmeta');
+  line.appendChild(chip(graphCountText(f), '', null));
+  line.appendChild(chip(L('first ', '처음 ') + clock(f.first) + L(' · last ', ' · 마지막 ') + clock(f.last), '', null));
+  box.appendChild(line);
+  var visits = trail.filter(function(e){ return e.i === c; }).slice(0, 5);
+  if (visits.length) {
+    var ul = el('ul', 'gvisits');
+    visits.forEach(function(e, vi){
+      var li = el('li');
+      li.appendChild(el('span', 'gx', clock(e.at) + ' · ' + graphOps(e) + ' · ' + e.who));
+      if (e.prev && e.prev.i >= 0) { li.appendChild(el('span', 'gx', ' ← ')); li.appendChild(graphFileLink(e.prev.i, graphBase(e.prev.path), 'p' + vi)); li.appendChild(el('span', 'gx', ' (' + graphRelLabel(e.rel, e.via) + ')')); }
+      else if (e.prev) li.appendChild(el('span', 'gx', ' ← ' + graphBase(e.prev.path) + ' (' + L('outside the graph', '그래프 밖') + ')'));
+      if (e.nx && e.nx.i >= 0) { li.appendChild(el('span', 'gx', ' → ')); li.appendChild(graphFileLink(e.nx.i, graphBase(e.nx.path), 'n' + vi)); li.appendChild(el('span', 'gx', ' (' + graphRelLabel(e.nx.rel, e.nx.via) + ')')); }
+      else if (e.nx) li.appendChild(el('span', 'gx', ' → ' + graphBase(e.nx.path) + ' (' + L('outside the graph', '그래프 밖') + ')'));
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+  }
+  if (impact) {
+    var tn = impact.tests.seen.length + impact.tests.not.length, bn = impact.by.seen.length + impact.by.not.length;
+    var txt = L('After the last edit (' + clock(impact.at) + '): tests touched ', '마지막 수정(' + clock(impact.at) + ') 뒤: 테스트 짚음 ') + impact.tests.seen.length + '/' + tn +
+      L(' · importers touched ', ' · 가져가는 파일 짚음 ') + impact.by.seen.length + '/' + bn + (impact.suite ? L(' · a whole test suite ran', ' · 전체 테스트 실행됨') : '');
+    box.appendChild(el('p', 'gimpact' + (impact.tests.not.length || impact.by.not.length ? ' warn' : ''), txt));
+  }
+  return box;
+}
+// The route the session took between files, newest first: when, what, by whom, and how each step relates to the one before it by the same agent.
+function graphTrailBlock(trail){
+  var det = el('details', 'gtrail');
+  det.open = GR.trailOpen;
+  var sum = el('summary', null, L('How the AI moved between files', 'AI가 파일 사이를 움직인 경로') + ' · ' + Math.min(trail.length, 60) + (trail.length > 60 ? '/' + trail.length : ''));
+  sum.dataset.fk = 'gr-trail';
+  det.appendChild(sum);
+  det.addEventListener('toggle', function(){ if (GR.trailOpen !== det.open) { GR.trailOpen = det.open; GR.key = ''; drawGraphFocus(); } });
+  if (!GR.trailOpen) return det;
+  if (!trail.length) { det.appendChild(el('p', 'muted', L('No file touched yet.', '아직 건드린 파일이 없습니다.'))); return det; }
+  var ol = el('ol', 'gsteps');
+  trail.slice(0, 60).forEach(function(e){
+    var li = el('li');
+    var rel = e.prev ? graphRelLabel(e.rel, e.via) : L('start', '시작');
+    var head = clock(e.at) + ' · ' + graphOps(e) + ' · ' + e.who + (rel ? ' · ' + rel : '');
+    if (e.i >= 0) {
+      var b = el('button', 'gitem step'); b.type = 'button'; b.title = e.path; b.dataset.fk = 'gr-tr-' + e.i + '-' + e.at0 + '-' + e.actor;
+      b.appendChild(el('span', 'gx', head)); b.appendChild(el('span', 'gp', e.path));
+      b.onclick = function(){ graphGo(e.i, true); };
+      li.appendChild(b);
+    } else {
+      var o = el('div', 'gitem step out'); o.title = e.path;
+      o.appendChild(el('span', 'gx', head)); o.appendChild(el('span', 'gp', e.path));
+      li.appendChild(o);
+    }
+    ol.appendChild(li);
+  });
+  det.appendChild(ol);
+  return det;
+}
+// The side list shows what the session touched, newest first, until a category is picked by hand.
+function graphCat(t){ return GR.catPicked ? GR.cat : (t.order.length || t.outside.length ? 'recent' : ''); }
 function drawGraph(refocus){
   var box = $('gr-body');
   if (!GR.data) {
@@ -3251,10 +3543,11 @@ function drawGraph(refocus){
     graphNote('');
     return;
   }
-  var d = GR.data, ix = GR.ix, t = graphTouched(d, ix);
+  var d = GR.data, ix = GR.ix, t = graphT();
   // Until a file is picked by hand, the view follows the file the session touched last.
-  if (GR.auto && t.order.length && t.order[t.order.length - 1] !== GR.center) { GR.center = t.order[t.order.length - 1]; GR.centerPath = d.nodes[GR.center].p; }
-  var key = [d.sig, GR.center, GR.q, GR.cat, GR.depth, GR.back.length, t.order.length, lang].join('|');
+  if (GR.auto && t.order.length && t.order[0] !== GR.center) { GR.center = t.order[0]; GR.centerPath = d.nodes[GR.center].p; }
+  var cat = graphCat(t);
+  var key = [d.sig, GR.center, GR.q, cat, GR.depth, GR.back.length, t.sig, GR.trailOpen ? 1 : 0, Math.floor(nowFor() / 60000), lang].join('|');
   graphNote(d.nodes.length + L(' files · ', '개 파일 · ') + d.edges.length + L(' links', '개 연결') + (d.truncated.length ? ' · ' + L('cut short', '일부만') : ''));
   box.hidden = !GR.err; if (GR.err) box.textContent = GR.err;
   $('gr-main').hidden = false; $('gr-side').hidden = false;
@@ -3262,16 +3555,34 @@ function drawGraph(refocus){
   GR.key = key;
   // the side list
   var list = $('gr-list'); list.textContent = '';
-  var rows = graphMatches(d, ix, GR.q, GR.cat);
-  if (!GR.q && !GR.cat && t.order.length) rows = t.order.slice().reverse().concat(rows.filter(function(i){ return !t.by[i]; }));
-  rows.slice(0, 200).forEach(function(i){ var b = graphItem(i, '', t); if (i === GR.center) b.setAttribute('aria-current', 'true'); list.appendChild(b); });
-  if (!rows.length) list.appendChild(el('p', 'muted', L('No file matches.', '맞는 파일이 없습니다.')));
-  if (rows.length > 200) list.appendChild(el('p', 'muted', L('Showing 200 of ', '200개만 표시 / 전체 ') + rows.length));
-  ['', 'source', 'test', 'config'].forEach(function(c){ $('gr-cat-' + (c || 'all')).setAttribute('aria-pressed', GR.cat === c ? 'true' : 'false'); });
+  var needle = String(GR.q || '').trim().toLowerCase(), shown = 0, total = 0;
+  if (cat === 'recent') {
+    var rec = t.order.filter(function(i){ return !needle || d.nodes[i].p.toLowerCase().indexOf(needle) >= 0; });
+    var outs = t.outside.filter(function(o){ return !needle || o.path.toLowerCase().indexOf(needle) >= 0; });
+    total = rec.length + outs.length;
+    rec.slice(0, 200).forEach(function(i){ var b = graphRecentItem(i, t.files[i]); if (i === GR.center) b.setAttribute('aria-current', 'true'); list.appendChild(b); shown++; });
+    outs.slice(0, Math.max(0, 200 - shown)).forEach(function(o){ list.appendChild(graphOutsideItem(o)); shown++; });
+    if (!total) list.appendChild(el('p', 'muted', needle ? L('No file matches.', '맞는 파일이 없습니다.') : L('The session has not touched a file yet.', '이 세션은 아직 파일을 건드리지 않았습니다.')));
+    if (total > shown) list.appendChild(el('p', 'muted', L('Showing 200 of ', '200개만 표시 / 전체 ') + total));
+    if (t.since) list.appendChild(el('p', 'muted', L('From the calls since ', '이 시각부터의 호출 기준: ') + clock(t.since)));
+  } else {
+    var rows = graphMatches(d, ix, GR.q, cat);
+    if (!GR.q && !cat && t.order.length) rows = t.order.slice().concat(rows.filter(function(i){ return !t.by[i]; }));
+    rows.slice(0, 200).forEach(function(i){ var b = graphItem(i, '', t); if (i === GR.center) b.setAttribute('aria-current', 'true'); list.appendChild(b); });
+    if (!rows.length) list.appendChild(el('p', 'muted', L('No file matches.', '맞는 파일이 없습니다.')));
+    if (rows.length > 200) list.appendChild(el('p', 'muted', L('Showing 200 of ', '200개만 표시 / 전체 ') + rows.length));
+  }
+  ['recent', '', 'source', 'test', 'config'].forEach(function(c){ $('gr-cat-' + (c || 'all')).setAttribute('aria-pressed', cat === c ? 'true' : 'false'); });
   // the centre
   var c = GR.center, main = $('gr-center'); main.textContent = '';
   if (c < 0) { main.appendChild(el('p', 'muted', L('This project has no JS/TS files.', '이 프로젝트에는 JS/TS 파일이 없습니다.'))); return; }
   var nb = graphNeighbors(d, ix, c, GR.depth), n = d.nodes[c];
+  var trail = graphTrailOf(), impact = graphImpact(d, ix, t, c);
+  // What the drawing and the columns add to the touches: the neighbours an edit left unchecked, and the ones the session went to from this file or came from.
+  var view = Object.create(t);
+  view.unseen = Object.create(null); view.walk = Object.create(null);
+  if (impact) impact.tests.not.concat(impact.by.not).forEach(function(i){ view.unseen[i] = 1; });
+  trail.forEach(function(e){ if (!e.prev || e.rel === 'jump' || e.rel === 'samecall' || e.rel === 'outside') return; if (e.i === c && e.prev.i >= 0) view.walk[e.prev.i] = 1; else if (e.prev.i === c && e.i >= 0) view.walk[e.i] = 1; });
   var head = el('div', 'grhead');
   var title = el('h3', 'grpath', n.p); title.tabIndex = -1; title.id = 'gr-center-h'; head.appendChild(title);
   var meta = el('div', 'grmeta');
@@ -3292,19 +3603,21 @@ function drawGraph(refocus){
   [back, dep, cp, rf].forEach(function(b){ bar.appendChild(b); });
   head.appendChild(bar);
   main.appendChild(head);
-  main.appendChild(graphSvg(c, nb, t));
+  main.appendChild(graphUsage(c, t, trail, impact));
+  main.appendChild(graphSvg(c, nb, view));
   var cols = el('div', 'gcols');
-  cols.appendChild(graphColumn(L('Imports', '가져오는 파일'), nb.imports, t, true));
-  cols.appendChild(graphColumn(L('Imported by', '가져가는 파일'), nb.by, t, false));
-  cols.appendChild(graphColumn(L('Tests', '테스트'), nb.tests, t, true));
+  cols.appendChild(graphColumn(L('Imports', '가져오는 파일'), nb.imports, view, true));
+  cols.appendChild(graphColumn(L('Imported by', '가져가는 파일'), nb.by, view, false));
+  cols.appendChild(graphColumn(L('Tests', '테스트'), nb.tests, view, true));
   main.appendChild(cols);
+  main.appendChild(graphTrailBlock(trail));
   if (refocus) { var h = $('gr-center-h'); if (h) h.focus({ preventScroll: true }); }
 }
 // Every redraw that is not the one in the queue keeps the focus where the keyboard was.
 function drawGraphFocus(refocus){ withFocus(function(){ drawGraph(refocus); }); }
 function graphInit(){
   $('gr-q').oninput = function(){ GR.q = this.value; GR.key = ''; drawGraphFocus(); };
-  [['all', ''], ['source', 'source'], ['test', 'test'], ['config', 'config']].forEach(function(p){ $('gr-cat-' + p[0]).onclick = function(){ GR.cat = p[1]; GR.key = ''; drawGraphFocus(); }; });
+  [['recent', 'recent'], ['all', ''], ['source', 'source'], ['test', 'test'], ['config', 'config']].forEach(function(p){ $('gr-cat-' + p[0]).onclick = function(){ GR.cat = p[1]; GR.catPicked = true; GR.key = ''; drawGraphFocus(); }; });
   // While the tab is open the graph is asked for again now and then (the server builds only what changed).
   setInterval(function(){ if (tab === 'graph' && !document.hidden) loadGraph(false); }, 8000);
 }

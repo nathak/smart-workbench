@@ -329,7 +329,7 @@ test('whatever publishing writes is accepted by the reader: long texts are cut t
   const real = [
     ev(1, 1, 'session.start', 0, { user: 'u'.repeat(300), branch: 'b'.repeat(400) }),
     ev(2, 2, 'commit', 1, { sha: 'abcdef1', subject: 's'.repeat(900), files: Array.from({ length: 600 }, (_, i) => `f${i}.ts`), via: 'tool' }),
-    ev(3, 3, 'tool.start', 1, { id: 'c1', tool: 'mcp__' + 't'.repeat(60), summary: 'x'.repeat(500), scope: 'edits of ' + 'p'.repeat(400), policy: 'allow' }),
+    ev(3, 3, 'tool.start', 1, { id: 'c1', tool: 'mcp__' + 't'.repeat(60), summary: 'x'.repeat(500), path: '/w/' + 'p'.repeat(600), scope: 'edits of ' + 'p'.repeat(400), policy: 'allow' }),
     ev(4, 4, 'guard.session-revoke', 1, { tool: 'Bash', input: 'i'.repeat(600), reason: 'r'.repeat(600), scope: 'git push && ' + 'g'.repeat(300) }),
     ev(5, 5, 'contract', 1, { goal: 'g'.repeat(5000), done: 'd'.repeat(9000) }),
     ev(6, 6, 'prompt', 1, { text: `${'word '.repeat(4000)}me@example.com`, origin: 'user' }),
@@ -337,6 +337,7 @@ test('whatever publishing writes is accepted by the reader: long texts are cut t
   const sent = publishEvents(real, 's1').events
   expect(sent.length).toBe(real.length)
   expect(sent.every(one => isSharedEvent(one))).toBe(true)
+  expect(sent.some(one => 'path' in one)).toBe(false)
   expect(maskPersonal(sent).every(one => isSharedEvent(one))).toBe(true)
 })
 

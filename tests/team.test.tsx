@@ -1065,6 +1065,34 @@ test('the live feed carries the masked input and output of an ordinary tool call
   expect(secret?.toolIn).toBeUndefined()
 })
 
+test('the live feed carries the whole path of a file call (its summary is cut at 120 characters), none for a shell call, and none with --no-prompts', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
+  await $.session.start(start)
+  const deep = `${CWD}/${'deep/'.repeat(30)}file.ts`
+  await $.tool.call({ tool: 'Read', file_path: deep })
+  await $.tool.call({ tool: 'Bash', command: 'cat src/a.ts' })
+  const huge = `${CWD}/${'d/'.repeat(300)}x.ts`
+  await $.tool.call({ tool: 'Read', file_path: huge })
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/a.ts`, old_string: 'a', new_string: 'b' }).catch(() => undefined)
+
+  const starts = feedLines(writes).filter(one => one.kind === 'tool.start')
+  const read = starts.find(one => one.tool === 'Read' && String(one.path).endsWith('file.ts'))
+  expect(read?.path).toBe(deep)
+  expect(String(read?.summary).length).toBe(120)
+  expect(starts.find(one => one.tool === 'Bash')?.path).toBeUndefined()
+  const long = starts.find(one => one.tool === 'Read' && one !== read)
+  expect(String(long?.path).length).toBeLessThanOrEqual(400)
+  expect(String(long?.path).endsWith('…')).toBe(true)
+  expect(starts.find(one => one.tool === 'Edit')?.path).toBe(`${CWD}/src/a.ts`)
+
+  await $.command.run({ command: 'swb', args: 'live 4400 --no-prompts', ...COMMAND })
+  await $.tool.call({ tool: 'Read', file_path: `${CWD}/src/b.ts` })
+  const quiet = feedLines(writes).filter(one => one.kind === 'tool.start' && one.tool === 'Read').pop()
+  expect(String(quiet?.summary)).toContain('src/b.ts')
+  expect(quiet?.path).toBeUndefined()
+})
+
 const LEDGER_DIR = `${CWD}/.git/swb-ledger`
 const ledgerRuns = (extra: Record<string, { exitCode: number; stdout: string }> = {}) => ({
   'git rev-parse --git-common-dir': { exitCode: 0, stdout: '.git\n' },

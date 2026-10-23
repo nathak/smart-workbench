@@ -287,6 +287,16 @@ function promptOf(live: Live, text: string, key: 'prompt' | 'output' | 'toolIn' 
   }
 }
 
+// The whole path a file call names, for the live page: the summary is cut at 120 characters, which loses the file name of a deep path. Left out when prompts are off.
+// The feed masks every text it carries, and the ledger keeps a text to 400 characters, so the path is cut there (the page ignores a path that ends in the cut).
+function pathField(live: Live, tool: string, input: unknown): Record<string, unknown> {
+  if (live.livePrompts === false) return {}
+  const args = (input ?? {}) as Record<string, unknown>
+  const raw = tool === 'NotebookEdit' ? args.notebook_path : /^(?:Read|Edit|Write|MultiEdit)$/.test(tool) ? args.file_path : undefined
+
+  return typeof raw === 'string' && raw !== '' ? { path: model.cut(raw, 400) } : {}
+}
+
 // The input and the result of an ordinary tool call, as text for the call's input and output tabs. Agent, Workflow and Codex calls carry their own fields.
 // A call that touches a secrets file shows neither, and every text goes through the same masking and length limits as a prompt.
 const NO_IO = new Set(['secret-output', 'secret-file', 'guard-policy', 'desktop-channel'])
@@ -3590,6 +3600,7 @@ export const register: Register = on => {
       ...(e.tool === 'Agent' && typeof (e as unknown as Record<string, unknown>).prompt === 'string' ? promptOf(live, (e as unknown as Record<string, string>).prompt as string) : {}),
       ...(codexRun && e.tool === 'Bash' ? promptOf(live, e.command) : {}),
       ...(e.tool === 'Workflow' ? workflowFields(live, e) : {}),
+      ...pathField(live, e.tool, e),
       ...(e.tool !== 'Agent' && e.tool !== 'Workflow' && !codexRun && !NO_IO.has(verdict.category) ? promptOf(live, inputText(e), 'toolIn') : {}),
     })
 

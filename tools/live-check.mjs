@@ -933,7 +933,7 @@ const G = await import('./live-graph.mjs')
 // ---- the page's side of the graph: the answer is re-shaped, and the neighbours of a file come out as drawn
 {
   const graphCode = page.slice(page.indexOf('// graph:begin'), page.indexOf('// graph:end'))
-  const P = new Function(`${modelCode}\n${graphCode}\nreturn { graphData, graphIndex, graphNeighbors, graphMatches }`)()
+  const P = new Function(`${modelCode}\n${graphCode}\nreturn { graphData, graphIndex, graphNeighbors, graphMatches, graphTokens, graphResolve, graphTouches, graphRelation, graphTrail, graphImpact }`)()
   check(P.graphData({ v: 2, nodes: [], edges: [] }) === null && P.graphData(null) === null && P.graphData({ v: 1, nodes: 'x', edges: [] }) === null, 'a graph that is not version 1 or not well formed is refused')
   const raw = { v: 1, builtAt: 5, truncated: { time: true, evil: true }, nodes: [{ p: 'a.ts', c: 'source', l: 'ts', s: 10 }, { p: 'b.ts', c: 'weird', l: 'x', s: 'NaN' }, { p: 'a.test.ts', c: 'test', l: 'ts', s: 1 }, { p: 'c.ts', c: 'source', l: 'ts', s: 1 }, null], edges: [[0, 1, 'i'], [2, 0, 't'], [2, 1, 'i'], [1, 3, 'r'], [0, 99, 'i'], [-1, 0, 'i'], [0, 1, 'x'], 'no', [1.5, 0, 'i']] }
   const d = P.graphData(raw)
@@ -950,6 +950,124 @@ const G = await import('./live-graph.mjs')
   check(nbBarrel.tests.length === 1 && nbBarrel.tests[0].i === 2 && nbBarrel.tests[0].via === 1 && nbBarrel.tests[0].step === 2, 'a test that imports a barrel re-exporting the file is a test of it, through the barrel')
   check(P.graphMatches(d, ix, 'B.T', '').join() === '1' && P.graphMatches(d, ix, '', 'test').join() === '2' && P.graphMatches(d, ix, 'zzz', '').length === 0, 'the search is by path part without case, and the category narrows it')
   check(page.includes('id="p-graph"') && /\bTABS = \[[^\]]*'graph'\]/.test(page) && page.includes("'flow', 'graph'") && !page.slice(page.indexOf('// ---- graph tab'), page.indexOf('// ---- tabs: roving')).includes('innerHTML'), 'the graph tab is in the tab list and the key list, and its code draws no markup from text')
+  // ---- what the session touched, and how it moved between files
+  const mkG = (paths, edges) => { const g = P.graphData({ v: 1, nodes: paths.map(p => ({ p, c: /test/.test(p) ? 'test' : 'source', l: 'ts', s: 1 })), edges }); return [g, P.graphIndex(g)] }
+  const sp = (id, tool, summary, at, extra = {}) => ({ id, tool, summary, at, end: at + 1, outcome: 'ok', agent: null, parent: null, turn: 1, ...extra })
+  {
+    const [g, gx] = mkG(['src/a.ts', 'src/b.ts', 'src/c.ts'], [])
+    const T = P.graphTouches(g, gx, [sp('1', 'Read', '/p/src/a.ts', 1), sp('2', 'Edit', '/p/src/b.ts', 2), sp('3', 'Bash', 'cat src/c.ts', 3)])
+    check(T.order.join() === '2,1,0' && T.files[0].reads === 1 && T.files[1].edits === 1 && T.files[2].shells === 1 && T.by[1].edit === true && T.by[0].edit === false, 'a Read, an Edit and a Bash command naming a node each count as a touch of that file, newest first')
+    const none = P.graphTouches(g, gx, [sp('1', 'Grep', 'src/a.ts', 1), sp('2', 'Glob', '/p/src/b.ts', 2), sp('3', 'Agent', '/p/src/c.ts', 3)])
+    check(none.order.length === 0 && none.steps.length === 0, 'a Grep or Glob call is not a touch of any file')
+    const bad = P.graphTouches(g, gx, [sp('1', 'Edit', '/p/src/a.ts', 1, { outcome: 'error' }), sp('2', 'Edit', '/p/src/b.ts', 2, { end: null, outcome: null }), sp('3', 'Edit', '/p/src/c.ts', 3, { outcome: 'blocked' })])
+    check(bad.files[0].fails === 1 && bad.files[0].edits === 0 && bad.files[0].lastEdit === 0 && bad.files[2].fails === 1 && bad.files[1].edits === 1 && bad.files[1].lastEdit === 0 && P.graphImpact(g, gx, bad, 1) === null, 'a failed or blocked edit counts as a failure, not an edit, and a running call has no outcome yet')
+    const cutLong = 'echo ' + 'z '.repeat(54) + 'src/a.ts'
+    const whole = 'echo ' + 'z '.repeat(40) + 'src/a.ts'
+    check(cutLong.length >= 120 && whole.length < 120 && P.graphTouches(g, gx, [sp('1', 'Bash', cutLong, 1)]).order.length === 0 && P.graphTouches(g, gx, [sp('1', 'Bash', whole, 1)]).order.join() === '0', 'the last word of a summary cut at 120 characters is not matched to a file')
+    const warm = new Map()
+    const first = P.graphTouches(g, gx, [sp('1', 'Read', '/p/src/a.ts', 1)], warm)
+    const again = P.graphTouches(g, gx, [sp('1', 'Read', '/p/src/b.ts', 1)], warm)
+    check(first.order.join() === '0' && again.order.join() === '1', 'a call whose words changed under the same id is resolved again, not read from the cache')
+  }
+  {
+    const [g, gx] = mkG(['index.ts', 'src/index.ts', 'lib/index.ts'], [])
+    const T = P.graphTouches(g, gx, [sp('1', 'Read', '/p/src/index.ts', 1), sp('2', 'Read', '/p/index.ts', 2), sp('3', 'Bash', 'cat lib/index.ts', 3), sp('4', 'Bash', 'cat index.ts', 4)])
+    check(T.files[1].reads === 1 && T.files[0].reads === 1 && T.files[0].shells === 1 && T.files[2].shells === 1 && T.files[2].reads === 0, 'the longest path ending wins: src/index.ts and lib/index.ts are told apart, and a bare index.ts is only the root one')
+  }
+  {
+    const [g, gx] = mkG(['src/a.ts', 'src/b.ts'], [])
+    const T = P.graphTouches(g, gx, [sp('1', 'Read', '/p/src/a.ts', 1), sp('2', 'Read', '/p/src/a.ts', 2), sp('3', 'Read', '/p/src/b.ts', 3), sp('4', 'Read', '/q/src/a.ts', 4), sp('5', 'Read', '/p/README.md', 5), sp('6', 'Bash', 'cat README.md src/zzz.ts src/a.ts', 6)])
+    check(T.root === '/p/' && T.files[0].reads === 2 && T.files[0].shells === 1 && T.steps.every(s => s.path !== '/q/src/a.ts') && T.outside.some(o => o.path === '/q/src/a.ts' && o.reads === 1), 'an absolute path under another root is marked far and left out of the counts')
+    check(T.outside.map(o => o.path).sort().join() === '/q/src/a.ts,README.md' && T.outside.find(o => o.path === 'README.md').reads === 1, 'a file read that is not in the graph is listed outside the graph, a Bash word that is not a node is not')
+    const twice = P.graphTouches(g, gx, [sp('1', 'Bash', 'diff src/a.ts src/b.ts src/a.ts', 1)])
+    const tr = P.graphTrail(g, gx, twice.steps, 300)
+    check(twice.steps.length === 2 && twice.files[0].shells === 1 && tr.length === 2 && tr[0].i === 1 && tr[0].rel === 'samecall', 'a span naming the same file twice is one touch; two files in one call are related as the same call')
+  }
+  {
+    // 0 a, 1 b, 2 a.test, 3 barrel, 4 c, 5 d, 6 lone
+    const [g, gx] = mkG(['src/a.ts', 'src/b.ts', 'src/a.test.ts', 'src/index.ts', 'src/c.ts', 'src/d.ts', 'src/lone.ts'], [[2, 0, 'i'], [0, 1, 'i'], [3, 0, 'r'], [3, 0, 'i'], [4, 5, 'i'], [4, 1, 'i']])
+    const rel = (a, b) => { const r = P.graphRelation(g, gx, a, b); return r.rel + (r.via >= 0 ? ':' + r.via : '') }
+    check(rel(0, 2) === 'test' && rel(2, 0) === 'tested', 'a step to the file that names or imports it is a test, before an import')
+    check(rel(3, 0) === 'reexp' && rel(0, 3) === 'reexp', 'a re-export is told before an import')
+    check(rel(0, 1) === 'dep' && rel(1, 0) === 'caller' && rel(5, 1) === 'near:4' && rel(6, 0) === 'jump' && rel(-1, 0) === 'outside' && rel(0, -1) === 'outside', 'the relation to the step before is import, then caller, near through a shared file, else a jump')
+    const spokes = n => ({ paths: ['hub.ts', ...Array.from({ length: n }, (_, k) => `x${k}.ts`)], edges: Array.from({ length: n }, (_, k) => [k + 1, 0, 'i']) })
+    const big = spokes(250), small = spokes(5)
+    const [bg, bx] = mkG(big.paths, big.edges)
+    const [sg, sx] = mkG(small.paths, small.edges)
+    check(P.graphRelation(bg, bx, 1, 2).rel === 'jump' && P.graphRelation(sg, sx, 1, 2).rel === 'near', 'a hub with very many links does not make every pair near')
+  }
+  {
+    // lead reads a, a subagent reads c in between, the lead goes on to b: a imports b
+    const [g, gx] = mkG(['src/a.ts', 'src/b.ts', 'src/c.ts'], [[0, 1, 'i']])
+    const spans = [sp('1', 'Read', '/p/src/a.ts', 1), sp('P', 'Agent', 'look', 2, { subagent: 'smartworkbench:explorer' }), sp('2', 'Read', '/p/src/c.ts', 3, { agent: 'ag1', parent: 'P' }), sp('3', 'Read', '/p/src/b.ts', 4)]
+    const T = P.graphTouches(g, gx, spans)
+    const tr = P.graphTrail(g, gx, T.steps, 300)
+    const b = tr.find(e => e.i === 1), c = tr.find(e => e.i === 2)
+    check(b.rel === 'dep' && b.from === 0 && c.who === 'explorer' && c.prev === null && T.files[2].who.explorer === 1, 'steps are related within one agent: a subagent\'s calls between two lead calls do not break the lead\'s chain')
+    const [g2, gx2] = mkG(['src/a.ts'], [])
+    const T2 = P.graphTouches(g2, gx2, [sp('1', 'Read', '/p/src/a.ts', 1), sp('2', 'Read', '/p/src/a.ts', 2), sp('3', 'Edit', '/p/src/a.ts', 3)])
+    const tr2 = P.graphTrail(g2, gx2, T2.steps, 300)
+    check(tr2.length === 1 && tr2[0].n === 3 && tr2[0].ops.join() === 'read,edit', 'repeated touches of one file by one agent fold into one step with a count')
+  }
+  {
+    // 0 a, 1 a.test, 2 a2.test, 3 user, 4 user2
+    const [g, gx] = mkG(['src/a.ts', 'src/a.test.ts', 'src/a2.test.ts', 'src/user.ts', 'src/user2.ts'], [[1, 0, 'i'], [2, 0, 'i'], [3, 0, 'i'], [4, 0, 'i']])
+    const T = P.graphTouches(g, gx, [sp('1', 'Read', '/p/src/a2.test.ts', 1), sp('2', 'Read', '/p/src/user2.ts', 2), sp('3', 'Bash', 'bun test', 3), sp('4', 'Edit', '/p/src/a.ts', 10), sp('5', 'Bash', 'bun test src/a.test.ts', 11), sp('6', 'Read', '/p/src/user.ts', 12)])
+    const im = P.graphImpact(g, gx, T, 0)
+    check(im && im.at === 10 && im.tests.seen.join() === '1' && im.tests.not.join() === '2' && im.by.seen.join() === '3' && im.by.not.join() === '4', 'after an edit, the tests run and the importers read afterwards are counted, earlier ones are not')
+    check(im.suite === false, 'a test run before the edit is not a whole-suite run after it')
+    const T2 = P.graphTouches(g, gx, [sp('4', 'Edit', '/p/src/a.ts', 10), sp('5', 'Bash', 'bun test', 11)])
+    check(P.graphImpact(g, gx, T2, 0).suite === true && T2.order.join() === '0', 'a test run naming no file after an edit is reported as a whole-suite run')
+  }
+  {
+    const [g, gx] = mkG(['src/a.ts', 'src/b.ts'], [[0, 1, 'i']])
+    const hostile = [null, 5, 'x', {}, { tool: 'Read' }, { tool: 'Read', summary: 12345, at: 'x' }, { tool: 'Bash', summary: { a: 1 }, at: NaN }, { tool: 'Read', summary: '/p/src/a.ts', at: 1, agent: 7, parent: {}, id: null }]
+    for (let k = 0; k < 4000; k++) hostile.push(sp('h' + k, 'Read', `/p/d${k}/x.md`, k + 10))
+    let T, error = ''
+    try { T = P.graphTouches(g, gx, hostile); P.graphTrail(g, gx, T.steps, 300); P.graphImpact(g, gx, T, 0) } catch (e) { error = String(e) }
+    check(!error && T.outside.length === 200 && T.order.length === 1 && T.steps.length <= 4010 && P.graphTouches(g, gx, new Map([['a', sp('a', 'Read', '/p/src/a.ts', 1)]])).order.join() === '0', 'hostile spans (no summary, numbers, 4000 long paths) give bounded lists and no error')
+    const many = []
+    for (let k = 0; k < 500; k++) many.push(sp('m' + k, 'Read', k % 2 ? '/p/src/a.ts' : '/p/src/b.ts', k + 1))
+    const T2 = P.graphTouches(g, gx, many)
+    const tr = P.graphTrail(g, gx, T2.steps, 300)
+    check(tr.length === 300 && tr[0].at === 500 && tr[299].at === 201, 'the trail is capped and keeps the newest steps')
+  }
+  {
+    const [g, gx] = mkG(['src/deep/a.ts', 'src/deep/a.tsx'], [])
+    const root = '/home/u/' + 'very/'.repeat(25)
+    const full = root + 'src/deep/a.tsx'
+    const cutSummary = full.slice(0, 120)
+    const withPath = P.graphTouches(g, gx, [sp('1', 'Read', cutSummary, 1, { path: full })])
+    check(cutSummary.length === 120 && withPath.order.join() === '1' && withPath.root === root, 'a span keeps the whole file path of the feed and touches use it over a cut summary')
+    const cutAtLimit = P.graphTouches(g, gx, [sp('1', 'Read', cutSummary, 1, { path: root + 'src/deep/a.ts…' }), sp('2', 'Read', cutSummary, 2, { path: 'x'.repeat(400) })])
+    check(cutAtLimit.order.length === 0, 'a path cut at the ledger limit is not matched')
+    const older = P.graphTouches(g, gx, [sp('1', 'Read', '/p/src/deep/a.ts', 1)])
+    check(older.order.join() === '0', 'an old feed without path still matches through the summary')
+  }
+  {
+    const [g, gx] = mkG(['src/a.ts', 'src/a.test.ts', 'src/user.ts'], [[1, 0, 'i'], [2, 0, 'i']])
+    const running = P.graphTouches(g, gx, [sp('1', 'Edit', '/p/src/a.ts', 10), sp('2', 'Read', '/p/src/a.test.ts', 11, { end: null, outcome: null }), sp('3', 'Read', '/p/src/user.ts', 12, { outcome: 'error' }), sp('4', 'Bash', 'npm test', 13, { end: null, outcome: null })])
+    const im = P.graphImpact(g, gx, running, 0)
+    check(im.tests.seen.length === 0 && im.tests.not.join() === '1' && im.by.not.join() === '2' && im.suite === false, 'a call still running, or one that failed, does not count as looked at or run after an edit')
+    const suiteOf = text => P.graphTouches(g, gx, [sp('1', 'Bash', text, 1)]).suite.length === 1
+    check(['npm test', 'bun test --run', 'cd x && npx vitest', 'claude plugin test . > out.txt 2>&1', 'pytest -q', 'cargo test', 'go test ./...', 'timeout 110 claude plugin test . 2>&1 | tail -3', 'CI=1 npm run test'].every(suiteOf), 'a test runner started without a file or folder is a whole-suite run')
+    check(['echo test', 'git diff -- tests/', 'bun test tests/', 'bun test foo.py', 'cat testing.md', 'ls | grep test', 'git commit -m "fix vitest config"', 'echo jest', 'cd x && cat pytest.ini'].every(text => !suiteOf(text)), 'a word test, a targeted run or a command that only mentions tests is not a whole-suite run')
+    const [g2, gx2] = mkG(['src/a.ts', 'src/b.ts'], [])
+    const T = P.graphTouches(g2, gx2, [sp('1', 'Read', '/p/src/a.ts', 1), sp('2', 'Read', '/p/src/b.ts', 2, { agent: 'ag1' }), sp('3', 'Read', '/p/src/a.ts', 3)])
+    const tr = P.graphTrail(g2, gx2, T.steps, 300)
+    check(tr.map(e => e.path).join() === 'src/a.ts,src/b.ts' && tr[0].at === 3 && tr[0].n === 2, 'a folded step is placed by the time of its last touch, newest first')
+  }
+  {
+    const [g, gx] = mkG(['src/a.ts'], [])
+    const base = [sp('1', 'Read', '/p/src/a.ts', 5), sp('2', 'Read', '/p/src/a.ts', 6, { outcome: 'error' })]
+    const one = P.graphTouches(g, gx, [...base, sp('3', 'Read', '/q/src/a.ts', 7)])
+    const two = P.graphTouches(g, gx, [...base, sp('3', 'Read', '/q/src/a.ts', 7), sp('4', 'Read', '/q/src/a.ts', 8)])
+    check(one.sig !== two.sig && P.graphTouches(g, gx, base.slice(1)).sig !== P.graphTouches(g, gx, base).sig, 'the signature changes when a file in another place is touched again or the oldest call is gone')
+    const tr = P.graphTrail(g, gx, P.graphTouches(g, gx, [...base, sp('5', 'Read', '/p/src/a.ts', 9)]).steps, 300)
+    check(tr.length === 1 && tr[0].failed === true && tr[0].n === 3 && tr[0].at0 === 5 && tr[0].at === 9, 'a folded step remembers a failure among its touches and keeps its first time')
+  }
+  check(/summary[^\n]*\.dataset\.fk = 'gr-trail'|sum\.dataset\.fk = 'gr-trail'/.test(page) && /addEventListener\('toggle'[^\n]*drawGraphFocus/.test(page) && page.includes("'gr-c-'"), 'the trail summary keeps the keyboard focus across a redraw, opening it draws its list at once, and the columns have their own focus keys')
+  check(page.includes('id="gr-cat-recent"') && page.includes("'gr-recent'") && page.includes('graphTrailBlock'), 'the graph tab has a Recent chip and a trail')
 }
 
 // A tsconfig that extends one relative config, a jsconfig alone, and a test that reaches a file through a barrel.
