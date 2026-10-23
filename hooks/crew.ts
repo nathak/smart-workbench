@@ -266,3 +266,11 @@ export function planWasApproved(track: Track): boolean {
 
 export const DESIGN_FIRST =
   `SmartWorkbench team mode: this edit is not small (${BIG_EDIT}), and no design from ${ADVISOR} exists for this work. Ask it for a DESIGN: send the goal, constraints and the paths you know. Then implement that design step by step. If the code does not match it, stop and go back to the advisor with what differed. (Asked once per turn.)`
+
+// The advisor ran, but before this turn's design start: say so, so a person who saw a design is not told none exists.
+export function designFromEarlierTurn(track: Track): boolean {
+  return track.lastAdvisorAt !== undefined && track.lastAdvisorAt < (track.designFrom ?? track.turnStartedAt ?? 0)
+}
+
+export const DESIGN_STALE =
+  `SmartWorkbench team mode: this edit is not small (${BIG_EDIT}), and no design from ${ADVISOR} exists for this turn: it last ran in an earlier turn, and that run does not count here. If the work changed, ask it for a new DESIGN (goal, constraints, the paths you know) and implement that. If this edit carries out that earlier design unchanged, send the same edit again; it goes through. (Asked once per turn.)`

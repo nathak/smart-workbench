@@ -90,6 +90,19 @@ describe('design first', () => {
     expect(crew.planWasApproved({ ...turn, planApprovedAt: 50 })).toBe(false)
   })
 
+  test('the refusal says so when the advisor ran only before this turn', async () => {
+    expect(crew.designFromEarlierTurn(turn)).toBe(false)
+    expect(crew.designFromEarlierTurn({ ...turn, lastAdvisorAt: 90 })).toBe(true)
+    expect(crew.designFromEarlierTurn({ ...turn, lastAdvisorAt: 100 })).toBe(false)
+    expect(crew.designFromEarlierTurn({ ...turn, lastAdvisorAt: 120 })).toBe(false)
+    expect(crew.designFromEarlierTurn({ ...turn, designFrom: 50, lastAdvisorAt: 60 })).toBe(false)
+    expect(crew.designFromEarlierTurn({ ...turn, designFrom: 50, lastAdvisorAt: 40 })).toBe(true)
+    expect(crew.DESIGN_STALE).toContain('no design from')
+    expect(crew.DESIGN_STALE).toContain('earlier turn')
+    expect(crew.DESIGN_STALE).toContain('Asked once per turn')
+    expect(crew.DESIGN_STALE).toContain(`${crew.SMALL_TURN_LINES} lines in this turn`)
+  })
+
   test('fixed prompt text has no dynamic values', async () => {
     expect(crew.TEAM_CONTEXT).toContain('designs; you implement')
     expect(crew.DESIGN_FIRST).toContain('Asked once per turn')

@@ -4,7 +4,10 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-23
+
 ### Changed
+- Team mode: when the advisor ran only in an earlier turn, the design-gate refusal says so (that run does not count for this turn; ask for a new design, or send the same edit again if it carries out the earlier design unchanged) instead of saying no design exists.
 - The live page's Files tab shows what the session touched and how it moved between files. The side list opens on **Recent**: the files the session read, edited or named in a shell command, newest first, each with when, the counts, who (the lead or a subagent) and how many calls failed; paths that are not part of the graph (a README, a file in another checkout) are listed but cannot be opened. For the open file the page shows how the AI used it (each visit with the file it came from and went on to, and how the two relate: an import, a caller, a test, a re-export, a shared neighbour, or no link), what an edit left unchecked (its tests and importers not read or run since, and whether a whole test suite ran; the unchecked ones are marked in the lists and the drawing, the links the session walked are drawn heavier) and the route between files as a list, newest first, each agent's steps related to its own previous step. It is read from the calls themselves (Read, Edit, Write and MultiEdit paths, shell commands that name a file; Grep and Glob name no file), and the same file again by the same agent is one step with a count.
 - The live feed carries the whole path of a Read, Edit, Write, MultiEdit or NotebookEdit call as `path` (masked, at most 400 characters, left out with `--no-prompts`), because the call's summary is cut at 120 characters and a deep project path lost its file name there; an older feed, or a path that was itself cut, is matched through the summary as before. Publishing a session leaves `path` out.
 

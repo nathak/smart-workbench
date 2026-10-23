@@ -648,6 +648,7 @@ test('a big edit is sent back once for a design; a design, a small edit or anoth
 
   const held = await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: BIG })
   expect(JSON.stringify(held)).toContain('no design from')
+  expect(JSON.stringify(held)).not.toContain('earlier turn')
   const retry = await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: BIG })
   expect(JSON.stringify(retry)).not.toContain('no design from')
 
@@ -659,6 +660,22 @@ test('a big edit is sent back once for a design; a design, a small edit or anoth
   await $.command.run({ command: 'swb', args: 'team off', ...COMMAND })
   await $.prompt.submit({ text: 'again', ...COMPOSER })
   expect(JSON.stringify(await $.tool.call({ tool: 'Write', file_path: `${CWD}/src/off.js`, content: BIG }))).not.toContain('no design from')
+})
+
+test('a refusal after an advisor run in an earlier turn says that run does not count; the same edit sent again passes', async ($, on) => {
+  const { clock } = world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'design it', ...COMPOSER })
+  await $.tool.call(advisorCall)
+  await clock.set(Date.UTC(2026, 9, 8, 1, 1, 0))
+  await $.prompt.submit({ text: 'build it', ...COMPOSER })
+
+  const held = await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: BIG })
+  expect(JSON.stringify(held)).toContain('no design from')
+  expect(JSON.stringify(held)).toContain('earlier turn')
+  const retry = await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: BIG })
+  expect(JSON.stringify(retry)).not.toContain('no design from')
 })
 
 test('plan review and design are each asked once per turn; notebook edits and subagent edits are judged right', async ($, on) => {

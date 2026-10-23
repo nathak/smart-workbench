@@ -3529,7 +3529,7 @@ export const register: Register = on => {
         await updateTrack($, current => ({ ...current, designDeniedAt: hookStart }))
         await audit($, 'team.design-required', { tool: e.tool })
 
-        return { deny: crew.DESIGN_FIRST }
+        return { deny: crew.designFromEarlierTurn(track) ? crew.DESIGN_STALE : crew.DESIGN_FIRST }
       }
     }
     const wb = await read($, wbAtom)
