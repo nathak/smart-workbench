@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-28
+
 ### Added
 - Done conditions are offered, not left to be typed. The checks at the project root (package.json scripts, pytest/mypy/ruff config, Cargo.toml, go.mod, gradlew, pom.xml, Makefile targets, a Claude Code plugin's own test and validate commands) are read at session start and by `/swb new`; the Intent tab lists them under **SUGGESTED** as conditions already linked to that kind of check (`Tests pass: npm test`), with `Add`, `Hide` and `Add all`. The goal's wording adds a review condition and a count condition (`100 times`, `100번`) with no link, to be marked with Verify. `/swb suggest` prints the list and `/swb suggest add` adds it; nothing is offered once the contract is locked or for what it already says, and `/swb new` only says how many are on offer.
 - Claude sets the done conditions for the task itself. While the contract is open and empty, the first three prompts you type carry a short reminder; for a request that changes files Claude calls the new `set_done_conditions` tool with a goal (used only if there is none) and 1 to 4 conditions. The call is checked against the project at that moment: a link to a check kind the project lacks refuses the whole call and names the checks found, so no condition says "tests pass" with nothing to prove it; conditions no command proves carry no link and are marked with Verify. Only on an unlocked contract with no condition, never from a subagent, and the contract is not locked. `Undo` in the Intent tab or `/swb suggest undo` takes back the conditions (and the goal) it wrote.
