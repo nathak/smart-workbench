@@ -1,6 +1,6 @@
 # SmartWorkbench for Claude Code
 
-[English](#english) · [한국어](#한국어)
+[English](#english) · [한국어](#한국어) · [Latest release](https://github.com/nathak/smart-workbench/releases/latest)
 
 ---
 
@@ -25,7 +25,7 @@ At the Claude Code prompt:
 /plugin install smartworkbench --marketplace nathak/smart-workbench
 ```
 
-Answer `y` to add the marketplace and choose the user scope.
+Answer `y` to add the marketplace and choose the user scope. Release notes and the desktop app builds: **[latest release](https://github.com/nathak/smart-workbench/releases/latest)**.
 
 Update an installed copy:
 
@@ -231,6 +231,8 @@ Choices are kept per project. The tab also shows the session's current model set
 A checked-in guard file can only raise the level (the stricter of the two applies) and can never set `off`; a template or a shared task cannot either. Every change is written to the audit log (`guard.profile`). Calls are still recorded in the live view with their risk, so you can see what went through.
 
 ### Desktop app (tray)
+
+Prebuilt Windows and Linux packages (unsigned) are attached to the **[latest release](https://github.com/nathak/smart-workbench/releases/latest)**; the commands below build it yourself.
 
 `desktop/` holds an Electron tray app (not part of the plugin; the plugin needs nothing from it). It keeps the live-view hub running with no session, shows it in a window of its own, and raises desktop notifications for a guard question that waits, a session that went quiet and a session that ended (project folder and tool name only, never a command). Closing the window hides it; quit from the tray menu. The menu switches: new sessions join automatically, full prompts in the monitor, each notice kind, start at login. The text follows the system language (Korean or English; `SWB_DESKTOP_LANG=ko|en` overrides).
 
@@ -517,7 +519,7 @@ Claude Code 입력창에서:
 /plugin install smartworkbench --marketplace nathak/smart-workbench
 ```
 
-마켓플레이스 추가를 물으면 `y`, 설치 범위는 user를 고릅니다.
+마켓플레이스 추가를 물으면 `y`, 설치 범위는 user를 고릅니다. 릴리스 노트와 데스크톱 앱 빌드는 **[최신 릴리스](https://github.com/nathak/smart-workbench/releases/latest)** 에서 받습니다.
 
 설치한 플러그인 업데이트:
 
@@ -723,6 +725,8 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 저장소의 Guard 파일은 단계를 높이기만 할 수 있고(둘 중 엄격한 쪽 적용) `off`로는 못 바꿉니다. 템플릿과 공유된 작업도 마찬가지입니다. 바꿀 때마다 감사 로그에 `guard.profile`이 남고, 실시간 화면에는 통과한 호출도 위험도와 함께 기록됩니다.
 
 ### 데스크톱 앱 (트레이)
+
+서명하지 않은 Windows·Linux 빌드는 **[최신 릴리스](https://github.com/nathak/smart-workbench/releases/latest)** 에 올라가 있습니다. 직접 빌드하려면 아래 명령을 쓰세요.
 
 `desktop/`에 Electron 트레이 앱이 있습니다(플러그인의 일부가 아니며 플러그인은 이 앱 없이 동작합니다). 세션이 없어도 실시간 보기 허브를 계속 띄워 두고, 별도 창으로 보여 주며, 확인 대기·조용해진 세션·종료된 세션을 데스크톱 알림으로 알려 줍니다(프로젝트 폴더 이름과 도구 이름만, 명령은 담지 않습니다). 창을 닫으면 숨기기만 하고 종료는 트레이 메뉴에서 합니다. 메뉴에서 새 세션 자동 연결, 모니터에 프롬프트 전체 표시, 알림 종류별 켜기/끄기, 로그인 시 시작을 바꿉니다. 문구는 시스템 언어(한국어/영어)를 따르고 `SWB_DESKTOP_LANG=ko|en`으로 바꿀 수 있습니다.
 
