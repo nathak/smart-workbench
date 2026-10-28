@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-28
+
 ### Changed
 - A file pin that cannot be added now says why (an absolute path outside the project, a path with `..`, a secrets file, or already pinned) in a toast instead of the input just emptying, and a typed one that was refused keeps its text so it can be fixed. An absolute path inside the project folder (`C:\project\src\a.ts`) is pinned as its relative form. Pins loaded from a template, a saved set or a shared task that are dropped for the same reasons are still dropped without a word.
 
