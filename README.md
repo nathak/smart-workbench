@@ -237,7 +237,7 @@ While the app runs it rewrites `~/.claude/smartworkbench-desktop/desktop.json` e
 
 ### Decision ledger
 
-Commits show what changed, not why. `/swb ledger on` records, for this project and this machine, each session's prompts, Claude's answers, tool calls (with masked input and output), guard decisions, edits and the commits it sees made, one JSON line per event under `<git dir>/swb-ledger/sessions/` (inside `.git`, so it is never committed; outside a git repository `.claude/swb-ledger/`). It is **off until you turn it on** (`/swb ledger off` stops it and keeps what was written; `/swb ledger` shows the state). Text is masked like the live feed, with prompts and answers kept up to 20,000 characters.
+Commits show what changed, not why. `/swb ledger on` records, for this project and this machine, each session's prompts, Claude's answers, tool calls (with masked input and output), guard decisions, edits and the commits it sees made, one JSON line per event under `<git common dir>/swb-ledger/sessions/` (inside `.git`, so it is never committed, and shared by the work trees of one repository; outside a git repository `.claude/swb-ledger/`). It is **off until you turn it on** (`/swb ledger off` stops it and keeps what was written; `/swb ledger` shows the state). Text is masked like the live feed, with prompts and answers kept up to 20,000 characters.
 
 `/swb why src/a.ts:42` (or a file, or a commit id) finds the commit behind the line with `git blame`, then shows that turn: the goal, the request, the actions with the guard's decisions, the answer and the commit. A commit the ledger saw made is exact; one it did not see (made by hand, or before the ledger was on) is matched by the files it touched and marked *inferred*.
 
@@ -722,7 +722,7 @@ cd desktop && npm run dist                  # electron-builder로 AppImage·deb(
 
 ### 결정 기록(Ledger)
 
-커밋은 무엇이 바뀌었는지만 보여 주고 왜 바뀌었는지는 말해 주지 않습니다. `/swb ledger on`을 켜면 이 프로젝트·이 컴퓨터에서 세션마다 프롬프트, Claude의 답변, 도구 호출(마스킹된 입력·출력), Guard 판정, 편집, 그리고 만들어진 커밋을 한 줄 JSON 이벤트로 `<git 디렉터리>/swb-ledger/sessions/`에 기록합니다(`.git` 안이라 커밋되지 않고, git 저장소가 아니면 `.claude/swb-ledger/`). **켜기 전까지는 꺼져 있습니다**(`/swb ledger off`는 기록을 멈추고 이미 쓴 것은 남기며, `/swb ledger`는 상태를 보여 줍니다). 텍스트는 실시간 보기와 같이 마스킹하고, 프롬프트와 답변은 20,000자까지 보관합니다.
+커밋은 무엇이 바뀌었는지만 보여 주고 왜 바뀌었는지는 말해 주지 않습니다. `/swb ledger on`을 켜면 이 프로젝트·이 컴퓨터에서 세션마다 프롬프트, Claude의 답변, 도구 호출(마스킹된 입력·출력), Guard 판정, 편집, 그리고 만들어진 커밋을 한 줄 JSON 이벤트로 `<git common 디렉터리>/swb-ledger/sessions/`에 기록합니다(`.git` 안이라 커밋되지 않고 한 저장소의 작업 트리끼리 공유하며, git 저장소가 아니면 `.claude/swb-ledger/`). **켜기 전까지는 꺼져 있습니다**(`/swb ledger off`는 기록을 멈추고 이미 쓴 것은 남기며, `/swb ledger`는 상태를 보여 줍니다). 텍스트는 실시간 보기와 같이 마스킹하고, 프롬프트와 답변은 20,000자까지 보관합니다.
 
 `/swb why src/a.ts:42`(파일이나 커밋 id도 가능)는 `git blame`으로 그 줄의 커밋을 찾아, 그 턴의 목표, 요청, 도구 호출과 Guard 판정, 답변, 커밋을 보여 줍니다. 기록이 직접 본 커밋은 정확하고, 보지 못한 커밋(손으로 한 커밋, 기록을 켜기 전)은 건드린 파일로 맞추며 *추정*이라고 표시합니다. 
 **팀과 공유.** 세션을 직접 발행하기 전에는 아무것도 컴퓨터 밖으로 나가지 않습니다. 세션 하나씩 발행합니다.

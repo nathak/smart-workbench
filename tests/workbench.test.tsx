@@ -17,7 +17,7 @@ const COMPOSER = { wait: false, origin: { kind: 'composer' } } as const
 const COMMAND = { origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } } as const
 
 // The world beneath the plugin: a project folder, a store the test can read, a clock.
-function world(on: On, store: Record<string, unknown> = {}, files: Record<string, string> = { 'src/auth.ts': 'export const ttl = 30' }) {
+function world(on: On, store: Record<string, unknown> = {}, files: Record<string, string> = { 'src/auth.ts': 'export const ttl = 30' }, toasts?: string[]) {
   mock.clock(on, { now: 1000 })
   on('store.get', ($, e) => ({ value: store[e.key] }))
   on('store.set', ($, e) => {
@@ -44,12 +44,39 @@ function world(on: On, store: Record<string, unknown> = {}, files: Record<string
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: { kind: 'file', size: text.length, mtimeMs: 0, isLink: false } }
   })
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts?.push(String((e as { text?: unknown }).text ?? ''))
+    return { value: undefined }
+  })
   on('ui.log', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
 
   return () => store[`ws:${CWD}`] as Workbench
 }
+
+test('a file pin that is refused says why; a path inside the project is pinned in its relative form; the same pin twice is told', async ($, on) => {
+  const toasts: string[] = []
+  const workbench = world(on, {}, { 'src/auth.ts': 'x' }, toasts)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-context' })
+  const pins = () => (workbench()?.context.pins ?? []).map(one => (one.kind === 'file' ? one.path : one.text))
+
+  await ui.input({ key: 'pin-file', text: 'C:\\elsewhere\\notes.txt' })
+  expect(pins()).toEqual([])
+  expect(toasts.some(one => one.includes('absolute path') && one.includes('notes.txt'))).toBe(true)
+  await ui.input({ key: 'pin-file', text: '.env' })
+  expect(toasts.some(one => one.includes('secrets file'))).toBe(true)
+  await ui.input({ key: 'pin-file', text: '../x.ts' })
+  expect(toasts.some(one => one.includes('".."'))).toBe(true)
+  expect(pins()).toEqual([])
+
+  await ui.input({ key: 'pin-file', text: `${CWD}/src/auth.ts` })
+  expect(pins()).toEqual(['src/auth.ts'])
+  await ui.input({ key: 'pin-file', text: 'src/auth.ts' })
+  expect(toasts.some(one => one.includes('already pinned'))).toBe(true)
+  expect(pins()).toEqual(['src/auth.ts'])
+  await ui.unmount()
+})
 
 test('a locked contract and pins reach the model as context, the prompt text untouched', async ($, on) => {
   world(on)

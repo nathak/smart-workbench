@@ -83,6 +83,27 @@ describe('what a shared file or a template may bring', () => {
     expect(model.clearAll({ ...wb, team }).team).toEqual(team)
     expect(shareText(wb, 0, undefined)).toContain('src/a.ts')
   })
+
+  test('a refused pin has a reason; an absolute path inside the project folder has a relative form', async () => {
+    const wb = model.pinFile(model.emptyWorkbench(), 'src/a.ts:1-5')
+    for (const spec of ['.env', '.env:3', 'id_rsa', '/etc/passwd', '../x', 'C:\\x\\a.ts', 'C:\\x\\a.ts:1-5']) expect(model.pinRefusal(wb, spec)?.message).toBeTruthy()
+    expect(model.pinRefusal(wb, '../x')?.problem).toBe('up')
+    expect(model.pinRefusal(wb, 'C:\\x\\a.ts:1-5')?.problem).toBe('absolute')
+    expect(model.pinRefusal(wb, 'src/a.ts:1-5')?.problem).toBe('duplicate')
+    expect(model.pinRefusal(wb, 'src/a.ts:6-9')).toBe(undefined)
+    expect(model.pinRefusal(wb, 'src/b.ts')).toBe(undefined)
+    expect(model.pinRefusal(wb, '  ')).toBe(undefined)
+
+    expect(model.relativeToRoot('C:\\Projects\\App 2\\src\\a.ts', 'c:/projects/app 2')).toBe('src/a.ts')
+    expect(model.relativeToRoot('/work/src/a.ts', '/work')).toBe('src/a.ts')
+    expect(model.relativeToRoot('/work/src/a.ts', '/work/')).toBe('src/a.ts')
+    expect(model.relativeToRoot('/workother/x.ts', '/work')).toBe(undefined)
+    expect(model.relativeToRoot('/work', '/work')).toBe(undefined)
+    expect(model.relativeToRoot('/work/../etc/x', '/work')).toBe('../etc/x')
+    expect(model.relativeToRoot('/Work/a.ts', '/work')).toBe(undefined)
+    expect(model.relativeToRoot('src/a.ts', '/work')).toBe(undefined)
+    expect(model.relativeToRoot('/work/a.ts', '/')).toBe(undefined)
+  })
 })
 
 describe('evidence, coverage and pins', () => {

@@ -11,7 +11,7 @@ import { applyOps, feedStateOf, isSettingOp, needsAnswer, rateWindowsOf, snapsho
 import { backgroundOf, notificationsOf } from './background'
 import { GRAPH_DESCRIPTION, GRAPH_TOOL, graphAnswer, graphDataOf, queryPath, type GraphData } from './graph'
 import { PROPOSE_TOOL } from './intent'
-import { estimateTokens, injectionOf, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
+import { estimateTokens, injectionOf, parsePinSpec, pinText, rangeLabel, sha256, sliceLines, type Injection, type PinContent } from './context'
 import { coverageOf, hunkLabel, lastCheckedEdit, lastEdit as lastAnyEdit, parseDiff, type Coverage } from './diff'
 import { checkOutcome, completionOf, evidenceKindsOf, expectText, isStale, judgeOf, latestOf, markOf, outcomeFromOutput, statusOf, turnSummary } from './evidence'
 import { canSet, checkExpectInput, EXPECT_DESCRIPTION, EXPECT_TOOL, expectOf, readTestRun } from './expect'
@@ -1096,6 +1096,30 @@ async function setDraft($: $, key: string, value: string | undefined): Promise<v
     const { [key]: _old, ...rest } = live.drafts ?? {}
     return { ...live, drafts: value === undefined ? rest : { ...rest, [key]: value } }
   })
+}
+
+// A typed or clicked file pin. An absolute path inside the project is pinned as its relative form; a refusal says why
+// (it used to vanish without a word), and a typed one that cannot be pinned keeps its text so it can be fixed.
+async function pinFileFor($: $, spec: string): Promise<'pinned' | 'refused' | 'duplicate' | 'empty'> {
+  const { path, lines } = parsePinSpec(spec)
+  if (path === '') return 'empty'
+  const inside = model.relativeToRoot(path, await $.session.root())
+  const wanted = inside === undefined ? spec : `${inside}${lines ? `:${lines.from}-${lines.to}` : ''}`
+  const refusal = model.pinRefusal(await read($, wbAtom), wanted)
+  if (refusal) {
+    $.ui.toast(`SmartWorkbench: ${refusal.message}`)
+
+    return refusal.problem === 'duplicate' ? 'duplicate' : 'refused'
+  }
+  await mutate($, wb => model.pinFile(wb, wanted))
+
+  return 'pinned'
+}
+
+async function pinTyped($: $, value: string): Promise<void> {
+  const done = await pinFileFor($, value)
+  await setDraft($, 'pin-file', done === 'refused' ? value : undefined)
+  await $.ui.focus({ requestId: PANE, key: 'pin-file' }).catch(() => undefined)
 }
 
 async function submitDraft($: $, key: string, action: () => Promise<unknown>): Promise<void> {
@@ -2843,7 +2867,7 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
           value={live.drafts?.['pin-file'] ?? ''}
           submitLabel="pin"
           onInput={value => void setDraft($, 'pin-file', value)}
-          onSubmit={value => void submitDraft($, 'pin-file', () => mutate($, wb => model.pinFile(wb, value)))}
+          onSubmit={value => void pinTyped($, value)}
         />
       <Input
           key="pin-note"
@@ -2865,7 +2889,7 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
           <Text dimColor>
             {categoryOf(one.path)} · {one.how === 'edited' ? 'edited' : `read ×${one.count ?? 1}`}
           </Text>
-          <Button key={`pinsug-${one.path}`} plain label="Pin" onPress={() => void mutate($, wb => model.pinFile(wb, one.path))} />
+          <Button key={`pinsug-${one.path}`} plain label="Pin" onPress={() => void pinFileFor($, one.path)} />
           <Button key={`hide-${one.path}`} plain dimColor label="Hide" onPress={() => void mutate($, wb => model.toggleExcluded(wb, one.path))} />
         </Box>
       ))}
@@ -2887,7 +2911,7 @@ async function contextTab($: $, { els, wb, live, width, room }: View): Promise<R
               {category} · {one.how}
             </Text>
             {category !== 'secret' && category !== 'generated' && (
-              <Button key={`pinobs-${one.path}`} plain label="Pin" onPress={() => void mutate($, wb => model.pinFile(wb, one.path))} />
+              <Button key={`pinobs-${one.path}`} plain label="Pin" onPress={() => void pinFileFor($, one.path)} />
             )}
             {isHidden && <Button key={`unhide-${one.path}`} plain dimColor label="Unhide" onPress={() => void mutate($, wb => model.toggleExcluded(wb, one.path))} />}
           </Box>

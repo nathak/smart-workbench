@@ -7,6 +7,7 @@ import type {
   Expectation,
   GuardProfile,
   IssueRef,
+  LineRange,
   Live,
   ManualMark,
   Proposal,
@@ -233,11 +234,50 @@ export function clearAll(wb: Workbench): Workbench {
 }
 
 // A pinned file goes into every prompt without a question, so it must be a path inside the project and not a secrets file.
-export function pinAllowed(path: string): boolean {
-  if (path === '' || /^([A-Za-z]:|[\\/])/.test(path)) return false
-  if (path.split(/[\\/]/).includes('..')) return false
+type PinProblem = 'empty' | 'absolute' | 'up' | 'secret'
 
-  return categoryOf(path) !== 'secret'
+function pinProblem(path: string): PinProblem | undefined {
+  if (path === '') return 'empty'
+  if (/^([A-Za-z]:|[\\/])/.test(path)) return 'absolute'
+  if (path.split(/[\\/]/).includes('..')) return 'up'
+
+  return categoryOf(path) === 'secret' ? 'secret' : undefined
+}
+
+export function pinAllowed(path: string): boolean {
+  return pinProblem(path) === undefined
+}
+
+const PIN_WHY: Record<Exclude<PinProblem, 'empty'>, string> = {
+  absolute: 'is an absolute path that is not inside the project folder; only files inside the project can be pinned (pin a note for anything else)',
+  up: 'leaves the project folder with ".."; pin a path inside the project',
+  secret: 'looks like a secrets file, which is never pinned',
+}
+
+function hasPin(wb: Workbench, path: string, lines: LineRange | undefined): boolean {
+  return wb.context.pins.some(one => one.kind === 'file' && one.path === path && rangeLabel(one.lines) === rangeLabel(lines))
+}
+
+// Why a typed or clicked file pin would not be added (nothing to say for an empty one), so the person is told instead of the input just vanishing.
+export function pinRefusal(wb: Workbench, spec: string): { problem: Exclude<PinProblem, 'empty'> | 'duplicate'; message: string } | undefined {
+  const { path, lines } = parsePinSpec(spec)
+  const problem = pinProblem(path)
+  if (problem === 'empty') return undefined
+  if (problem !== undefined) return { problem, message: `${cut(path, 80)} ${PIN_WHY[problem]}` }
+
+  return hasPin(wb, path, lines) ? { problem: 'duplicate', message: `${cut(path, 80)} is already pinned` } : undefined
+}
+
+// An absolute path inside the project folder is the same file as its relative form ("C:\proj\src\a.ts" in "c:/proj"): the part after the folder, or nothing.
+export function relativeToRoot(path: string, root: string): string | undefined {
+  const fold = (text: string) => text.replace(/\\/g, '/').replace(/\/+$/, '')
+  const full = fold(path)
+  const base = fold(root)
+  if (base === '' || !/^([A-Za-z]:|\/)/.test(full)) return undefined
+  const head = full.slice(0, base.length)
+  const same = /^[A-Za-z]:/.test(base) ? head.toLowerCase() === base.toLowerCase() : head === base
+
+  return same && full.length > base.length + 1 && full[base.length] === '/' ? full.slice(base.length + 1) : undefined
 }
 
 // Pins that come from a file or a template (not typed by the person now) are held to the same rule.
@@ -247,8 +287,7 @@ function safePins(pins: readonly ContextPin[]): ContextPin[] {
 
 export function pinFile(wb: Workbench, spec: string): Workbench {
   const { path, lines } = parsePinSpec(spec)
-  const same = (one: ContextPin) => one.kind === 'file' && one.path === path && rangeLabel(one.lines) === rangeLabel(lines)
-  if (!pinAllowed(path) || wb.context.pins.some(same)) {
+  if (!pinAllowed(path) || hasPin(wb, path, lines)) {
     return wb
   }
   const pin: ContextPin = { id: newId('p'), kind: 'file', path, mode: 'live', ...(lines ? { lines } : {}) }
