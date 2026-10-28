@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { ConditionStatus, ConditionSuggestion, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, TeamRoleName, Template, ToolCallRecord, Track, Workbench } from '../types'
+import type { ConditionStatus, ConditionSuggestion, ContextPin, DoneCondition, ProjectCheck, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, TeamRoleName, Template, ToolCallRecord, Track, Workbench } from '../types'
 import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
@@ -1272,6 +1272,64 @@ async function setConditionExpectation($: $, input: Record<string, unknown>): Pr
   return { result: `recorded on ${id}: ${expectText(expect)}. It only makes the verdict stricter; the person can clear it. Finishing is held once when the numbers fall short.` }
 }
 
+// The check kinds the project has right now: the root read again, plus CI when GitHub Actions workflows exist.
+async function projectKinds($: $): Promise<{ kinds: EvidenceKind[]; checks: ProjectCheck[]; hasCi: boolean }> {
+  await refreshChecks($)
+  const checks = (await read($, liveAtom)).checks ?? []
+  const root = await $.session.root().catch(() => '')
+  const hasCi = root !== '' && (await $.fs.exists(`${root}/.github/workflows`).catch(() => false))
+
+  return { kinds: [...new Set([...checks.map(one => one.kind), ...(hasCi ? ['ci' as const] : [])])], checks, hasCi }
+}
+
+// Claude sets the goal and conditions of a task nobody has put conditions on. Checked against the project as it is now; the contract stays
+// unlocked, so the person can edit, undo (/swb suggest undo) or lock it.
+async function setDoneConditions($: $, input: Record<string, unknown>, agentId?: string): Promise<{ result: string }> {
+  if (agentId !== undefined) return { result: 'rejected: only the main session sets done conditions.' }
+  const { kinds, checks } = await projectKinds($)
+  const checked = suggest.checkAutoInput(input, kinds, checks)
+  if (!checked.ok) return { result: `rejected: ${checked.reason}.` }
+  const before = await read($, wbAtom)
+  const allowed = suggest.canAutoSet(before.task)
+  if (!allowed.ok) return { result: `rejected: ${allowed.reason}.` }
+  const hadGoal = before.task.goal.trim() !== ''
+  // Checked again on the state the write sees: the person may have locked the contract or typed a condition meanwhile.
+  let refused = ''
+  // What the write itself made (the contract had no condition): a condition the person adds right after is not Claude's.
+  let made: DoneCondition[] = []
+  let taskId = ''
+  await mutate($, current => {
+    const again = suggest.canAutoSet(current.task)
+    if (!again.ok) {
+      refused = again.reason
+      return current
+    }
+    const next = model.setAutoConditions(current, checked.value)
+    made = next.task.doneConditions
+    taskId = next.task.id
+
+    return next
+  })
+  if (refused) return { result: `rejected: ${refused}.` }
+  const wb = await read($, wbAtom)
+  const goalSet = !hadGoal && wb.task.goal === checked.value.goal
+  await setLive($, live => ({ ...live, autoSet: { task: taskId, ids: made.map(one => one.id), texts: made.map(one => one.text), ...(goalSet ? { goal: checked.value.goal } : {}) } }))
+  await audit($, 'contract.auto-set', { by: 'claude', ids: made.map(one => one.id), links: made.map(one => one.link ?? 'none'), goalSet })
+  if (ledger) {
+    await record($, 'contract', { goal: wb.task.goal, done: made.map(one => one.text).join(' | ') })
+    ledger.goal = wb.task.goal
+  }
+  $.ui.toast(`SmartWorkbench: Claude set ${made.length} done condition${made.length === 1 ? '' : 's'} for this task · /swb to review or undo`)
+  await emitState($)
+  const lines = made.map(one => {
+    const command = one.link ? checks.find(check => check.kind === one.link)?.command : undefined
+
+    return `${one.id} "${model.cut(redact(one.text), 80)}" (${one.link ? `${one.link}${command ? `: ${command}` : ''}` : 'by hand'})`
+  })
+
+  return { result: `set ${lines.join(', ')}. ${hadGoal ? 'The existing goal was kept. ' : ''}Run each linked check after your last edit so its condition is verified; the person marks the by-hand ones with Verify. The contract stays unlocked: the person can edit, undo or lock it.` }
+}
+
 async function propose($: $, input: Record<string, unknown>): Promise<{ result: string }> {
   const change = CHANGES.find(one => one === input.change)
   const text = typeof input.text === 'string' ? input.text.trim() : ''
@@ -1790,6 +1848,49 @@ async function refreshChecks($: $): Promise<void> {
   } catch {
     // Suggestions are optional.
   }
+}
+
+// Adds what is offered, as the project root shows it now: a press on a list drawn earlier must not add a check that is gone.
+async function addOffered($: $, keys?: readonly string[]): Promise<{ added: number; gone: number }> {
+  await refreshChecks($)
+  const wb = await read($, wbAtom)
+  const now = suggestionsFor(wb, await read($, liveAtom))
+  const chosen = keys === undefined ? now : now.filter(one => keys.includes(one.key))
+  const gone = keys === undefined ? 0 : keys.filter(key => !now.some(one => one.key === key)).length
+  await mutate($, current => model.addSuggestions(current, chosen))
+  if (gone > 0) $.ui.toast(`SmartWorkbench: ${gone} suggestion${gone === 1 ? '' : 's'} no longer apply (the project root changed); not added`)
+
+  return { added: chosen.length, gone }
+}
+
+// Takes back what set_done_conditions wrote for this task, while the contract is open: the conditions still there, and the goal when it wrote that too.
+async function undoAutoSet($: $): Promise<string> {
+  const wb = await read($, wbAtom)
+  const set = (await read($, liveAtom)).autoSet
+  if (!set || set.task !== wb.task.id || set.ids.length === 0) return 'Claude has set nothing for this task.'
+  if (wb.task.locked) return 'The contract is locked; unlock it to undo.'
+  // Decided on the state the write sees: another session may have saved a newer task or the person may have locked it meanwhile.
+  let removed: string[] = []
+  let goalGone = false
+  let refused = ''
+  await mutate($, current => {
+    if (current.task.id !== set.task || current.task.locked) {
+      refused = current.task.locked ? 'The contract is locked; unlock it to undo.' : 'Claude has set nothing for this task.'
+      return current
+    }
+    removed = suggest.autoMade(current.task, set).map(one => one.id)
+    const left = removed.reduce((now, id) => model.removeCondition(now, id), current)
+
+    goalGone = set.goal !== undefined && left.task.goal === set.goal
+
+    return goalGone ? model.setGoal(left, '') : left
+  })
+  if (refused) return refused
+  // Kept with no ids: the reminder does not come back for this task.
+  await setLive($, live => ({ ...live, autoSet: { task: set.task, ids: [], texts: [] } }))
+  await audit($, 'contract.auto-undo', { ids: removed })
+
+  return `Removed ${removed.length} done condition${removed.length === 1 ? '' : 's'} Claude set${goalGone ? ' and the goal' : ''}.`
 }
 
 // The done conditions on offer for the task as it stands.
@@ -2452,6 +2553,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   if (word === 'suggest') {
+    if (args.trim().toLowerCase().split(/\s+/)[1] === 'undo') return { text: await undoAutoSet($) }
     await refreshChecks($)
     const wb = await read($, wbAtom)
     const live = await read($, liveAtom)
@@ -2459,9 +2561,9 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     const offered = suggestionsFor(wb, live)
     if (args.trim().toLowerCase().split(/\s+/)[1] === 'add') {
       if (offered.length === 0) return { text: 'Nothing to add.' }
-      await mutate($, current => model.addSuggestions(current, offered))
+      const { added } = await addOffered($)
 
-      return { text: `Added ${offered.length} done condition${offered.length === 1 ? '' : 's'}; review them in the Intent tab.` }
+      return { text: `Added ${added} done condition${added === 1 ? '' : 's'}; review them in the Intent tab.` }
     }
     if (offered.length === 0) {
       return { text: (live.checks ?? []).length === 0 ? 'No checks found at the project root (package.json, pyproject.toml, Cargo.toml, go.mod, gradlew, pom.xml, Makefile); type a condition and link it in the Evidence tab.' : 'Nothing to suggest: the contract already covers what was found.' }
@@ -2733,6 +2835,7 @@ function intentTab($: $, { els, wb, live, width }: View): RenderElement {
   const { task } = wb
   const ro = task.locked
   const offered = suggestionsFor(wb, live)
+  const autoMade = !ro && suggest.autoMade(task, live.autoSet).length > 0
 
   return (
     <Box flexDirection="column">
@@ -2816,8 +2919,10 @@ function intentTab($: $, { els, wb, live, width }: View): RenderElement {
           onSubmit={value => void submitDraft($, 'add-constraint', () => mutate($, wb => model.addConstraint(wb, value)))}
         />
       )}
-      <Box marginTop={1}>
+      <Box marginTop={1} gap={1}>
         <Text bold>Done conditions</Text>
+        {autoMade && <Text dimColor>set by Claude from the request</Text>}
+        {autoMade && <Button key="auto-undo" plain label="Undo" onPress={() => void undoAutoSet($).then(text => $.ui.toast(`SmartWorkbench: ${text}`))} />}
       </Box>
       {task.doneConditions.length === 0 && <Text dimColor>none</Text>}
       {task.doneConditions.map(one => {
@@ -2844,7 +2949,7 @@ function intentTab($: $, { els, wb, live, width }: View): RenderElement {
       {!ro && offered.length > 0 && (
         <Box gap={1}>
           <Text bold>SUGGESTED</Text>
-          {offered.length > 1 && <Button key="sug-all" plain label="Add all" onPress={() => void mutate($, wb => model.addSuggestions(wb, offered))} />}
+          {offered.length > 1 && <Button key="sug-all" plain label="Add all" onPress={() => void addOffered($, offered.map(one => one.key))} />}
         </Box>
       )}
       {!ro &&
@@ -2853,7 +2958,7 @@ function intentTab($: $, { els, wb, live, width }: View): RenderElement {
             <Text color="suggestion">◇</Text>
             <Text wrap="truncate-end">{model.cut(one.text, width - 26)}</Text>
             <Text dimColor>{one.link ?? 'by hand'}</Text>
-            <Button key={`sug-add-${one.key}`} plain label="Add" onPress={() => void mutate($, wb => model.addCondition(wb, one.text, one.link))} />
+            <Button key={`sug-add-${one.key}`} plain label="Add" onPress={() => void addOffered($, [one.key])} />
             <Button key={`sug-hide-${one.key}`} plain dimColor label="Hide" onPress={() => void setLive($, now => ({ ...now, suggestHidden: [...(now.suggestHidden ?? []), one.key] }))} />
           </Box>
         ))}
@@ -3512,6 +3617,30 @@ export const register: Register = on => {
         required: ['id', 'reason'],
       },
     }).catch(error => $.ui.log(`SmartWorkbench: could not register set_condition_expectation: ${String(error)}`, { to: 'debug' }))
+    await $.tool.register({
+      name: 'set_done_conditions',
+      description: suggest.AUTO_DESCRIPTION,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          goal: { type: 'string', description: 'The task in one line; used only when the contract has no goal' },
+          conditions: {
+            type: 'array',
+            minItems: 1,
+            maxItems: suggest.MAX_AUTO,
+            items: {
+              type: 'object',
+              properties: {
+                text: { type: 'string', description: 'One verifiable outcome of this task, under 160 characters' },
+                link: { type: 'string', enum: [...suggest.CHECK_KINDS], description: 'Only a check kind this project has; omit when no command proves it' },
+              },
+              required: ['text'],
+            },
+          },
+        },
+        required: ['goal', 'conditions'],
+      },
+    }).catch(error => $.ui.log(`SmartWorkbench: could not register set_done_conditions: ${String(error)}`, { to: 'debug' }))
     const sessionId = await $.session.id().catch(() => undefined)
     if (sessionId) await setLive($, live => ({ ...live, sessionId }))
     isAskable = e.isInteractive !== false
@@ -3643,9 +3772,22 @@ export const register: Register = on => {
     }
     await emit($, 'prompt', { origin: e.origin.kind, text: model.cut(redact(scanned(e.text)).replace(/\s+/g, ' '), 120), ...promptOf(await read($, liveAtom), e.text), team: wb.team?.enabled === true, loop: loopBlocks.length > 0, codex: codex.isCodexOn(wb.team) })
 
+    // A task with no done condition: a request the person typed gets the reminder to set them (a command, a loop pass, a background report and a locked contract do not).
+    const nudge: string[] = []
+    const typed = e.origin.kind !== 'plugin' && e.origin.kind !== 'task-notification' && !e.text.trimStart().startsWith('/') && !e.text.trimStart().startsWith('<task-notification>')
+    // Not in a run nobody watches (`claude -p`): conditions set there would sit unreviewed, and the undo record does not outlive the session.
+    if (typed && isAskable && loopBlocks.length === 0) {
+      const live = await read($, liveAtom)
+      if (!live.loop && suggest.shouldNudge(wb.task, live.conditionNudge, live.autoSet?.task)) {
+        const { checks, hasCi } = await projectKinds($)
+        nudge.push(suggest.nudgeText(checks, hasCi))
+        await setLive($, current => ({ ...current, conditionNudge: { task: wb.task.id, asked: current.conditionNudge?.task === wb.task.id ? current.conditionNudge.asked + 1 : 1 } }))
+      }
+    }
+
     // A loop pass that rides on a typed prompt carries no Codex brief either.
     const kept = loopBlocks.length > 0 ? blocks.filter(one => !codexBlock.includes(one)) : blocks
-    const all = [...kept, ...loopBlocks]
+    const all = [...kept, ...loopBlocks, ...nudge]
 
     return all.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...all] })
   }).catch(($, e, next) => next(e))
@@ -3664,6 +3806,9 @@ export const register: Register = on => {
     }
     if (e.tool === EXPECT_TOOL) {
       return setConditionExpectation($, e as unknown as Record<string, unknown>)
+    }
+    if (e.tool === suggest.AUTO_TOOL) {
+      return setDoneConditions($, e as unknown as Record<string, unknown>, e.agentId)
     }
     const hookStart = await $.clock.now()
     const isTeam = (await read($, wbAtom)).team?.enabled === true
@@ -4172,7 +4317,7 @@ export const register: Register = on => {
     const row = await next(e)
     const id = e.props.tool_use_id
     const text = (await read($, badgesAtom))[id]
-    const isFailed = e.props.isErrored && !e.props.isRunning && !e.props.isInterrupted && e.props.tool !== PROPOSE_TOOL && e.props.tool !== GRAPH_TOOL && e.props.tool !== EXPECT_TOOL
+    const isFailed = e.props.isErrored && !e.props.isRunning && !e.props.isInterrupted && e.props.tool !== PROPOSE_TOOL && e.props.tool !== GRAPH_TOOL && e.props.tool !== EXPECT_TOOL && e.props.tool !== suggest.AUTO_TOOL
 
     if (text === undefined && !isFailed) {
       return row

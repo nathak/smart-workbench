@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { evidenceKindOf, guessLink } from '../hooks/evidence'
 import * as model from '../hooks/model'
-import { isUnlinked, projectChecks, suggestConditions, wordingSuggestions, type RootFiles } from '../hooks/suggest'
+import { AUTO_TOOL, autoMade, canAutoSet, checkAutoInput, isUnlinked, nudgeText, NUDGE_LIMIT, projectChecks, shouldNudge, suggestConditions, wordingSuggestions, type RootFiles } from '../hooks/suggest'
 import type { ProjectCheck, Task } from '../types'
 
 const root = (names: string[], texts: Record<string, string> = {}): RootFiles => ({ names, texts })
@@ -183,5 +183,75 @@ describe('adding offered conditions', () => {
     expect(isUnlinked({ id: 'dc-1', text: 'a' })).toBe(true)
     expect(isUnlinked({ id: 'dc-1', text: 'a', link: 'test' })).toBe(false)
     expect(isUnlinked({ id: 'dc-1', text: 'a', manual: { status: 'verified', at: 1, note: '' } })).toBe(false)
+  })
+})
+
+describe('conditions Claude sets for the task', () => {
+  const found: ProjectCheck[] = [{ kind: 'test', command: 'npm test', from: 'package.json' }, { kind: 'typecheck', command: 'npx tsc --noEmit', from: 'tsconfig.json' }]
+  const check = (raw: Record<string, unknown>) => checkAutoInput(raw, found.map(one => one.kind), found)
+  const reason = (raw: Record<string, unknown>) => {
+    const out = check(raw)
+    return out.ok ? '' : out.reason
+  }
+
+  test('a goal and conditions are taken as one masked line each; a link only for a check the project has', () => {
+    const out = check({ goal: '  Add\nexpiry  ', conditions: [{ text: 'Parser tests pass', link: 'test' }, { text: 'README section written' }] })
+    expect(out).toEqual({ ok: true, value: { goal: 'Add expiry', conditions: [{ text: 'Parser tests pass', link: 'test' }, { text: 'README section written' }] } })
+    const masked = check({ goal: 'g', conditions: [{ text: 'Use key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123 safely' }] })
+    expect(masked.ok && masked.value.conditions[0]?.text).not.toContain('abcdefghijklmnopqrstuvwxyz0123')
+  })
+
+  test('a link to a kind the project lacks refuses the call and names what was found', () => {
+    expect(reason({ goal: 'g', conditions: [{ text: 'Build passes', link: 'build' }] })).toBe('link "build" has no check in this project (found: test (npm test), typecheck (npx tsc --noEmit)); give that condition no link, or a kind that was found')
+    expect(reason({ goal: 'g', conditions: [{ text: 'It works', link: 'lint' }] })).toContain('found: test')
+    expect(checkAutoInput({ goal: 'g', conditions: [{ text: 'Build passes', link: 'build' }] }, [], [])).toMatchObject({ ok: false, reason: expect.stringContaining('found: none') })
+    expect(reason({ goal: 'g', conditions: [{ text: 'Magic passes', link: 'magic' }] })).toContain('link must be one of')
+  })
+
+  test('size, count and duplicates are checked', () => {
+    expect(reason({ conditions: [{ text: 'abc' }] })).toContain('goal')
+    expect(reason({ goal: 'x'.repeat(201), conditions: [{ text: 'abc' }] })).toContain('goal')
+    expect(reason({ goal: 'g', conditions: [] })).toContain('1 to 4')
+    expect(reason({ goal: 'g', conditions: 'x' })).toContain('1 to 4')
+    expect(reason({ goal: 'g', conditions: Array.from({ length: 5 }, (_, i) => ({ text: `condition ${i}` })) })).toContain('1 to 4')
+    expect(reason({ goal: 'g', conditions: [{ text: 'ab' }] })).toContain('3 to 160')
+    expect(reason({ goal: 'g', conditions: [{ text: 'x'.repeat(161) }] })).toContain('3 to 160')
+    expect(reason({ goal: 'g', conditions: [{ text: 'one\ntwo' }] })).toContain('one line')
+    expect(reason({ goal: 'g', conditions: [{ text: 'Tests pass' }, { text: ' tests  PASS ' }] })).toContain('given twice')
+    expect(reason({ goal: 'g', conditions: [null] })).toContain('3 to 160')
+  })
+
+  test('only an open contract with no condition takes them', () => {
+    expect(canAutoSet(task())).toEqual({ ok: true })
+    expect(canAutoSet(task({ locked: true }))).toMatchObject({ ok: false, reason: expect.stringContaining('locked') })
+    expect(canAutoSet(task({ doneConditions: [{ id: 'dc-1', text: 'mine' }] }))).toMatchObject({ ok: false, reason: expect.stringContaining('already has done conditions') })
+  })
+
+  test('the reminder goes to an open empty contract, a few prompts a task, until Claude has set it', () => {
+    const open = task({ id: 't1' })
+    expect(shouldNudge(open, undefined, undefined)).toBe(true)
+    expect(shouldNudge(open, { task: 't1', asked: NUDGE_LIMIT - 1 }, undefined)).toBe(true)
+    expect(shouldNudge(open, { task: 't1', asked: NUDGE_LIMIT }, undefined)).toBe(false)
+    expect(shouldNudge(open, { task: 't0', asked: NUDGE_LIMIT }, undefined)).toBe(true)
+    expect(shouldNudge(open, undefined, 't1')).toBe(false)
+    expect(shouldNudge(task({ id: 't1', locked: true }), undefined, undefined)).toBe(false)
+    expect(shouldNudge(task({ id: 't1', doneConditions: [{ id: 'dc-1', text: 'x' }] }), undefined, undefined)).toBe(false)
+  })
+
+  test('the reminder names the checks found, or says there are none', () => {
+    expect(nudgeText(found, false)).toContain('checks this project has: {test (npm test), typecheck (npx tsc --noEmit)}.')
+    expect(nudgeText(found, true)).toContain('ci (GitHub Actions)}')
+    expect(nudgeText([], false)).toContain('this project has no check the workbench detects, so give no link.')
+    expect(nudgeText(found, false)).toContain(AUTO_TOOL)
+    expect(nudgeText(found, false)).toBe(nudgeText(found, false))
+  })
+
+  test('what Claude set is told by id and words: a condition the person removed and wrote again is theirs', () => {
+    const set = { task: 't1', ids: ['dc-1', 'dc-2'], texts: ['Parser tests pass', 'README written'] }
+    const have = (...list: [string, string][]) => task({ id: 't1', doneConditions: list.map(([id, text]) => ({ id, text })) })
+    expect(autoMade(have(['dc-1', 'Parser tests pass'], ['dc-2', 'README written']), set).map(one => one.id)).toEqual(['dc-1', 'dc-2'])
+    expect(autoMade(have(['dc-1', 'My own condition'], ['dc-2', 'README written']), set).map(one => one.id)).toEqual(['dc-2'])
+    expect(autoMade(task({ id: 't2', doneConditions: [{ id: 'dc-1', text: 'Parser tests pass' }] }), set)).toEqual([])
+    expect(autoMade(have(['dc-1', 'Parser tests pass']), undefined)).toEqual([])
   })
 })

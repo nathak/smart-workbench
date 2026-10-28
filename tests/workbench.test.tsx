@@ -653,3 +653,190 @@ test('/swb new says how many conditions it can suggest, and a condition with no 
   const status = (await $.command.run({ command: 'swb', args: 'status', ...COMMAND })).text
   expect(status).toContain('1 done condition has no linked check')
 })
+
+const AUTO = 'mcp__smartworkbench__set_done_conditions'
+const NUDGE = '<smartworkbench_done_conditions>'
+
+// A project with an npm test script and a tsconfig; `files` is what the root holds.
+function project(on: On, files: Record<string, string>, toasts?: string[]) {
+  const workbench = world(on, {}, files, toasts)
+  on('fs.exists', ($, e) => ({ value: Object.keys(files).some(name => e.path.endsWith(`/${name}`)) }))
+  on('fs.list', () => ({ value: Object.keys(files).map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) }))
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__smartworkbench__${e.name}` } }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+
+  return workbench
+}
+
+const NPM = { 'package.json': JSON.stringify({ scripts: { test: 'vitest' } }), 'tsconfig.json': '{}' }
+
+test('Claude sets the goal and conditions for the task: a linked one only for a check the project has, the contract stays unlocked, and it can be undone', async ($, on) => {
+  const toasts: string[] = []
+  const workbench = project(on, { ...NPM }, toasts)
+  let seen: readonly string[] | undefined
+  on('prompt.submit', ($, e) => {
+    seen = e.context
+    return { text: e.text, context: e.context }
+  })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+
+  const done = JSON.stringify(await $.tool.call({ tool: AUTO, goal: 'Add token expiry', conditions: [{ text: 'Parser tests pass', link: 'test' }, { text: 'README section written' }] }))
+  expect(done).toContain('set dc-1 \\"Parser tests pass\\" (test: npm test), dc-2 \\"README section written\\" (by hand)')
+  expect(workbench().task).toMatchObject({ goal: 'Add token expiry', locked: false })
+  expect(workbench().task.doneConditions.map(one => [one.text, one.link])).toEqual([['Parser tests pass', 'test'], ['README section written', undefined]])
+  expect(toasts.some(one => one.includes('Claude set 2 done conditions'))).toBe(true)
+
+  // A person's contract, or one that already has conditions, is not added to.
+  expect(JSON.stringify(await $.tool.call({ tool: AUTO, goal: 'x', conditions: [{ text: 'Another thing' }] }))).toContain('already has done conditions')
+
+  const result = await $.command.run({ command: 'swb', args: 'suggest undo', ...COMMAND })
+  expect(result.text).toBe('Removed 2 done conditions Claude set and the goal.')
+  expect(workbench().task).toMatchObject({ goal: '', doneConditions: [] })
+  // No reminder again for this task after an undo.
+  await $.prompt.submit({ text: 'add expiry to the token', ...COMPOSER })
+  expect((seen ?? []).join('\n')).not.toContain(NUDGE)
+  expect((await $.command.run({ command: 'swb', args: 'suggest undo', ...COMMAND })).text).toBe('Claude has set nothing for this task.')
+})
+
+test('set_done_conditions is refused for a kind the project lacks, a locked contract, a subagent and bad input, and changes nothing', async ($, on) => {
+  const workbench = project(on, { ...NPM })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+  const call = async (input: Record<string, unknown>) => JSON.stringify(await $.tool.call({ tool: AUTO, ...input }))
+
+  expect(await call({ goal: 'g', conditions: [{ text: 'Build passes', link: 'build' }] })).toContain('rejected: link \\"build\\" has no check in this project (found: test (npm test), typecheck (npx tsc --noEmit))')
+  expect(await call({ goal: 'g', conditions: [{ text: 'Tests pass' }, { text: 'tests pass' }] })).toContain('given twice')
+  expect(await call({ goal: 'g', conditions: Array.from({ length: 5 }, (_, i) => ({ text: `condition ${i}` })) })).toContain('1 to 4')
+  expect(await call({ goal: 'g', conditions: [{ text: 'Tests pass', link: 'test' }], agentId: 'agent-1' })).toContain('only the main session')
+  expect(workbench()?.task.doneConditions ?? []).toEqual([])
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'Mine' })
+  await ui.press({ key: 'lock' })
+  await ui.unmount()
+  expect(await call({ goal: 'g', conditions: [{ text: 'Tests pass', link: 'test' }] })).toContain('the contract is locked')
+  expect(workbench().task.doneConditions).toEqual([])
+})
+
+test('a conditions-less contract gets the reminder on a typed prompt, three times a task, and never on a command, a plugin prompt, a report or a locked contract', async ($, on) => {
+  project(on, { ...NPM })
+  let seen = ''
+  on('prompt.submit', ($, e) => {
+    seen = (e.context ?? []).join('\n')
+    return { text: e.text, context: e.context }
+  })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+
+  await $.prompt.submit({ text: 'fix the login bug', ...COMPOSER })
+  expect(seen).toContain(NUDGE)
+  expect(seen).toContain('checks this project has: {test (npm test), typecheck (npx tsc --noEmit)}.')
+  expect(seen).toContain(AUTO)
+
+  for (const text of ['/swb status', '<task-notification>\n<task-id>a</task-id>\n<status>completed</status>\n</task-notification>']) {
+    seen = ''
+    await $.prompt.submit({ text, ...COMPOSER })
+    expect(seen).not.toContain(NUDGE)
+  }
+  seen = ''
+  await $.prompt.submit({ text: 'from a plugin', wait: false, origin: { kind: 'plugin', plugin: 'x' } } as never)
+  expect(seen).not.toContain(NUDGE)
+
+  await $.prompt.submit({ text: 'second', ...COMPOSER })
+  expect(seen).toContain(NUDGE)
+  await $.prompt.submit({ text: 'third', ...COMPOSER })
+  expect(seen).toContain(NUDGE)
+  seen = ''
+  await $.prompt.submit({ text: 'fourth', ...COMPOSER })
+  expect(seen).not.toContain(NUDGE)
+})
+
+test('no reminder once the contract is locked or has a condition, and none for a project with no check says so', async ($, on) => {
+  project(on, {})
+  let seen = ''
+  on('prompt.submit', ($, e) => {
+    seen = (e.context ?? []).join('\n')
+    return { text: e.text, context: e.context }
+  })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'write the design doc', ...COMPOSER })
+  expect(seen).toContain('this project has no check the workbench detects, so give no link.')
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'Doc' })
+  await ui.input({ key: 'add-condition', text: 'Doc written' })
+  await ui.unmount()
+  seen = ''
+  await $.prompt.submit({ text: 'go on', ...COMPOSER })
+  expect(seen).not.toContain(NUDGE)
+})
+
+test('Add checks the project root again: a check that went away since the list was drawn is not added', async ($, on) => {
+  const toasts: string[] = []
+  const files: Record<string, string> = { ...NPM }
+  const workbench = project(on, files, toasts)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+
+  // The test script is removed after the list was read at session start.
+  files['package.json'] = JSON.stringify({ scripts: {} })
+  await ui.press({ key: 'sug-add-check:test' })
+  expect(workbench()?.task.doneConditions ?? []).toEqual([])
+  expect(toasts.some(one => one.includes('1 suggestion no longer apply'))).toBe(true)
+  await ui.unmount()
+})
+
+test('Undo takes back only what Claude set: a condition the person wrote in its place stays, and the goal goes only if it is still the one Claude wrote', async ($, on) => {
+  const workbench = project(on, { ...NPM })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: AUTO, goal: 'Add token expiry', conditions: [{ text: 'Parser tests pass', link: 'test' }, { text: 'README section written' }] })
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  // The person drops Claude's first condition and writes their own, which takes the freed id.
+  await ui.press({ key: 'dx-dc-1' })
+  await ui.press({ key: 'dx-dc-2' })
+  await ui.input({ key: 'add-condition', text: 'Mine, written afterwards' })
+  await ui.input({ key: 'goal', text: 'My own goal' })
+  await ui.unmount()
+  expect(workbench().task.doneConditions.map(one => [one.id, one.text])).toEqual([['dc-1', 'Mine, written afterwards']])
+
+  const result = await $.command.run({ command: 'swb', args: 'suggest undo', ...COMMAND })
+  expect(result.text).toBe('Removed 0 done conditions Claude set.')
+  expect(workbench().task.doneConditions.map(one => one.text)).toEqual(['Mine, written afterwards'])
+  expect(workbench().task.goal).toBe('My own goal')
+})
+
+test('no reminder in a run nobody watches (isInteractive false)', async ($, on) => {
+  project(on, { ...NPM })
+  let seen = ''
+  on('prompt.submit', ($, e) => {
+    seen = (e.context ?? []).join('\n')
+    return { text: e.text, context: e.context }
+  })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: false })
+  await $.prompt.submit({ text: 'fix the login bug', ...COMPOSER })
+  expect(seen).not.toContain(NUDGE)
+})
+
+test('CI counts as a check when the project has GitHub Actions workflows, and a goal the person wrote is kept and not undone', async ($, on) => {
+  const workbench = project(on, { ...NPM, '.github/workflows': '' })
+  let seen = ''
+  on('prompt.submit', ($, e) => {
+    seen = (e.context ?? []).join('\n')
+    return { text: e.text, context: e.context }
+  })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+  await $.prompt.submit({ text: 'fix it', ...COMPOSER })
+  expect(seen).toContain('ci (GitHub Actions)}')
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.input({ key: 'goal', text: 'My goal' })
+  await ui.unmount()
+  const done = JSON.stringify(await $.tool.call({ tool: AUTO, goal: 'Claude goal', conditions: [{ text: 'Pipeline is green', link: 'ci' }] }))
+  expect(done).toContain('The existing goal was kept.')
+  expect(workbench().task).toMatchObject({ goal: 'My goal' })
+  expect(workbench().task.doneConditions.map(one => one.link)).toEqual(['ci'])
+  expect((await $.command.run({ command: 'swb', args: 'suggest undo', ...COMMAND })).text).toBe('Removed 1 done condition Claude set.')
+  expect(workbench().task.goal).toBe('My goal')
+})

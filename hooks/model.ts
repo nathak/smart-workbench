@@ -155,14 +155,15 @@ export function removeNonGoal(wb: Workbench, index: number): Workbench {
   return editTask(wb, task => ({ ...task, nonGoals: task.nonGoals.filter((_, i) => i !== index) }))
 }
 
-export function addCondition(wb: Workbench, text: string, given?: EvidenceKind): Workbench {
+// `given` null = no link at all: the wording is not guessed at (a condition Claude wrote without a link is one only the person can verify).
+export function addCondition(wb: Workbench, text: string, given?: EvidenceKind | null): Workbench {
   if (text.trim() === '') {
     return wb
   }
 
   return editTask(wb, task => {
     const n = task.doneConditions.reduce((max, one) => Math.max(max, Number(one.id.replace('dc-', '')) || 0), 0) + 1
-    const link = given ?? guessLink(text)
+    const link = given === null ? undefined : (given ?? guessLink(text))
 
     return { ...task, doneConditions: [...task.doneConditions, { id: `dc-${n}`, text: text.trim(), ...(link ? { link } : {}) }] }
   })
@@ -174,6 +175,13 @@ export function addSuggestions(wb: Workbench, list: readonly ConditionSuggestion
   const same = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ')
 
   return list.reduce((now, one) => (now.task.doneConditions.some(item => same(item.text, one.text)) ? now : addCondition(now, one.text, one.link)), wb)
+}
+
+// What Claude's set_done_conditions writes: the goal only when there is none, each condition with its link or none. A locked contract refuses each add.
+export function setAutoConditions(wb: Workbench, input: { goal: string; conditions: readonly { text: string; link?: EvidenceKind }[] }): Workbench {
+  const withGoal = wb.task.goal.trim() === '' ? setGoal(wb, input.goal) : wb
+
+  return input.conditions.reduce((now, one) => addCondition(now, one.text, one.link ?? null), withGoal)
 }
 
 export function removeCondition(wb: Workbench, id: string): Workbench {

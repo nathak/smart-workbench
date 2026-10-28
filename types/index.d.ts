@@ -228,6 +228,10 @@ export type Live = {
   // The checks found at the project root at session start or /swb new, and the suggestion keys hidden; both session-only.
   checks?: ProjectCheck[]
   suggestHidden?: string[]
+  // How many prompts of a task got the reminder to set done conditions; session-only.
+  conditionNudge?: { task: string; asked: number }
+  // What Claude's set_done_conditions wrote for a task (and the goal, when it wrote that too), kept to undo it; session-only.
+  autoSet?: { task: string; ids: string[]; texts: string[]; goal?: string }
   // Why the live feed could not be written, while it cannot; session-only.
   feedError?: string
   // /swb live --no-prompts: the feed keeps only the 120-character start of a prompt, not its text.
