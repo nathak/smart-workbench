@@ -356,6 +356,9 @@ function workflowFields(live: Live, input: unknown): Record<string, unknown> {
 const agentAnswers = new Map<string, Record<string, unknown>>()
 // Advisors started in the background, by agent id, until their run ends.
 const backgroundAdvisors = new Map<string, { id: string; description: string }>()
+// The same agent ids, kept past the advisor's own end: the desktop app and VS Code run every subagent in the background, so its
+// report arrives afterwards as a prompt that starts a turn, and that report (once) is what carries the design into the turn.
+const advisorTasks = new Set<string>()
 
 // The answer of the subagent an Agent call ran: from the run's own last turn (found by the agent id in the call's record), or the
 // result itself when the tool returned plain text.
@@ -3191,6 +3194,25 @@ const ROLE_NOTE: Record<TeamRoleName, string> = {
   advisor: `${crew.ADVISOR}: plan, repeated errors, final check`,
 }
 
+const AGENT_COLOR: Record<string, 'success' | 'warning' | 'error' | undefined> = { pending: 'warning', running: 'warning', waiting: 'warning', completed: 'success', failed: 'error', killed: 'error' }
+
+// Puts an agent's transcript in the main view; why it did not, or undefined. `$.ui.view` is in Claude Code 2.1.300 and later.
+async function viewAgent($: $, id: string): Promise<string | undefined> {
+  try {
+    // @ts-ignore the types written by an older build lack `$.ui.view`
+    const shown = await $.ui.view({ agentId: id })
+
+    return shown?.deny
+  } catch {
+    return "this Claude Code build cannot show an agent's transcript from here"
+  }
+}
+
+// The agents list is not state the pane reads, so a change in it asks the Team tab to draw again.
+function redrawAgents($: $, live: Live): void {
+  if (live.activeTab === 'team') $.ui.invalidate('ui.render')
+}
+
 async function teamTab($: $, { els, wb, live, width }: View): Promise<RenderElement> {
   const { Box, Text, Button, Select } = els
   const row = await modelRow($)
@@ -3202,6 +3224,14 @@ async function teamTab($: $, { els, wb, live, width }: View): Promise<RenderElem
     return (list.includes(current) ? list : [current, ...list]).map(value => ({ value, label: crew.withVersion(value) }))
   }
   const toast = (text: string) => $.ui.toast(`SmartWorkbench: ${text}`)
+  // The newest few agents of the session.
+  const agents = await (async () => {
+    try {
+      return (await $.agent.list()).slice(-6).reverse()
+    } catch {
+      return []
+    }
+  })()
 
   return (
     <Box flexDirection="column">
@@ -3275,6 +3305,22 @@ async function teamTab($: $, { els, wb, live, width }: View): Promise<RenderElem
           </Box>
         )
       })()}
+      {agents.length > 0 && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold>AGENTS</Text>
+          {agents.map(agent => (
+            <Box key={`agent-${agent.id}`} gap={1} marginLeft={agent.parentId === undefined ? 0 : 2}>
+              <Text color={AGENT_COLOR[agent.status]} dimColor={agent.status === 'idle'}>
+                ●
+              </Text>
+              <Text dimColor>{agent.type.replace(/^smartworkbench:/, '')}</Text>
+              <Text wrap="truncate-end">{model.cut(redact(agent.description), Math.max(10, width - 30))}</Text>
+              <Text dimColor>{agent.status}</Text>
+              <Button key={`agent-view-${agent.id}`} plain dimColor label="View" onPress={() => void viewAgent($, agent.id).then(why => { if (why) toast(why) })} />
+            </Box>
+          ))}
+        </Box>
+      )}
       <Box marginTop={1} flexDirection="column">
         <Text dimColor>Session model setting now: {row?.value || 'unknown'}</Text>
         <Text dimColor>
@@ -3450,7 +3496,7 @@ export const register: Register = on => {
     const { policy } = await read($, liveAtom)
 
     // Opt-in team rule: no work without a locked contract that says when it is done.
-    if (policy?.requireContract && e.origin.kind !== 'plugin' && !/^\/(?:swb|smartworkbench|workbench)(?:\s|$)/.test(e.text.trimStart()) && !(wb.task.locked && wb.task.goal.trim() !== '' && wb.task.doneConditions.length > 0)) {
+    if (policy?.requireContract && e.origin.kind !== 'plugin' && e.origin.kind !== 'task-notification' && !/^\/(?:swb|smartworkbench|workbench)(?:\s|$)/.test(e.text.trimStart()) && !(wb.task.locked && wb.task.goal.trim() !== '' && wb.task.doneConditions.length > 0)) {
       return { drop: `This project requires a locked SmartWorkbench contract with at least one done condition (${POLICY_PATH}: requireContract). Run /swb new, fill it in and Lock.` }
     }
 
@@ -3463,7 +3509,8 @@ export const register: Register = on => {
     // A prompt the person types takes the session back: a running loop ends (its own passes come from the Stop hook).
     // A loop whose first pass never went out (no turn.complete after the command) rides on that prompt instead.
     let loopBlocks: string[] = []
-    if (e.origin.kind !== 'plugin' && !e.text.trimStart().startsWith('/')) {
+    // (A background agent's report is not the person: it neither ends a loop nor takes a loop's pass.)
+    if (e.origin.kind !== 'plugin' && e.origin.kind !== 'task-notification' && !e.text.trimStart().startsWith('/')) {
       const { loop: running } = await read($, liveAtom)
       if (running?.pending) {
         loopBlocks = [loop.iterationPrompt(running)]
@@ -3474,10 +3521,25 @@ export const register: Register = on => {
         $.ui.toast('SmartWorkbench: Loop ended because you sent a prompt.')
       }
     }
-    const carriesDesign = (e.origin.kind === 'plugin' && (await read($, liveAtom)).loop !== undefined) || crew.planWasApproved((await read($, liveAtom)).track ?? crew.EMPTY_TRACK)
+    // A finished background advisor's report (stamped by the engine, so not something typed) starts a turn like any prompt, but the design
+    // it gave belongs to it. A failed or stopped advisor gives none; each report counts once.
+    const handedBack =
+      wb.team?.enabled === true && e.origin.kind === 'task-notification' && e.text.trimStart().startsWith('<task-notification>')
+        ? notificationsOf(e.text).flatMap(note => (note.task !== undefined && advisorTasks.delete(note.task) && note.status === 'completed' ? [note.task] : []))
+        : []
+    const carriesDesign = (e.origin.kind === 'plugin' && (await read($, liveAtom)).loop !== undefined) || crew.planWasApproved((await read($, liveAtom)).track ?? crew.EMPTY_TRACK) || handedBack.length > 0
     // The commit the turn starts from, for a Codex review of work that gets committed within the turn.
     const turnHead = wb.team?.enabled && codex.isCodexOn(wb.team) && codex.codexOf(wb.team).review ? (await gitOut($, ['rev-parse', 'HEAD']))?.trim() : undefined
-    await updateTrack($, track => ({ ...crew.turnStart(track, startedAt, carriesDesign), ...(turnHead && /^[0-9a-f]{7,40}$/.test(turnHead) ? { turnHead } : {}) }))
+    // A report delivered into a running turn starts nothing: the turn's design, edit count and starting commit stay, and the advisor's own
+    // end (turn.complete) is what records its run. One that starts a turn is the advisor's run for it, which may not have ended yet.
+    const isMidTurn = handedBack.length > 0 && e.turnId !== undefined
+    if (!isMidTurn) {
+      await updateTrack($, track => ({
+        ...crew.turnStart(track, startedAt, carriesDesign),
+        ...(handedBack.length > 0 ? { lastAdvisorAt: Math.max(track.lastAdvisorAt ?? 0, startedAt) } : {}),
+        ...(turnHead && /^[0-9a-f]{7,40}$/.test(turnHead) ? { turnHead } : {}),
+      }))
+    }
     await setLive($, current => {
       const { turnResult: _done, ...rest } = current
 
@@ -3803,11 +3865,14 @@ export const register: Register = on => {
       await audit($, 'team.codex-review', { id: call.id })
     }
 
+    if (e.tool === 'Agent') redrawAgents($, live)
     if (e.tool === 'Agent' && e.subagent_type === crew.ADVISOR && isOk) {
       const launched = (ran.result as { agentId?: unknown } | undefined)?.agentId
       if ((e as unknown as { run_in_background?: unknown }).run_in_background === true && typeof launched === 'string') {
         // Launching a background advisor is not its review: the design and final-check gates open when its run ends.
         backgroundAdvisors.set(launched, { id: call.id, description: String(e.description ?? '') })
+        advisorTasks.add(launched)
+        if (advisorTasks.size > 50) advisorTasks.delete(advisorTasks.values().next().value as string)
       } else {
         await updateTrack($, track => crew.advisorRan(track, endedAt))
         await audit($, 'team.advisor', { id: call.id, description: e.description })
@@ -3875,9 +3940,14 @@ export const register: Register = on => {
       const advisor = backgroundAdvisors.get(e.agentId)
       if (advisor) {
         backgroundAdvisors.delete(e.agentId)
-        await updateTrack($, track => crew.advisorRan(track, Date.now()))
-        await audit($, 'team.advisor', { id: advisor.id, description: advisor.description, background: true })
+        // A run the person interrupted is not a review: it opens no gate.
+        if (e.isAborted !== true) {
+          const at = await $.clock.now()
+          await updateTrack($, track => crew.advisorRan(track, at))
+          await audit($, 'team.advisor', { id: advisor.id, description: advisor.description, background: true })
+        }
       }
+      redrawAgents($, await read($, liveAtom))
       await emit($, 'turn.agent', { agent: e.agentId, ...usageOf(e.usage) })
       // The agent's own turn is over: a second end signal for the live page's list, which a notice's status overrides when it comes.
       if (bgAgents.delete(e.agentId)) await emit($, 'bg.end', { task: e.agentId, status: 'other', by: 'turn' })

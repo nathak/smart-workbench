@@ -4,6 +4,13 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+- Team mode with a background advisor (the desktop app and VS Code run every subagent in the background): the advisor's report starts a turn of its own, and that turn now carries the design the advisor gave, so the lead's first big edit is not refused as having no design. Only a report the engine stamped as a task notice, for an advisor this session started, that completed, counts, and each report counts once; a failed or stopped advisor, a typed copy of a report and another agent's report do not. Such a report also no longer ends a `/swb loop` or gets dropped by `requireContract`, and one delivered into a running turn no longer restarts the turn's design and edit count.
+- The Team tab lists the session's newest agents (type, what it was asked, state) with a **View** button that puts that agent's transcript in the main view (Claude Code 2.1.300 and later, terminal).
+
+### Fixed
+- A background advisor's end was timed by the real clock instead of the session clock, and an advisor the person interrupted was counted as a review; it now opens no gate.
+
 ## [0.25.0] - 2026-10-28
 
 ### Changed

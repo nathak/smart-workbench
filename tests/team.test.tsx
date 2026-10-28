@@ -678,6 +678,94 @@ test('a refusal after an advisor run in an earlier turn says that run does not c
   expect(JSON.stringify(retry)).not.toContain('no design from')
 })
 
+const NOTICE = (task: string, status = 'completed') => `<task-notification>\n<task-id>${task}</task-id>\n<status>${status}</status>\n<summary>advisor ${status}</summary>\n</task-notification>`
+const REPORT = { wait: false, origin: { kind: 'task-notification' } } as const
+const BG_ADVISOR = { ...advisorCall, run_in_background: true } as never
+const advisorEnd = { answer: 'DESIGN', durationMs: 1, isAborted: false, turnId: 't9', reason: 'answer', agentId: 'adv1' } as never
+
+// The desktop app and VS Code run every subagent in the background: the advisor's report starts a turn of its own.
+async function backgroundAdvisor($: Parameters<Parameters<typeof test>[1]>[0], on: On, report: string, options: { origin?: typeof REPORT | typeof COMPOSER; before?: boolean; abort?: boolean; again?: boolean } = {}) {
+  const { clock } = world(on, { agentId: 'adv1' })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'design it', ...COMPOSER })
+  await $.tool.call(BG_ADVISOR)
+  await clock.set(Date.UTC(2026, 9, 8, 1, 1, 0))
+  const end = options.abort ? ({ ...(advisorEnd as object), isAborted: true } as never) : advisorEnd
+  if (!options.before) await $.turn.complete(end)
+  await clock.set(Date.UTC(2026, 9, 8, 1, 2, 0))
+  await $.prompt.submit({ text: report, ...(options.origin ?? REPORT) })
+  const edit = { tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '30', new_string: BIG } as const
+  // Before: the edit comes while the advisor's own turn.complete has not arrived yet.
+  const first = JSON.stringify(await $.tool.call(edit))
+  if (options.before) await $.turn.complete(end)
+  if (!options.again) return first
+  await clock.set(Date.UTC(2026, 9, 8, 1, 3, 0))
+  await $.prompt.submit({ text: report, ...REPORT })
+
+  return JSON.stringify(await $.tool.call(edit))
+}
+
+test('a finished background advisor\'s report carries its design into the turn it starts, whichever of its end and its report comes first', async ($, on) => {
+  expect(await backgroundAdvisor($, on, NOTICE('adv1'))).not.toContain('no design from')
+})
+
+test('a report is counted once: the same report again starts a turn without the design', async ($, on) => {
+  expect(await backgroundAdvisor($, on, NOTICE('adv1'), { again: true })).toContain('earlier turn')
+})
+
+test('a report delivered into a running turn keeps that turn\'s state: it does not count as a review of the edits made since', async ($, on) => {
+  const { clock } = world(on, { agentId: 'adv1' })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'team on', ...COMMAND })
+  await $.prompt.submit({ text: 'build it', ...COMPOSER })
+  await $.tool.call(BG_ADVISOR)
+  await $.turn.complete(advisorEnd)
+  await clock.set(Date.UTC(2026, 9, 8, 1, 1, 0))
+  await $.tool.call({ tool: 'Edit', file_path: `${CWD}/src/auth.js`, old_string: '5', new_string: '30' })
+  await clock.set(Date.UTC(2026, 9, 8, 1, 2, 0))
+  await $.prompt.submit({ text: NOTICE('adv1'), wait: false, origin: { kind: 'task-notification' }, turnId: 'running' } as never)
+  const stop = await $.classic.Stop({ stop_hook_active: false })
+  expect(stop.block).toContain('final check')
+})
+
+test('the report of a background advisor that ended before its own turn.complete still carries the design', async ($, on) => {
+  expect(await backgroundAdvisor($, on, NOTICE('adv1'), { before: true })).not.toContain('no design from')
+})
+
+test('a failed background advisor carries no design', async ($, on) => {
+  expect(await backgroundAdvisor($, on, NOTICE('adv1', 'failed'))).toContain('no design from')
+})
+
+test('an interrupted background advisor opens no gate', async ($, on) => {
+  expect(await backgroundAdvisor($, on, NOTICE('adv1', 'killed'), { abort: true })).toContain('no design from')
+})
+
+test('a typed copy of the report carries no design', async ($, on) => {
+  expect(await backgroundAdvisor($, on, NOTICE('adv1'), { origin: COMPOSER })).toContain('no design from')
+})
+
+test('a report of an agent that was not a recorded advisor carries no design', async ($, on) => {
+  expect(await backgroundAdvisor($, on, NOTICE('other'))).toContain('no design from')
+})
+
+test('the Team tab lists the newest agents, newest first, without the plugin prefix', async ($, on) => {
+  world(on)
+  const agents = Array.from({ length: 8 }, (_, i) => ({ id: `a${i}`, description: `task ${i + 1}`, type: i === 7 ? 'smartworkbench:advisor' : 'Explore', status: 'completed' }))
+  on('agent.list', () => ({ value: agents }) as never)
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-team' })
+  expect(await ui.find({ type: 'Text', text: 'AGENTS' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /task 8/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /task 3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /task 2/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: 'advisor' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('plan review and design are each asked once per turn; notebook edits and subagent edits are judged right', async ($, on) => {
   world(on)
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
@@ -813,6 +901,25 @@ test('the command\'s own stop is not a pass, and a slash command neither ends no
 
   await $.prompt.submit({ text: '/swb loop status', ...COMPOSER })
   expect((await $.command.run({ command: 'swb', args: 'loop status', ...COMMAND })).text).toContain('0 of 2')
+})
+
+test('a background agent\'s report neither ends a running loop nor is held back by requireContract', async ($, on) => {
+  world(on, { files: { '.claude/smartworkbench.json': JSON.stringify({ requireContract: true }) } })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.session.start(start)
+  expect((await $.prompt.submit({ text: NOTICE('x'), ...REPORT })).drop).toBe(undefined)
+  expect((await $.prompt.submit({ text: NOTICE('x'), ...COMPOSER })).drop).toContain('requires a locked SmartWorkbench contract')
+})
+
+test('a background agent\'s report does not end a running loop', async ($, on) => {
+  world(on)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  await $.command.run({ command: 'swb', args: 'loop inf tidy', ...COMMAND })
+  await $.prompt.submit({ text: 'go', ...COMPOSER })
+  await $.prompt.submit({ text: NOTICE('x'), ...REPORT })
+  expect((await $.classic.Stop({ stop_hook_active: false })).block).toContain('pass 2')
 })
 
 test('a prompt the person types ends a running loop', async ($, on) => {

@@ -191,7 +191,7 @@ Band above the prompt: `WB ● Goal │ Ctx +2 pins · 42% │ Done 1/2 │ Guar
 - Image generation needs no switch: with Codex on, a plain `task --write "<what to draw>; save it as assets/<name>.png ..."` runs without asking when the brief names an image and one output file under `assets/`, `images/`, `public/` or `static/`. Codex's imagegen tool makes the picture; its path is only as binding as the brief, since Codex's own writes do not pass the guard. Any other `--write` still asks. After an image run SmartWorkbench compares `git status` before and after and warns (toast, flag in the live view, audit line) when a file outside those picture paths changed; the comparison covers each changed path's size and modification time, so a further edit to a file that was already modified is seen too. It never reverts anything and skips background runs.
 - The live view shows a Codex box and link. The counts are runs of the command, not passes. Background jobs are shown as "state not tracked here".
 
-**Team tab** (hotkey `5`, or `/swb team`): turn team mode on or off and pick each role's model and effort from drop-downs. Remote or keyboard: `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`. Each choice is an alias and the list shows the version it usually stands for (`opus (claude-opus-5-5)`); Claude Code decides what an alias resolves to, so the hint can lag behind a newer model.
+**Team tab** (hotkey `5`, or `/swb team`): turn team mode on or off and pick each role's model and effort from drop-downs. Remote or keyboard: `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`. Each choice is an alias and the list shows the version it usually stands for (`opus (claude-opus-5-5)`); Claude Code decides what an alias resolves to, so the hint can lag behind a newer model. Below the roles it lists the session's newest agents (type, task, state); **View** puts one's transcript in the main view (terminal, Claude Code 2.1.300 and later).
 
 | Role | Default | What a change does |
 |---|---|---|
@@ -676,7 +676,7 @@ Guard 파일에서 감사 로그를 켰을 때 최근 `n`개(기본 20개) 항�
 - 이미지 생성은 별도 스위치가 필요 없습니다. Codex를 켜 두면, 그림 설명과 `assets/`·`images/`·`public/`·`static/` 아래 출력 파일 하나를 적은 단순 `task --write "...; assets/<이름>.png로 저장"` 명령은 묻지 않고 실행됩니다. 그림은 Codex의 imagegen 도구가 만들며, Codex가 직접 쓰는 파일은 Guard를 거치지 않으므로 경로는 지시문이 정하는 만큼만 지켜집니다. 그 외 `--write`는 계속 묻습니다. 이미지 실행이 끝나면 `git status`를 실행 전후로 비교해, 그림 경로 밖의 파일이 바뀌었을 때 경고합니다(토스트, 라이브 화면의 플래그, 감사 기록). 경로마다 크기와 수정 시각까지 비교하므로 이미 수정돼 있던 파일을 더 고친 것도 알아봅니다. 아무것도 되돌리지 않으며 백그라운드 실행은 점검하지 않습니다.
 - 라이브 화면에 Codex 박스와 연결선이 표시됩니다. 표시되는 숫자는 명령 실행 횟수이지 통과 횟수가 아닙니다. 백그라운드 작업은 "여기서 상태를 추적하지 않음"으로 표시됩니다.
 
-**Team 탭**(단축키 `5`, 또는 `/swb team`): 팀 모드를 켜고 끄며, 역할마다 모델과 effort를 드롭다운에서 고릅니다. 원격·키보드에서는 `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`처럼 씁니다. 선택지는 별칭이며, 목록에는 그 별칭이 보통 가리키는 버전이 함께 나옵니다(`opus (claude-opus-5-5)`). 별칭이 어느 버전으로 풀리는지는 Claude Code가 정하므로, 새 모델이 나오면 이 표시가 한동안 뒤처질 수 있습니다.
+**Team 탭**(단축키 `5`, 또는 `/swb team`): 팀 모드를 켜고 끄며, 역할마다 모델과 effort를 드롭다운에서 고릅니다. 원격·키보드에서는 `/swb team advisor opus max`, `/swb team explorer sonnet low`, `/swb team lead opus[1m] high`처럼 씁니다. 선택지는 별칭이며, 목록에는 그 별칭이 보통 가리키는 버전이 함께 나옵니다(`opus (claude-opus-5-5)`). 별칭이 어느 버전으로 풀리는지는 Claude Code가 정하므로, 새 모델이 나오면 이 표시가 한동안 뒤처질 수 있습니다. 역할 아래에는 이 세션의 최근 에이전트(종류, 맡은 일, 상태)가 나오고, **View**를 누르면 그 대화가 메인 화면에 열립니다(터미널, Claude Code 2.1.300 이상).
 
 | 역할 | 기본값 | 바꾸면 |
 |---|---|---|
