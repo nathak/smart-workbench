@@ -98,6 +98,15 @@ describe('whether a test run passed, from its own summary', () => {
     expect(read('claude plugin test . 2>&1 | tail -3; claude plugin validate . 2>&1 | tail -1; tsc --noEmit | tail -2', ' 5 pass\n 0 fail\n').ok).toBe(true)
   })
 
+  test('git add and git status after the run are allowed; a commit after it can only fail the run', () => {
+    const jest = 'Test Suites: 1 passed, 1 total\nTests: 9 passed, 9 total'
+    expect(read('npx jest | tail -3; git add -A', jest).ok).toBe(true)
+    expect(read('claude plugin test . 2>&1 | tail -5; git status --short', ' 5 pass\n 0 fail\n').ok).toBe(true)
+    const commit = 'claude plugin test . 2>&1 | tail -5; git add -A && git commit -qm x'
+    expect(read(commit, ' 5 pass\n 0 fail\n')).toMatchObject({ ok: null, facts: { passed: 5, failed: 0 } })
+    expect(read(commit, ' 4 pass\n 1 fail\n').ok).toBe(false)
+  })
+
   test('a suite that failed to load, a cut suite line, several summaries or a git hook never make a pass', () => {
     const tests = 'Tests:       10 passed, 10 total'
     expect(read('npx jest 2>&1 | tail -20', `Test Suites: 1 failed, 3 passed, 4 total\n${tests}\nSnapshots:   0 total`).ok).toBe(false)
@@ -161,6 +170,12 @@ describe('whether a test run passed, from its own summary', () => {
       'python3 - <<\'E\'\nprint(1)\nnpm test | tail',
       'cat > f <<E\n$(date)\nE\nnpm test | tail',
       'npm test | tail; cp a b',
+      'npm test | tail; git add -p',
+      'npm test | tail; git status -v',
+      'npm test | tail; git commit --dry-run -v',
+      'npm test | tail; git diff',
+      'npm test | tail; git show',
+      'npm test | tail; git -C x add .',
     ]) expect(read(command, out)).toEqual({ ok: null })
   })
 

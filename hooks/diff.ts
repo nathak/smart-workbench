@@ -119,20 +119,25 @@ export function coverageOf(changed: Changed, evidence: readonly EvidenceRecord[]
       return { path, hunks, state: 'untracked' as const }
     }
 
-    const after = evidence.filter(one => one.at >= editedAt && one.ok !== null)
+    // A run that was interrupted or sent to the background (unsettled) says nothing; a run that finished without a verdict (ok null) does not prove anything either, but it ends the failure before it.
+    const after = evidence.filter(one => one.at >= editedAt && (one.ok !== null || one.unsettled !== true))
     // The latest result of each kind of check: a passing lint run does not hide a failing test run.
     const latestByKind = new Map<string, EvidenceRecord>()
     for (const one of after) latestByKind.set(one.kind, one)
-    const failing = [...latestByKind.values()].filter(one => one.ok === false).sort((a, b) => a.at - b.at)
+    const latest = [...latestByKind.values()]
+    const failing = latest.filter(one => one.ok === false).sort((a, b) => a.at - b.at)
+    // A failure that a later run of its kind left undecided is no longer shown as failing, and still keeps the file from counting as proven.
+    // (Only when the last verdict of that kind was the failure: one a passing run already resolved is history.)
+    const isCleared = latest.some(one => one.ok === null && [...after].reverse().find(two => two.kind === one.kind && two.ok !== null)?.ok === false)
     const provenBy = [...after].reverse().find(one => one.ok === true)
     const failedBy = failing[failing.length - 1]
-    const state = after.length === 0 ? 'unproven' : failing.length > 0 ? 'failing' : 'proven'
+    const state = failing.length > 0 ? 'failing' : isCleared || !provenBy ? 'unproven' : 'proven'
 
     return {
       path,
       hunks,
       editedAt,
-      ...(provenBy ? { provenBy } : {}),
+      ...(provenBy && state !== 'unproven' ? { provenBy } : {}),
       ...(failedBy ? { failedBy } : {}),
       state,
     }

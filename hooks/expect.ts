@@ -69,6 +69,8 @@ export type TestRead = { ok: boolean | null; facts?: EvidenceRecord['facts'] }
 const NONE: TestRead = { ok: null }
 // A later command that runs tests, or prints a summary line like one, would add lines that are not this run's.
 const RUNNER = /^(?:npm|pnpm|yarn|bun|make|gradle|\.?\/?gradlew|mvn|\.?\/?mvnw)(?=\s|$)/
+// After the run: git commands that change no working file and print no diff. A commit runs hooks, so it can only fail the run.
+const GIT_AFTER = /^git\s+(?:add|status|commit)(?=\s|$)(?!.*\s(?:-[a-zA-Z]*[vpi][a-zA-Z]*|--(?:verbose|patch|interactive|dry-run|edit))(?=\s|=|$))/
 // Summaries that read as all passed while the run still fails.
 const VETO = [/^Errors\s+\d+ errors?$/, /^\d+ errors?$/, /coverage threshold .* not met/i, /Required test coverage of .* not reached/i, /does not meet (?:global )?threshold/i, /^(?:# |ℹ )cancelled [1-9]\d*$/]
 // jest and vitest print the suite (file) totals right before the test totals; a suite that failed to load leaves the test totals clean.
@@ -108,6 +110,9 @@ function shapeOf(text: string): { tests: number; isLast: boolean; canPass: boole
       if (/^git\s+(?:commit|checkout|switch)(?=\s|$)/.test(body)) canPass = false
       continue
     } else if (tests > 0 && (kind === 'typecheck' || kind === 'lint' || (kind === 'build' && !RUNNER.test(body)))) {
+      continue
+    } else if (tests > 0 && GIT_AFTER.test(body)) {
+      if (/^git\s+commit(?=\s|$)/.test(body)) canPass = false
       continue
     } else return undefined
   }

@@ -119,6 +119,25 @@ describe('evidence, coverage and pins', () => {
     expect(coverageOf(changed, [evidence[0] as (typeof evidence)[number], { ...evidence[1]!, id: 'e3', kind: 'test' as const }])[0]?.state).toBe('proven')
   })
 
+  test('a failure that a later run of its kind left undecided is unproven, not failing; another kind or an unsettled run does not clear it', async () => {
+    const changed = { files: ['src/a.ts'], edits: { 'src/a.ts': 10 }, hunks: {}, added: 0, removed: 0 }
+    const run = (kind: 'test' | 'lint', ok: boolean | null, at: number, unsettled?: true) => ({ id: `e${at}`, kind, command: kind, ok, at, ...(unsettled ? { unsettled } : {}) })
+    const state = (...evidence: ReturnType<typeof run>[]) => coverageOf(changed, evidence)[0]
+
+    const cleared = state(run('test', false, 20), run('test', null, 30))
+    expect(cleared?.state).toBe('unproven')
+    expect(cleared?.failedBy).toBeUndefined()
+    expect(cleared?.provenBy).toBeUndefined()
+    expect(state(run('test', false, 20), run('lint', true, 25), run('test', null, 30))?.state).toBe('unproven')
+    expect(state(run('test', false, 20), run('lint', null, 30))?.state).toBe('failing')
+    expect(state(run('test', false, 20), run('test', null, 30, true))?.state).toBe('failing')
+    expect(state(run('test', true, 20), run('test', null, 30))?.state).toBe('proven')
+    expect(state(run('test', false, 20), run('test', true, 25), run('test', null, 30))?.state).toBe('proven')
+    expect(state(run('test', true, 20), run('test', false, 25), run('test', null, 30))?.state).toBe('unproven')
+    expect(state(run('test', null, 5), run('test', false, 20))?.state).toBe('failing')
+    expect(state(run('test', null, 20))?.state).toBe('unproven')
+  })
+
   test('a format-only or no-test run is not a check, however it is started', async () => {
     for (const command of ['ruff format .', 'uv run ruff format .', 'python -m ruff format x.py', 'npx vitest run --passWithNoTests']) expect(evidenceKindsOf(command)).toEqual([])
   })

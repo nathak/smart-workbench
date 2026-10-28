@@ -4047,7 +4047,7 @@ export const register: Register = on => {
           const ok = isUnsettled ? null : (checkOutcome(e.command, kind, isOk) ?? (read?.ok === false ? false : (outcomeFromOutput(e.command, kind, streams, isOk) ?? read?.ok ?? null)))
           // The counts the run's own summary line shows, for a test run that finished: what a condition's expectation is judged by.
           const facts = read?.facts
-          const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt, ...(facts ? { facts } : {}) }
+          const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt, ...(facts ? { facts } : {}), ...(isUnsettled ? { unsettled: true as const } : {}) }
           updated = model.addEvidence(updated, record)
           fresh.push(record)
         })

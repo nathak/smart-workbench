@@ -4,6 +4,10 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+- The Files tab and the import graph kept a file as `failing` after a failed test run even when later runs passed but could not be read (a pipe hid their exit code and their summary was not readable): only runs with a verdict counted, so an undecided run never replaced the failure. A failure that a later run of the same kind left undecided now shows as `unproven` (never `proven`); a run that was interrupted or sent to the background still clears nothing.
+- A test run followed by `git add`, `git status` or `git commit` in the same command (`npm test | tail; git add -A && git commit -qm x`) is read from its own summary again: add and status keep the verdict, a commit (whose hooks may print summaries of their own) can only fail the run. Anything that prints a diff (`-p`, `-v`, `--dry-run`, `git diff`, `git show`), `git -C`, and any other command after the run stay unread.
+
 ## [0.26.0] - 2026-10-28
 
 ### Added

@@ -138,6 +138,8 @@ export type ToolCallRecord = {
 }
 
 export type EvidenceRecord = {
+  // Interrupted or sent to the background: no known outcome, and it clears no failure.
+  unsettled?: true
   id: string
   kind: EvidenceKind
   command: string
