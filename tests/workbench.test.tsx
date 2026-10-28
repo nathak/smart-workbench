@@ -593,3 +593,63 @@ test('files the work keeps returning to are suggested and can be pinned or hidde
   expect(await ui.find({ key: 'pinsug-tests/session.test.ts' })).toBe(undefined)
   await ui.unmount()
 })
+
+test('a project\'s own checks are offered as done conditions: listed by /swb suggest, added with their link, and offered only while the contract is open', async ($, on) => {
+  const files: Record<string, string> = { 'package.json': JSON.stringify({ scripts: { test: 'vitest', build: 'vite build' } }), 'tsconfig.json': '{}' }
+  const workbench = world(on, {}, files)
+  on('fs.exists', ($, e) => ({ value: Object.keys(files).some(name => e.path.endsWith(`/${name}`)) }))
+  on('fs.list', () => ({ value: Object.keys(files).map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) }))
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__smartworkbench__${e.name}` } }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+
+  const listed = await $.command.run({ command: 'swb', args: 'suggest', ...COMMAND })
+  expect(listed.text).toContain('Tests pass: npm test (test · npm test)')
+  expect(listed.text).toContain('Typecheck passes: npx tsc --noEmit')
+  expect(listed.text).toContain('Build passes: npm run build')
+  expect((await $.command.run({ command: 'swb', args: 'status', ...COMMAND })).text).toContain('Suggested done conditions: 3')
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  await ui.press({ key: 'sug-add-check:test' })
+  expect(workbench().task.doneConditions.map(one => [one.text, one.link])).toEqual([['Tests pass: npm test', 'test']])
+  await ui.press({ key: 'sug-hide-check:build' })
+  expect((await $.command.run({ command: 'swb', args: 'suggest', ...COMMAND })).text).not.toContain('Build passes')
+  await ui.unmount()
+
+  const added = await $.command.run({ command: 'swb', args: 'suggest add', ...COMMAND })
+  expect(added.text).toContain('Added 1 done condition')
+  expect(workbench().task.doneConditions.map(one => one.link)).toEqual(['test', 'typecheck'])
+  expect((await $.command.run({ command: 'swb', args: 'suggest', ...COMMAND })).text).toContain('Nothing to suggest')
+
+  const again = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await again.press({ key: 'tab-intent' })
+  await again.input({ key: 'goal', text: 'Ship it' })
+  await again.unmount()
+  await $.command.run({ command: 'swb', args: 'lock', ...COMMAND })
+  expect(workbench().task.locked).toBe(true)
+  expect((await $.command.run({ command: 'swb', args: 'suggest add', ...COMMAND })).text).toContain('locked')
+})
+
+test('/swb new says how many conditions it can suggest, and a condition with no linked check is called out', async ($, on) => {
+  const files: Record<string, string> = { 'Cargo.toml': '[package]' }
+  const workbench = world(on, {}, files)
+  on('fs.exists', () => ({ value: false }))
+  on('fs.list', () => ({ value: Object.keys(files).map(name => ({ name, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) }))
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__smartworkbench__${e.name}` } }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true })
+
+  const fresh = await $.command.run({ command: 'swb', args: 'new', ...COMMAND })
+  expect(fresh.text).toContain('2 done conditions suggested in the Intent tab')
+  expect(workbench().task.doneConditions).toEqual([])
+
+  const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+  await ui.press({ key: 'tab-intent' })
+  await ui.input({ key: 'add-condition', text: '루프 100번 돌았는지 확인' })
+  await ui.unmount()
+  const status = (await $.command.run({ command: 'swb', args: 'status', ...COMMAND })).text
+  expect(status).toContain('1 done condition has no linked check')
+})

@@ -56,6 +56,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 |---|---|
 | `/swb` | Open the panel |
 | `/swb new` | Start a new task contract |
+| `/swb suggest [add]` | List done conditions offered from the project's checks and the goal's wording; `add` adds them all |
 | `/swb lock` · `/swb unlock` | Lock or unlock the contract |
 | `/swb team [on\|off]` | Team mode: Opus designs and reviews, Sonnet builds, Haiku explores; opens the Team tab |
 | `/swb live [port\|stop\|off] [--no-prompts]` | Start or stop (`stop` or `off`) the live web view of the request flow |
@@ -86,6 +87,9 @@ Opens the SmartWorkbench panel on the last tab used. Where no panel can be shown
 
 #### `/swb new`
 Starts a fresh task contract and opens the Intent tab; when the project guard file names a `defaultTemplate`, the new task starts from that team template. If a goal is already set it asks first (`Start new` / `Keep current`). Without a template goal, the goal is drafted from your last prompt in the session or, failing that, the branch name (`fix/PROJ-12-login-expiry` → `Login expiry`); edit it before locking. The previous goal, constraints, non-goals, done conditions, evidence and changed-file record are cleared and the contract is unlocked. Pins, tool call history and the guard profile are kept.
+
+#### `/swb suggest [add]`
+Done conditions are never made without you, but they are offered. The checks at the project root are read at session start and by `/swb new` (`package.json` scripts, pytest/mypy/ruff config, `Cargo.toml`, `go.mod`, `gradlew`, `pom.xml`, `Makefile` targets, a Claude Code plugin's own `claude plugin test`/`validate`; the root only, one check per kind), and each becomes a condition such as `Tests pass: npm test`, already linked to that kind of check, so running the command puts a result on it. The goal's wording adds two that no command can verify, with no link: a review request (`review`, `리뷰`, `검토`) and a count of two or more (`100 times`, `100번`); mark those with Verify. The Intent tab lists them under **SUGGESTED** with `Add`, `Hide` and `Add all`; `/swb suggest` prints them and `/swb suggest add` adds them all. Nothing is offered once the contract is locked, nor what it already says. A condition with no linked check shows `by hand` and the status says so. `/swb new` only tells how many are on offer.
 
 #### `/swb lock` · `/swb unlock`
 Lock the contract (it is added to every prompt from then on) or unlock it to edit; the same as the Intent tab's `Lock` button, handy from the keyboard or a remote surface. Locking needs a goal.
@@ -461,6 +465,7 @@ hooks/context.ts     pin ranges, snapshots, serialization and injection
 hooks/report.ts      handoff Markdown, tool row badge text
 hooks/policy.ts      project guard file parsing, globs, rule application
 hooks/files.ts       file classification, suggestions
+hooks/suggest.ts     done conditions offered from the project's checks and the goal's wording
 hooks/diff.ts        git diff region parsing, per-file evidence links
 hooks/team.ts        audit lines, CI results, issue refs, shared task file
 hooks/crew.ts        team mode decisions (design first, plan review, repeated error, final check)
@@ -541,6 +546,7 @@ claude plugin update smartworkbench
 |---|---|
 | `/swb` | 패널 열기 |
 | `/swb new` | 새 작업 계약 시작 |
+| `/swb suggest [add]` | 프로젝트의 점검 명령과 목표 문구에서 제안한 완료 조건을 보여 줍니다. `add`는 전부 추가 |
 | `/swb lock` · `/swb unlock` | 계약 잠금·해제 |
 | `/swb team [on\|off]` | 팀 모드: Opus 설계·검토, Sonnet 구축, Haiku 탐색. Team 탭 열기 |
 | `/swb live [포트\|stop\|off] [--no-prompts]` | 요청 흐름 실시간 웹 화면 시작·종료(`stop`·`off`) |
@@ -571,6 +577,9 @@ SmartWorkbench 패널을 마지막에 보던 탭으로 엽니다. 패널을 띄�
 
 #### `/swb new`
 새 작업 계약을 시작하고 Intent 탭을 엽니다. 프로젝트 Guard 파일에 `defaultTemplate`이 있으면 그 팀 템플릿으로 시작합니다. 이미 목표가 있으면 먼저 묻습니다(`Start new` / `Keep current`). 템플릿에 목표가 없으면 이 세션의 마지막 프롬프트, 없으면 브랜치 이름(`fix/PROJ-12-login-expiry` → `Login expiry`)으로 목표 초안을 채웁니다. 잠그기 전에 고치면 됩니다. 이전 목표·제약·하지 않을 일·완료 조건·증거·변경 파일 기록을 비우고 잠금을 풉니다. Pin, 툴 호출 기록, Guard 프로필은 유지됩니다.
+
+#### `/swb suggest [add]`
+완료 조건은 사용자 몰래 만들지 않고 제안만 합니다. 프로젝트 루트의 점검 명령을 세션 시작과 `/swb new`에서 읽고(`package.json` 스크립트, pytest·mypy·ruff 설정, `Cargo.toml`, `go.mod`, `gradlew`, `pom.xml`, `Makefile` 대상, Claude Code 플러그인 자체의 `claude plugin test`·`validate`. 루트만, 종류마다 하나), 각각을 `Tests pass: npm test` 같은 조건으로 제안합니다. 이미 그 종류의 점검에 연결돼 있어서 명령을 실행하면 결과가 붙습니다. 목표 문구에서는 명령으로 확인할 수 없는 조건 둘을 연결 없이 제안합니다. 리뷰 요청(`review`, `리뷰`, `검토`)과 2 이상의 횟수(`100 times`, `100번`)이고, Verify로 직접 표시합니다. Intent 탭의 **SUGGESTED**에 `Add`·`Hide`·`Add all` 버튼이 나오고, `/swb suggest`는 목록을 출력하며 `/swb suggest add`는 전부 추가합니다. 계약이 잠겨 있으면 제안하지 않고, 이미 있는 내용도 제안하지 않습니다. 연결된 점검이 없는 조건에는 `by hand`가 붙고 상태 출력도 알려 줍니다. `/swb new`는 제안 개수만 알려 줍니다.
 
 #### `/swb lock` · `/swb unlock`
 계약을 잠그거나(이때부터 매 프롬프트에 붙음) 편집하려고 잠금을 풉니다. Intent 탭의 `Lock` 버튼과 같고, 키보드나 원격 화면에서 쓰기 편합니다. 잠그려면 목표가 있어야 합니다.
@@ -943,6 +952,7 @@ hooks/context.ts     Pin 범위·Snapshot·직렬화와 주입 조립
 hooks/report.ts      handoff Markdown, 툴 행 배지 문구
 hooks/policy.ts      프로젝트 Guard 파일 파싱, glob, 규칙 적용
 hooks/files.ts       파일 분류, Suggested 선정
+hooks/suggest.ts     프로젝트 점검 명령·목표 문구에서 완료 조건 제안
 hooks/diff.ts        git diff 구간 파싱, 파일별 증거 연결
 hooks/team.ts        감사 로그, CI 결과, 이슈 참조, 공유 작업 파일
 hooks/crew.ts        팀 모드 판단 (설계 먼저, 계획 검토, 반복 오류, 마무리 점검)

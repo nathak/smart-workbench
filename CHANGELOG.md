@@ -4,6 +4,10 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+- Done conditions are offered, not left to be typed. The checks at the project root (package.json scripts, pytest/mypy/ruff config, Cargo.toml, go.mod, gradlew, pom.xml, Makefile targets, a Claude Code plugin's own test and validate commands) are read at session start and by `/swb new`; the Intent tab lists them under **SUGGESTED** as conditions already linked to that kind of check (`Tests pass: npm test`), with `Add`, `Hide` and `Add all`. The goal's wording adds a review condition and a count condition (`100 times`, `100번`) with no link, to be marked with Verify. `/swb suggest` prints the list and `/swb suggest add` adds it; nothing is offered once the contract is locked or for what it already says, and `/swb new` only says how many are on offer.
+- A done condition with no linked check shows `by hand` in the Intent tab, with a line saying to mark it with Verify, and `/swb status` counts them: such a condition used to stay pending without a word.
+
 ### Changed
 - Team mode with a background advisor (the desktop app and VS Code run every subagent in the background): the advisor's report starts a turn of its own, and that turn now carries the design the advisor gave, so the lead's first big edit is not refused as having no design. Only a report the engine stamped as a task notice, for an advisor this session started, that completed, counts, and each report counts once; a failed or stopped advisor, a typed copy of a report and another agent's report do not. Such a report also no longer ends a `/swb loop` or gets dropped by `requireContract`, and one delivered into a running turn no longer restarts the turn's design and edit count.
 - The Team tab lists the session's newest agents (type, what it was asked, state) with a **View** button that puts that agent's transcript in the main view (Claude Code 2.1.300 and later, terminal).

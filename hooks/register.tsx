@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { ConditionStatus, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, TeamRoleName, Template, ToolCallRecord, Track, Workbench } from '../types'
+import type { ConditionStatus, ConditionSuggestion, ContextPin, EvidenceKind, EvidenceRecord, GuardProfile, Live, Proposal, ProposalChange, Tab, TeamRoleName, Template, ToolCallRecord, Track, Workbench } from '../types'
 import * as codex from './codex'
 import * as crew from './crew'
 import * as loop from './loop'
@@ -17,6 +17,7 @@ import { checkOutcome, completionOf, evidenceKindsOf, expectText, isStale, judge
 import { canSet, checkExpectInput, EXPECT_DESCRIPTION, EXPECT_TOOL, expectOf, readTestRun } from './expect'
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
+import * as suggest from './suggest'
 import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
@@ -1774,6 +1775,28 @@ async function goalDraftFor($: $): Promise<string | undefined> {
   return model.goalDraft(lastPrompt, branch?.exitCode === 0 ? branch.stdout : undefined)
 }
 
+// The checks the project root shows, read once at session start and by /swb new and /swb suggest: the Intent tab draws without any IO.
+async function refreshChecks($: $): Promise<void> {
+  try {
+    const root = await $.session.root()
+    const names = (await $.fs.list(root).catch(() => [])).map(one => one.name)
+    if (await $.fs.exists(`${root}/.claude-plugin/plugin.json`).catch(() => false)) names.push('.claude-plugin/plugin.json')
+    const texts: Partial<Record<string, string>> = {}
+    for (const name of suggest.ROOT_READS) {
+      if (names.includes(name)) texts[name] = String(await $.fs.read(`${root}/${name}`).catch(() => '')).slice(0, 200_000)
+    }
+    const checks = suggest.projectChecks({ names, texts })
+    await setLive($, live => ({ ...live, checks }))
+  } catch {
+    // Suggestions are optional.
+  }
+}
+
+// The done conditions on offer for the task as it stands.
+function suggestionsFor(wb: Workbench, live: Live): ConditionSuggestion[] {
+  return suggest.suggestConditions(wb.task, live.checks ?? [], live.suggestHidden)
+}
+
 // ---- commands
 
 // The desktop app's heartbeat (tools/desktop-state.mjs), or undefined when it does not run. Never throws.
@@ -2218,6 +2241,8 @@ async function scopeCommand($: $, args: string): Promise<{ text: string }> {
 function statusText(wb: Workbench, live: Live): string {
   const constraints = wb.task.constraints.filter(one => one.isActive).map(one => `  [${one.priority === 'hard' ? 'H' : 'S'}] ${one.text}`)
   const pins = wb.context.pins.map(one => `  ${one.kind === 'file' ? one.path : `Note: ${one.text}`}`)
+  const unlinked = wb.task.doneConditions.filter(suggest.isUnlinked).length
+  const offered = suggestionsFor(wb, live).length
 
   return [
     model.bandText(wb, live),
@@ -2230,6 +2255,8 @@ function statusText(wb: Workbench, live: Live): string {
     ...((live.sessionAllows ?? []).length > 0 ? [`Allowed for this session: ${(live.sessionAllows ?? []).map(one => one.label).join(', ')}`] : []),
     ...(live.policy ? [`Guard file: ${live.policy.source} (${live.policy.rules.length} rules${live.policy.profile ? `, profile ${live.policy.profile}` : ''})`] : []),
     ...(wb.task.doneConditions.length > 0 ? [turnSummary(wb.task, wb.evidence, lastCheckedEdit(wb.changed))] : []),
+    ...(unlinked > 0 ? [`${unlinked} done condition${unlinked === 1 ? ' has' : 's have'} no linked check; Verify ${unlinked === 1 ? 'it' : 'them'} by hand in the Evidence tab.`] : []),
+    ...(offered > 0 ? [`Suggested done conditions: ${offered} (Intent tab, or /swb suggest add)`] : []),
   ].join('\n')
 }
 
@@ -2406,17 +2433,41 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
     const team = (await read($, liveAtom)).policy
     const template = team?.templates.find(one => one.name === team.defaultTemplate)
     const draft = template?.goal ? undefined : await goalDraftFor($)
+    await refreshChecks($)
     await mutate($, current => {
       const fresh = template ? model.applyTeamTemplate(model.newTask(current), template) : model.newTask(current)
       return draft ? model.setGoal(fresh, draft) : fresh
     })
+    await setLive($, current => ({ ...current, suggestHidden: undefined }))
     await audit($, 'task.new', template ? { template: template.name } : {})
     await openPane($, 'intent')
 
     const from = template ? ` from the team template "${template.name}"` : ''
     const goal = draft ? ` Goal drafted as "${model.cut(draft, 60)}"; edit it if needed.` : ''
 
-    return { text: `New SmartWorkbench task${from}.${goal} Add done conditions, then Lock.` }
+    const offered = suggestionsFor(await read($, wbAtom), await read($, liveAtom)).length
+    const tip = offered > 0 ? ` ${offered} done condition${offered === 1 ? '' : 's'} suggested in the Intent tab; Add the ones you mean, then Lock.` : ' Add done conditions, then Lock.'
+
+    return { text: `New SmartWorkbench task${from}.${goal}${tip}` }
+  }
+
+  if (word === 'suggest') {
+    await refreshChecks($)
+    const wb = await read($, wbAtom)
+    const live = await read($, liveAtom)
+    if (wb.task.locked) return { text: 'The contract is locked; unlock it to add conditions.' }
+    const offered = suggestionsFor(wb, live)
+    if (args.trim().toLowerCase().split(/\s+/)[1] === 'add') {
+      if (offered.length === 0) return { text: 'Nothing to add.' }
+      await mutate($, current => model.addSuggestions(current, offered))
+
+      return { text: `Added ${offered.length} done condition${offered.length === 1 ? '' : 's'}; review them in the Intent tab.` }
+    }
+    if (offered.length === 0) {
+      return { text: (live.checks ?? []).length === 0 ? 'No checks found at the project root (package.json, pyproject.toml, Cargo.toml, go.mod, gradlew, pom.xml, Makefile); type a condition and link it in the Evidence tab.' : 'Nothing to suggest: the contract already covers what was found.' }
+    }
+
+    return { text: ['Suggested done conditions (/swb suggest add adds them all):', ...offered.map(one => `  ◇ ${one.text} (${one.link ? `${one.link} · ${one.command ?? ''}` : 'by hand'})`)].join('\n') }
   }
 
   if (word === 'team') {
@@ -2681,6 +2732,7 @@ function intentTab($: $, { els, wb, live, width }: View): RenderElement {
   const { Box, Text, Button, Input } = els
   const { task } = wb
   const ro = task.locked
+  const offered = suggestionsFor(wb, live)
 
   return (
     <Box flexDirection="column">
@@ -2774,11 +2826,13 @@ function intentTab($: $, { els, wb, live, width }: View): RenderElement {
         return (
           <Box key={`d-${one.id}`} gap={1}>
             <Text color={STATUS_COLOR[status]}>{markOf(status)}</Text>
-            <Text wrap="truncate-end">{model.cut(one.text, width - 8)}</Text>
+            <Text wrap="truncate-end">{model.cut(one.text, suggest.isUnlinked(one) ? width - 16 : width - 8)}</Text>
+            {suggest.isUnlinked(one) && <Text dimColor>by hand</Text>}
             {!ro && <Button key={`dx-${one.id}`} plain dimColor label="×" onPress={() => void mutate($, wb => model.removeCondition(wb, one.id))} />}
           </Box>
         )
       })}
+      {task.doneConditions.some(suggest.isUnlinked) && <Text dimColor wrap="wrap">No linked check: mark it with Verify in the Evidence tab when done.</Text>}
       {!ro && <Input
           key="add-condition"
           placeholder="+ done condition"
@@ -2787,6 +2841,22 @@ function intentTab($: $, { els, wb, live, width }: View): RenderElement {
           onInput={value => void setDraft($, 'add-condition', value)}
           onSubmit={value => void submitDraft($, 'add-condition', () => mutate($, wb => model.addCondition(wb, value)))}
         />}
+      {!ro && offered.length > 0 && (
+        <Box gap={1}>
+          <Text bold>SUGGESTED</Text>
+          {offered.length > 1 && <Button key="sug-all" plain label="Add all" onPress={() => void mutate($, wb => model.addSuggestions(wb, offered))} />}
+        </Box>
+      )}
+      {!ro &&
+        offered.map(one => (
+          <Box key={`sug-${one.key}`} gap={1}>
+            <Text color="suggestion">◇</Text>
+            <Text wrap="truncate-end">{model.cut(one.text, width - 26)}</Text>
+            <Text dimColor>{one.link ?? 'by hand'}</Text>
+            <Button key={`sug-add-${one.key}`} plain label="Add" onPress={() => void mutate($, wb => model.addCondition(wb, one.text, one.link))} />
+            <Button key={`sug-hide-${one.key}`} plain dimColor label="Hide" onPress={() => void setLive($, now => ({ ...now, suggestHidden: [...(now.suggestHidden ?? []), one.key] }))} />
+          </Box>
+        ))}
       <Box marginTop={1}>
         <Text bold>Non-goals</Text>
       </Box>
@@ -3393,7 +3463,7 @@ export const register: Register = on => {
     bgAgents.clear()
     ledger = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
-    const argumentHint = '[new|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|scope|notify|why|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|suggest|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|scope|notify|why|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })
@@ -3448,6 +3518,7 @@ export const register: Register = on => {
     await startScope($, sessionId)
     await load($)
     await loadPolicy($)
+    await refreshChecks($)
     // Team mode's agents, with this project's chosen models: available to Claude at all times,
     // the automatic reviews only while team mode is on.
     await registerRole($, 'explorer')

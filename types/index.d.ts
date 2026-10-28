@@ -209,6 +209,10 @@ export type TeamConfig = {
 
 export type Tab = 'intent' | 'context' | 'run' | 'evidence' | 'team'
 
+// A check the project root shows (package.json script, pytest config, Cargo.toml...), and a done condition offered from it or from the goal's wording.
+export type ProjectCheck = { kind: EvidenceKind; command: string; from: string }
+export type ConditionSuggestion = { key: string; text: string; link?: EvidenceKind; command?: string }
+
 export type Live = {
   activeTab: Tab
   isPreviewOpen: boolean
@@ -221,6 +225,9 @@ export type Live = {
   expectHoldOnly?: boolean
   // The subscription rate-limit windows the last response reported (empty off a subscription), as the live feed carries them.
   rateLimits?: { kind: 'five_hour' | 'seven_day' | 'spend_limit'; pct: number; resetsAt?: number }[]
+  // The checks found at the project root at session start or /swb new, and the suggestion keys hidden; both session-only.
+  checks?: ProjectCheck[]
+  suggestHidden?: string[]
   // Why the live feed could not be written, while it cannot; session-only.
   feedError?: string
   // /swb live --no-prompts: the feed keeps only the 120-character start of a prompt, not its text.

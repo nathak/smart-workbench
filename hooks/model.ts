@@ -1,6 +1,7 @@
 // Pure state transitions: no engine access, so the engine-facing code in
 // register.tsx stays the only place `$` is used.
 import type {
+  ConditionSuggestion,
   ContextPin,
   EvidenceKind,
   EvidenceRecord,
@@ -154,17 +155,25 @@ export function removeNonGoal(wb: Workbench, index: number): Workbench {
   return editTask(wb, task => ({ ...task, nonGoals: task.nonGoals.filter((_, i) => i !== index) }))
 }
 
-export function addCondition(wb: Workbench, text: string): Workbench {
+export function addCondition(wb: Workbench, text: string, given?: EvidenceKind): Workbench {
   if (text.trim() === '') {
     return wb
   }
 
   return editTask(wb, task => {
     const n = task.doneConditions.reduce((max, one) => Math.max(max, Number(one.id.replace('dc-', '')) || 0), 0) + 1
-    const link = guessLink(text)
+    const link = given ?? guessLink(text)
 
     return { ...task, doneConditions: [...task.doneConditions, { id: `dc-${n}`, text: text.trim(), ...(link ? { link } : {}) }] }
   })
+}
+
+// A locked contract refuses each add (editTask), so nothing changes.
+// A suggestion the contract already holds (a second press on a stale list) is not added twice.
+export function addSuggestions(wb: Workbench, list: readonly ConditionSuggestion[]): Workbench {
+  const same = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ')
+
+  return list.reduce((now, one) => (now.task.doneConditions.some(item => same(item.text, one.text)) ? now : addCondition(now, one.text, one.link)), wb)
 }
 
 export function removeCondition(wb: Workbench, id: string): Workbench {
