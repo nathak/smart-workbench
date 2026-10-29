@@ -17,6 +17,20 @@ Try it on the [sample project](examples/sample-project/README.md); review what i
 - **A task contract and a guard** underneath: a locked goal and done conditions ride along with every prompt, risky calls are asked or blocked (`/swb guard high|medium|low|off`), and the Evidence tab says what has been checked.
 - **A decision ledger** (optional, off by default): keeps the conversation and decisions behind each commit, so `/swb why <file:line>` can say why a change was made. See [Decision ledger](#decision-ledger).
 
+### Why use it
+
+Claude Code on its own is fast. What it lacks on a long or risky task is a way to see, bound and check the work. SmartWorkbench adds that without changing how you talk to Claude.
+
+- **"Done" means checked, not claimed.** A done condition is Verified only by a real check that ran and passed (tests, build, typecheck, lint, CI); Claude's own words never count. A failure is not hidden by an older pass or by a passing lint run, and the Evidence tab shows, file by file, which changes have a check behind them and which have none.
+- **The goal does not drift.** The locked goal, constraints and done conditions ride along with every prompt, so the hundredth turn still answers the first request. Claude can also set done conditions itself from your request; each is checked against what the project can actually run when it is set, and `Undo` takes them back.
+- **Risky calls meet a rule, not luck.** Pushes and deploys, possible secrets and remote scripts are asked; force pushes, `reset --hard` and `rm -r` are blocked, with the reason shown to Claude. Every decision can go to an audit log the team shares. It is a regex-based workflow control, not a sandbox.
+- **Expensive models are spent where they pay off.** In team mode Sonnet builds, Haiku does the reading, and Opus is asked only for a design before a big edit, help after a repeated error, and a check before the turn ends. Optional Codex adds an independent second opinion on the diff.
+- **You can see the work as it happens.** The live view shows every prompt, tool call, guard decision, agent and token count in a browser, for every session on the machine, from a phone too. You notice a wrong turn while it is happening, not after.
+- **Work survives the session.** State is restored when you reopen the project, `/swb share` and `/swb pickup` carry a task to another machine, and the decision ledger can answer why a line changed (`/swb why <file:line>`).
+- **Light and local.** About 2 ms per prompt and 4 ms per tool call, no network requests of its own and no telemetry.
+
+It pays off most on multi-step changes, shared repositories, unattended or `/swb loop` runs, and anything you will hand to someone else. For a one-line question it adds nothing.
+
 ### Install
 
 At the Claude Code prompt:
@@ -510,6 +524,20 @@ Claude에게 맡긴 작업의 **목표(Intent)·맥락(Context)·실행(Run)·�
 - **실시간 모니터링**은 Claude가 하는 일을 브라우저에서 바로 보여 줍니다. 모든 프롬프트, 도구 호출(마스킹된 입력·출력 포함), Guard 판정의 타임라인, 에이전트와 실행, 흐름도, 토큰과 컨텍스트 사용량을 보여 주고, 한 화면에 이 컴퓨터의 모든 세션이 탭으로 나뉘며, 역방향 프록시를 거쳐 휴대폰에서도 열 수 있습니다. `/swb live`, [실시간 보기](#실시간-보기) 참고.
 - **작업 계약과 Guard**가 바탕에 있습니다. 잠근 목표와 완료 조건이 모든 프롬프트에 함께 가고, 위험한 호출은 묻거나 막으며(`/swb guard high|medium|low|off`), Evidence 탭이 무엇을 확인했는지 알려 줍니다.
 - **결정 기록(Ledger)**(선택, 기본 꺼짐)은 각 커밋 뒤의 대화와 판단을 남겨, `/swb why <파일:줄>`로 왜 바뀌었는지 볼 수 있게 합니다. [결정 기록](#결정-기록ledger) 참고.
+
+### 왜 쓰나 (강점)
+
+Claude Code는 혼자서도 빠릅니다. 길거나 위험한 작업에서 모자란 것은 작업을 보고, 범위를 정하고, 확인하는 수단입니다. SmartWorkbench는 Claude에게 말하는 방식을 바꾸지 않고 이것을 더합니다.
+
+- **"끝났다"는 말이 아니라 확인으로 정해집니다.** 완료 조건은 실제로 실행되어 통과한 검증(테스트, 빌드, 타입 검사, 린트, CI)으로만 Verified가 되고, Claude 자신의 말은 인정되지 않습니다. 예전 통과나 린트 통과가 테스트 실패를 가리지 않으며, Evidence 탭이 파일별로 검증이 뒷받침된 변경과 그렇지 않은 변경을 보여 줍니다.
+- **목표가 흐려지지 않습니다.** 잠근 목표·제약·완료 조건이 모든 프롬프트에 함께 가서, 백 번째 턴도 첫 요청에 답합니다. Claude가 요청을 보고 완료 조건을 직접 정하기도 하는데, 정하는 시점에 프로젝트가 실제로 실행할 수 있는 검증인지 확인하고, `Undo`로 되돌릴 수 있습니다.
+- **위험한 호출은 운이 아니라 규칙이 막습니다.** push·배포, 비밀 정보로 보이는 접근, 원격 스크립트 실행은 묻고, 강제 push·`reset --hard`·`rm -r`은 막으며 이유를 Claude에게 알려 줍니다. 모든 판정은 팀이 공유하는 감사 로그에 남길 수 있습니다. 정규식 기반의 작업 통제이며 샌드박스는 아닙니다.
+- **비싼 모델은 값어치가 있는 곳에만 씁니다.** 팀 모드에서는 Sonnet이 만들고 Haiku가 읽고 찾으며, Opus는 큰 수정 전의 설계, 같은 오류가 반복될 때의 도움, 턴을 끝내기 전의 점검에만 불립니다. Codex를 켜면 diff에 대한 독립적인 두 번째 의견이 더해집니다.
+- **일하는 모습을 바로 봅니다.** 실시간 보기는 모든 프롬프트, 도구 호출, Guard 판정, 에이전트, 토큰을 브라우저에 보여 주고, 이 컴퓨터의 모든 세션을 휴대폰에서도 볼 수 있습니다. 잘못된 방향을 끝난 뒤가 아니라 진행 중에 알아챕니다.
+- **세션이 끝나도 작업이 이어집니다.** 프로젝트를 다시 열면 상태가 복원되고, `/swb share`·`/swb pickup`으로 다른 컴퓨터에 작업을 넘기며, 결정 기록은 어떤 줄이 왜 바뀌었는지 답해 줍니다(`/swb why <파일:줄>`).
+- **가볍고 로컬입니다.** 프롬프트당 약 2ms, 도구 호출당 약 4ms이고, 자체 네트워크 요청과 텔레메트리가 없습니다.
+
+여러 단계에 걸친 변경, 여럿이 쓰는 저장소, 무인 실행이나 `/swb loop`, 다른 사람에게 넘겨야 하는 작업에서 가장 값어치가 큽니다. 한 줄짜리 질문에는 더해 주는 것이 없습니다.
 
 ### 설치
 
