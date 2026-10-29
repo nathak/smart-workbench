@@ -23,12 +23,12 @@ Claude Code on its own is fast. What it lacks on a long or risky task is a way t
 
 - **"Done" means checked, not claimed.** A done condition is Verified only by a real check that ran and passed (tests, build, typecheck, lint, CI); Claude's own words never count. A failure is not hidden by an older pass or by a passing lint run, and the Evidence tab shows, file by file, which changes have a check behind them and which have none.
 - **The goal does not drift.** The locked goal, constraints and done conditions ride along with every prompt, so the hundredth turn still answers the first request. Claude can also set done conditions itself from your request; each is checked against what the project can actually run when it is set, and `Undo` takes them back.
-- **Risky calls meet a rule, not luck.** Pushes and deploys, possible secrets and remote scripts are asked; force pushes, `reset --hard` and `rm -r` are blocked, with the reason shown to Claude. Every decision can go to an audit log the team shares. It is a regex-based workflow control, not a sandbox.
-- **Expensive models are spent where they pay off.** In team mode Sonnet builds, Haiku does the reading, and Opus is asked only for a design before a big edit, help after a repeated error, and a check before the turn ends. Optional Codex adds an independent second opinion on the diff.
+- **Risky calls meet a rule, not luck.** Pushes and deploys, possible secrets and remote scripts are asked; force pushes, `reset --hard` and `rm -r` are blocked, with the reason shown to Claude. Blocks and questions can go to an audit log you commit for the team. It is a regex-based workflow control, not a sandbox.
+- **Expensive models are spent where they pay off.** In team mode Sonnet builds, Haiku does the reading, and Opus is asked for a design before a big edit, a plan review, help after a repeated error and a check before the turn ends, not for the reading or the typing. Optional Codex adds an independent second opinion on the diff.
 - **Tokens go to the work, not to the searching.** Explorers read files in their own context and bring back only the conclusion with paths and line numbers, so the lead's context does not fill with file dumps. `import_graph` answers "what uses this file" with a short list of paths instead of grepping and reading half the project. Pins can be a line range (`src/auth.ts:10-40`) instead of a whole file, and `Preview` shows the exact text that will be sent, with `~` token estimates. The advisor gets a focused brief rather than the conversation, and a design before a big edit and a check before the end cut rework. The live view's context gauge and per-model token counts show where the tokens went. No percentage is promised: team mode adds Opus calls, which pay off on larger tasks and not on a small one.
-- **You can see the work as it happens.** The live view shows every prompt, tool call, guard decision, agent and token count in a browser, for every session on the machine, from a phone too. You notice a wrong turn while it is happening, not after.
+- **You can see the work as it happens.** The live view shows every prompt, tool call, guard decision, agent and token count in a browser, for every session on the machine, and from a phone through a reverse proxy you set up. You notice a wrong turn while it is happening, not after.
 - **Work survives the session.** State is restored when you reopen the project, `/swb share` and `/swb pickup` carry a task to another machine, and the decision ledger can answer why a line changed (`/swb why <file:line>`).
-- **Light and local.** About 2 ms per prompt and 4 ms per tool call, no network requests of its own and no telemetry.
+- **Light and local.** About 2 ms per prompt and 4 ms per tool call, no network requests of its own unless you run `/swb ci`, `/swb issue` or `/swb ledger publish`, and no telemetry.
 
 It pays off most on multi-step changes, shared repositories, unattended or `/swb loop` runs, and anything you will hand to someone else. For a one-line question it adds nothing.
 
@@ -140,7 +140,7 @@ Writes a Markdown handoff for the next session or developer, by default to `.cla
 - `/swb policy init`: writes an example file when none exists, then shows it. Edit and commit it to share the rules with the team (see *Project guard file*).
 
 #### `/swb ci`
-Asks the local `gh` CLI for the GitHub Actions runs of the current commit (`git rev-parse HEAD`) and records the latest run of each workflow as `ci` evidence: success counts as passed, failure/cancelled/timed out as failed, a running workflow as observed. While code changes are uncommitted, CI did not test what is on disk, so every result counts only as observed. Running the command again updates the same run's record. Link a done condition to `ci` (conditions mentioning CI are linked automatically). The Evidence tab's `Check CI` button (hotkey `c`) does the same. Besides `/swb issue` with a GitHub reference, this is the only feature that reaches the network, and only when you run it.
+Asks the local `gh` CLI for the GitHub Actions runs of the current commit (`git rev-parse HEAD`) and records the latest run of each workflow as `ci` evidence: success counts as passed, failure/cancelled/timed out as failed, a running workflow as observed. While code changes are uncommitted, CI did not test what is on disk, so every result counts only as observed. Running the command again updates the same run's record. Link a done condition to `ci` (conditions mentioning CI are linked automatically). The Evidence tab's `Check CI` button (hotkey `c`) does the same. Besides `/swb issue` with a GitHub reference and `/swb ledger publish`, this is the only feature that reaches the network, and only when you run it.
 
 #### `/swb issue <ref>`
 Links the task to an issue; it becomes part of the contract (`<issue>`) and the handoff.
@@ -532,12 +532,12 @@ Claude Code는 혼자서도 빠릅니다. 길거나 위험한 작업에서 모�
 
 - **"끝났다"는 말이 아니라 확인으로 정해집니다.** 완료 조건은 실제로 실행되어 통과한 검증(테스트, 빌드, 타입 검사, 린트, CI)으로만 Verified가 되고, Claude 자신의 말은 인정되지 않습니다. 예전 통과나 린트 통과가 테스트 실패를 가리지 않으며, Evidence 탭이 파일별로 검증이 뒷받침된 변경과 그렇지 않은 변경을 보여 줍니다.
 - **목표가 흐려지지 않습니다.** 잠근 목표·제약·완료 조건이 모든 프롬프트에 함께 가서, 백 번째 턴도 첫 요청에 답합니다. Claude가 요청을 보고 완료 조건을 직접 정하기도 하는데, 정하는 시점에 프로젝트가 실제로 실행할 수 있는 검증인지 확인하고, `Undo`로 되돌릴 수 있습니다.
-- **위험한 호출은 운이 아니라 규칙이 막습니다.** push·배포, 비밀 정보로 보이는 접근, 원격 스크립트 실행은 묻고, 강제 push·`reset --hard`·`rm -r`은 막으며 이유를 Claude에게 알려 줍니다. 모든 판정은 팀이 공유하는 감사 로그에 남길 수 있습니다. 정규식 기반의 작업 통제이며 샌드박스는 아닙니다.
-- **비싼 모델은 값어치가 있는 곳에만 씁니다.** 팀 모드에서는 Sonnet이 만들고 Haiku가 읽고 찾으며, Opus는 큰 수정 전의 설계, 같은 오류가 반복될 때의 도움, 턴을 끝내기 전의 점검에만 불립니다. Codex를 켜면 diff에 대한 독립적인 두 번째 의견이 더해집니다.
+- **위험한 호출은 운이 아니라 규칙이 막습니다.** push·배포, 비밀 정보로 보이는 접근, 원격 스크립트 실행은 묻고, 강제 push·`reset --hard`·`rm -r`은 막으며 이유를 Claude에게 알려 줍니다. 차단과 질문은 커밋해서 팀이 공유할 수 있는 감사 로그에 남길 수 있습니다. 정규식 기반의 작업 통제이며 샌드박스는 아닙니다.
+- **비싼 모델은 값어치가 있는 곳에만 씁니다.** 팀 모드에서는 Sonnet이 만들고 Haiku가 읽고 찾으며, Opus는 큰 수정 전의 설계, 계획 검토, 같은 오류가 반복될 때의 도움, 턴을 끝내기 전의 점검에 불리고 읽기나 타이핑에는 쓰이지 않습니다. Codex를 켜면 diff에 대한 독립적인 두 번째 의견이 더해집니다.
 - **토큰이 검색이 아니라 작업에 쓰입니다.** 탐색기는 자기 컨텍스트에서 파일을 읽고 경로와 줄 번호가 붙은 결론만 가져오므로, 리드의 컨텍스트가 파일 내용으로 차지 않습니다. `import_graph`는 "이 파일을 누가 쓰나"에 프로젝트 절반을 grep하고 읽는 대신 짧은 경로 목록으로 답합니다. Pin은 파일 전체 대신 줄 범위(`src/auth.ts:10-40`)로 걸 수 있고, `Preview`는 실제로 보낼 텍스트를 `~` 토큰 추정치와 함께 보여 줍니다. 어드바이저는 대화 전체가 아니라 요점을 정리한 브리프만 받으며, 큰 수정 전의 설계와 끝내기 전의 점검이 재작업을 줄입니다. 실시간 보기의 컨텍스트 게이지와 모델별 토큰 수로 토큰이 어디에 쓰였는지 볼 수 있습니다. 몇 퍼센트 줄어든다고는 약속하지 않습니다. 팀 모드는 Opus 호출이 더해지므로 큰 작업에서 이득이고 작은 작업에서는 아닙니다.
-- **일하는 모습을 바로 봅니다.** 실시간 보기는 모든 프롬프트, 도구 호출, Guard 판정, 에이전트, 토큰을 브라우저에 보여 주고, 이 컴퓨터의 모든 세션을 휴대폰에서도 볼 수 있습니다. 잘못된 방향을 끝난 뒤가 아니라 진행 중에 알아챕니다.
+- **일하는 모습을 바로 봅니다.** 실시간 보기는 모든 프롬프트, 도구 호출, Guard 판정, 에이전트, 토큰을 브라우저에 보여 주고, 이 컴퓨터의 모든 세션을 볼 수 있고, 직접 설정한 역방향 프록시를 거치면 휴대폰에서도 열 수 있습니다. 잘못된 방향을 끝난 뒤가 아니라 진행 중에 알아챕니다.
 - **세션이 끝나도 작업이 이어집니다.** 프로젝트를 다시 열면 상태가 복원되고, `/swb share`·`/swb pickup`으로 다른 컴퓨터에 작업을 넘기며, 결정 기록은 어떤 줄이 왜 바뀌었는지 답해 줍니다(`/swb why <파일:줄>`).
-- **가볍고 로컬입니다.** 프롬프트당 약 2ms, 도구 호출당 약 4ms이고, 자체 네트워크 요청과 텔레메트리가 없습니다.
+- **가볍고 로컬입니다.** 프롬프트당 약 2ms, 도구 호출당 약 4ms이고, `/swb ci`, `/swb issue`, `/swb ledger publish`를 실행하지 않는 한 자체 네트워크 요청이 없고 텔레메트리도 없습니다.
 
 여러 단계에 걸친 변경, 여럿이 쓰는 저장소, 무인 실행이나 `/swb loop`, 다른 사람에게 넘겨야 하는 작업에서 가장 값어치가 큽니다. 한 줄짜리 질문에는 더해 주는 것이 없습니다.
 
@@ -649,7 +649,7 @@ SmartWorkbench가 매 프롬프트에 붙이는 내용을 그대로 보여 줍�
 - `/swb policy init`: 파일이 없을 때 예시 파일을 만들고 내용을 보여 줍니다. 고쳐서 커밋하면 팀이 같은 규칙을 씁니다(아래 *프로젝트 Guard 파일* 참고).
 
 #### `/swb ci`
-로컬 `gh` CLI로 현재 커밋(`git rev-parse HEAD`)의 GitHub Actions 실행을 조회해, 워크플로마다 가장 최근 실행을 `ci` 증거로 기록합니다. 성공은 통과, 실패·취소·시간 초과는 실패, 실행 중은 observed입니다. 커밋되지 않은 코드 변경이 있으면 CI가 지금 디스크의 코드를 검사한 것이 아니므로 모든 결과를 observed로만 칩니다. 다시 실행하면 같은 실행의 기록을 갱신합니다. 완료 조건을 `ci`에 연결하세요(CI를 언급한 조건은 자동 연결). Evidence 탭의 `Check CI` 버튼(단축키 `c`)도 같습니다. GitHub 이슈를 지정한 `/swb issue`와 함께 네트워크를 쓰는 유일한 기능이며, 직접 실행할 때만 동작합니다.
+로컬 `gh` CLI로 현재 커밋(`git rev-parse HEAD`)의 GitHub Actions 실행을 조회해, 워크플로마다 가장 최근 실행을 `ci` 증거로 기록합니다. 성공은 통과, 실패·취소·시간 초과는 실패, 실행 중은 observed입니다. 커밋되지 않은 코드 변경이 있으면 CI가 지금 디스크의 코드를 검사한 것이 아니므로 모든 결과를 observed로만 칩니다. 다시 실행하면 같은 실행의 기록을 갱신합니다. 완료 조건을 `ci`에 연결하세요(CI를 언급한 조건은 자동 연결). Evidence 탭의 `Check CI` 버튼(단축키 `c`)도 같습니다. GitHub 이슈를 지정한 `/swb issue`, `/swb ledger publish`와 함께 네트워크를 쓰는 유일한 기능이며, 직접 실행할 때만 동작합니다.
 
 #### `/swb issue <ref>`
 작업에 이슈를 연결합니다. 이슈는 계약(`<issue>`)과 handoff에 들어갑니다.
