@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-30
+
 ### Added
 - `/swb vhdb [status|on|off]` turns the separate vhdb plugin's upload to a team server on and off, and shows its state. `on` asks first: the question shows the server, the project, that the decision ledger (prompts, replies, tool summaries, edits, commits) is included, that history gathered so far is uploaded too, and that turning it off leaves uploaded data on the server until its admin deletes it; the choices are *Turn on from now only*, *Turn on with past history* and *Cancel*. After the answer the settings are read again, and only if they are unchanged is vhdb's approval file written, `remote on --from-ui` run and the file removed again. A vhdb that is not installed or not ready is reported and `on` is refused.
 - The guard blocks, in every profile including `off`, a tool call that runs vhdb's `remote on` or `--from-ui` or writes `vhdb/state/ui-approval` (only the dialog approves), and asks before `remote set` in every profile (no "Allow for session"; chained with a command that is blocked it stays blocked, `off` included); a `remote set` command, judged by its text and not by the category the rules gave it, is kept out of the live feed in every form (input, output, summary, the evidence record) and has no Retry or Add evidence button, since the token may be piped in on stdin. Any command that names `vhdb/state` is blocked too, reads included: look in a terminal.
