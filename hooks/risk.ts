@@ -65,6 +65,22 @@ function withoutSubstitutions(text: string): string {
 // A rule marked raw reads the command as typed; the others read it with message and search text blanked (see maskData).
 const BASH_RULES: readonly Rule[] = [
   {
+    // Turning on the vhdb upload is the person's decision in the /swb vhdb on dialog; this is a barrier against an accident or a careless command, not a sandbox.
+    // First of all the rules, so a chained command (rm -rf x; node vhdb.mjs remote on) cannot take an earlier rule that the off profile relaxes.
+    category: 'vhdb-approval',
+    risk: 'high',
+    policy: 'block',
+    pattern: /\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+on\b|--from-ui(?![\w-])|state\/ui-approval\b|\bvhdb\/state\b/,
+    reason: 'approves the vhdb upload, which only the person may do with /swb vhdb on',
+  },
+  {
+    category: 'vhdb-config',
+    risk: 'high',
+    policy: 'ask',
+    pattern: /\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/,
+    reason: 'changes where vhdb uploads, or its token',
+  },
+  {
     category: 'destructive-git',
     risk: 'high',
     policy: 'block',
@@ -265,6 +281,9 @@ const SECRET_PATH = /(^|\/)(\.env(?:\.(?!(?:example|sample|template|dist)$)[^/]*
 const GUARD_FILE = /(^|\/)\.claude\/smartworkbench\.json$/i
 // The app's folder under ~/.claude (or its parts, for a home set elsewhere). A repository that merely carries the name is not touched.
 const DESKTOP_CHANNEL = /(?:\.claude\/smartworkbench-de|smartworkbench-desktop\/(?:key|inbox|ack|state|web-pair)(?:\/|$))/i
+// The file that says the person approved the vhdb upload in the swb dialog (a path only; an MCP tool's arguments are searched for the same name).
+const VHDB_APPROVAL = /(?:^|[\\/])state[\\/]+ui-approval$/i
+const VHDB_APPROVAL_NAMED = /state[\\/]+ui-approval/i
 // A glob that reaches for secrets files (**/.env*, **/id_*, *.pem).
 const SECRET_GLOB = /(^|[/*])\.env(?!\.(?:example|sample|template|dist)\b)|\.envrc|\.npmrc|\.netrc|\.pgpass|\.pypirc|\.git-credentials|credentials|id_(?:rsa|dsa|ecdsa|ed25519|\*)|\*\.(?:pem|pfx|p12)\b|\.ssh\/\*/i
 const SEND_TOOL = /(^|_)(send|post|publish|deploy|create_pr|create_pull_request|share|comment|reply|message)/i
@@ -315,10 +334,14 @@ export function classify(tool: string, input: unknown): Verdict {
     const plain = withoutSubstitutions(data)
     // The same command with its quotes and escapes removed, so "-rf", '-'r and git "push" read as the flags and words they become in the shell.
     const unquoted = data.replace(/\\(?=\S)/g, '').replace(/["']/g, '')
-    const rule = BASH_RULES.find(one => {
+    const hits = (one: Rule) => {
       if (one.raw) return one.pattern.test(command)
       return one.pattern.test(data) || one.pattern.test(unquoted) || (one.stripped === true && one.pattern.test(plain))
-    })
+    }
+    const rule = BASH_RULES.find(hits)
+    // A change of where vhdb uploads, chained with a command that is blocked: the block stays (the off profile would otherwise let the ask go with it).
+    const alsoBlocked = rule?.category === 'vhdb-config' ? BASH_RULES.find(one => one.policy === 'block' && one.category !== 'vhdb-approval' && hits(one)) : undefined
+    if (rule && alsoBlocked) return { category: rule.category, risk: rule.risk, policy: 'block', reason: alsoBlocked.reason }
 
     return rule
       ? { category: rule.category, risk: rule.risk, policy: rule.policy, reason: rule.reason }
@@ -330,6 +353,10 @@ export function classify(tool: string, input: unknown): Verdict {
 
     if (DESKTOP_CHANNEL.test(path)) {
       return { category: 'desktop-channel', risk: 'high', policy: 'block', reason: "edits the desktop app's key or command inbox" }
+    }
+
+    if (VHDB_APPROVAL.test(path)) {
+      return { category: 'vhdb-approval', risk: 'high', policy: 'block', reason: 'writes the vhdb upload approval, which only the person may give with /swb vhdb on' }
     }
 
     if (GUARD_FILE.test(path)) {
@@ -357,6 +384,7 @@ export function classify(tool: string, input: unknown): Verdict {
   if (tool.startsWith('mcp__')) {
     // An MCP tool can read any file: its arguments are looked at for the app's folder too.
     if (DESKTOP_CHANNEL.test(JSON.stringify(args))) return { category: 'desktop-channel', risk: 'high', policy: 'block', reason: "names the desktop app's key or command inbox" }
+    if (VHDB_APPROVAL_NAMED.test(JSON.stringify(args))) return { category: 'vhdb-approval', risk: 'high', policy: 'block', reason: 'names the vhdb upload approval file' }
 
     return classifyMcp(tool)
   }
@@ -365,7 +393,7 @@ export function classify(tool: string, input: unknown): Verdict {
 }
 
 // Asked even under the permissive profile.
-export const ALWAYS_ASK = new Set(['desktop-channel', 'project-rule', 'secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec', 'codex-send', 'codex-write', 'codex-transfer'])
+export const ALWAYS_ASK = new Set(['desktop-channel', 'project-rule', 'secret-output', 'secret-file', 'guard-policy', 'mcp-deploy', 'remote-exec', 'codex-send', 'codex-write', 'codex-transfer', 'vhdb-approval', 'vhdb-config'])
 
 const PROFILE_RANK: Record<GuardProfile, number> = { off: -1, permissive: 0, balanced: 1, strict: 2 }
 
@@ -379,7 +407,9 @@ export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolea
   // Off: nothing the built-in rules find is stopped. What a project rule asked for still holds, so does the pause switch,
   // and a change to the guard file is still asked (or the rules could be deleted without anyone seeing it).
   if (profile === 'off') {
-    if (verdict.category === 'desktop-channel') return 'block'
+    if (verdict.category === 'desktop-channel' || verdict.category === 'vhdb-approval') return 'block'
+    // Where the vhdb upload goes, or its token, is asked even here: changing it while the upload is on is turning it on anew.
+    if (verdict.category === 'vhdb-config') return verdict.rule === 'block' || verdict.policy === 'block' ? 'block' : 'ask'
     // First, so a rule inside the guard file cannot allow edits of the guard file.
     if (verdict.category === 'guard-policy') return verdict.rule === 'block' ? 'block' : 'ask'
     const asked = verdict.rule ?? 'allow'
@@ -412,7 +442,10 @@ export function summarize(tool: string, input: unknown): string {
   const text =
     args.command ?? args.file_path ?? args.notebook_path ?? args.pattern ?? args.url ?? args.query ?? args.description ?? ''
 
-  return String(text).replace(/\s+/g, ' ').trim().slice(0, 120)
+  const line = String(text).replace(/\s+/g, ' ').trim()
+
+  // Where vhdb uploads and its token: the summary goes to the feed and the records, so the values are masked.
+  return (/\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/.test(line) ? redact(line) : line).slice(0, 120)
 }
 
 // ---- "Allow for session"
@@ -488,7 +521,7 @@ export type SessionScope = { key: string; label: string }
 export function sessionScope(tool: string, input: unknown, verdict: Verdict): SessionScope | undefined {
   // remote-exec is asked every time, so allowing one script for the session never covers the next.
   // The same goes for Codex: the key stops at the script, so one allowed review would cover a write or a transcript transfer.
-  if (verdict.category === 'desktop-channel' || verdict.category === 'guard-policy' || verdict.category === 'remote-exec' || verdict.category.startsWith('codex-') || verdict.policy === 'block') {
+  if (verdict.category === 'desktop-channel' || verdict.category === 'guard-policy' || verdict.category === 'vhdb-config' || verdict.category === 'remote-exec' || verdict.category.startsWith('codex-') || verdict.policy === 'block') {
     return undefined
   }
   const args = (input ?? {}) as Record<string, unknown>

@@ -18,6 +18,7 @@ import { canSet, checkExpectInput, EXPECT_DESCRIPTION, EXPECT_TOOL, expectOf, re
 import { affectsChecks, categoryOf, suggestionsOf } from './files'
 import * as model from './model'
 import * as suggest from './suggest'
+import * as vhdb from './vhdb'
 import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
@@ -52,6 +53,7 @@ const HELP = [
   '  /smartworkbench team [on|off]   team mode: Opus designs and reviews, Sonnet builds, Haiku explores',
   '  /smartworkbench team <lead|explorer|advisor> <model> [effort]   set a role\'s model and effort',
   '  /smartworkbench team codex on|off|check|review on|off|rescue on|off   optional Codex second opinion',
+  '  /smartworkbench vhdb [status|on|off]   upload of the vhdb records and the decision ledger to the team server (vhdb plugin)',
   '  /smartworkbench live [port|stop] [--no-prompts]   live web view of the request flow (stop: off)',
   '  /smartworkbench advise [topic]  ask the Opus advisor now',
   '  /smartworkbench loop <count|inf> <item>[; <item>...]   repeat a task; works with team mode (loop stop | loop status)',
@@ -300,7 +302,7 @@ function pathField(live: Live, tool: string, input: unknown): Record<string, unk
 
 // The input and the result of an ordinary tool call, as text for the call's input and output tabs. Agent, Workflow and Codex calls carry their own fields.
 // A call that touches a secrets file shows neither, and every text goes through the same masking and length limits as a prompt.
-const NO_IO = new Set(['secret-output', 'secret-file', 'guard-policy', 'desktop-channel'])
+const NO_IO = new Set(['secret-output', 'secret-file', 'guard-policy', 'desktop-channel', 'vhdb-config'])
 
 function inputText(input: unknown): string {
   const args = (input ?? {}) as Record<string, unknown>
@@ -465,13 +467,20 @@ type LedgerState = { dir: string; session: string; seq: number; turn: number; he
 let ledger: LedgerState | undefined
 let isLedgerNoted = false
 
-async function ledgerDirOf($: $): Promise<string> {
+// The repository's common git folder (the same for every worktree), absolute; undefined outside a repository.
+async function gitCommonDir($: $): Promise<string | undefined> {
   const root = await $.session.root()
   const ran = await $.process.run(['git', 'rev-parse', '--git-common-dir'], { cwd: root }).catch(() => undefined)
   const out = ran?.exitCode === 0 ? ran.stdout.trim() : ''
-  if (out === '') return `${root}/.claude/swb-ledger`
+  if (out === '') return undefined
 
-  return `${/^(?:[A-Za-z]:)?[\\/]/.test(out) ? out : `${root}/${out}`}/swb-ledger`
+  return /^(?:[A-Za-z]:)?[\\/]/.test(out) ? out : `${root}/${out}`
+}
+
+async function ledgerDirOf($: $): Promise<string> {
+  const common = await gitCommonDir($)
+
+  return common ? `${common}/swb-ledger` : `${await $.session.root()}/.claude/swb-ledger`
 }
 
 const MKDIR_SCRIPT = "require('fs').mkdirSync(process.argv[1], { recursive: true })"
@@ -1472,21 +1481,27 @@ async function modelRow($: $): Promise<{ value: string; options: string[] } | un
 // Where the Codex plugin's companion script is, from Claude Code's own plugin list; null when it cannot be found.
 // Only the list is read (and HOME asked for when the plugin root does not show the plugins folder): a missing or
 // unreadable list just means Codex is unknown, and the feature stays off.
+async function pluginsBase($: $): Promise<string | undefined> {
+  const root = String($.plugin.root)
+  const marker = root.indexOf('/plugins/')
+  let base = marker >= 0 ? root.slice(0, marker + '/plugins/'.length) : undefined
+  if (!base) {
+    // A custom config folder (CLAUDE_CONFIG_DIR) holds the plugin list; without one it is ~/.claude.
+    const config = await $.process.run(['printenv', 'CLAUDE_CONFIG_DIR']).catch(() => undefined)
+    const dir = config?.exitCode === 0 ? config.stdout.trim().replace(/\/$/, '') : ''
+    if (dir) base = `${dir}/plugins/`
+    else {
+      const home = await $.process.run(['printenv', 'HOME'])
+      base = home.exitCode === 0 && home.stdout.trim() ? `${home.stdout.trim()}/.claude/plugins/` : undefined
+    }
+  }
+
+  return base
+}
+
 async function detectCodex($: $): Promise<string | null> {
   try {
-    const root = String($.plugin.root)
-    const marker = root.indexOf('/plugins/')
-    let base = marker >= 0 ? root.slice(0, marker + '/plugins/'.length) : undefined
-    if (!base) {
-      // A custom config folder (CLAUDE_CONFIG_DIR) holds the plugin list; without one it is ~/.claude.
-      const config = await $.process.run(['printenv', 'CLAUDE_CONFIG_DIR']).catch(() => undefined)
-      const dir = config?.exitCode === 0 ? config.stdout.trim().replace(/\/$/, '') : ''
-      if (dir) base = `${dir}/plugins/`
-      else {
-        const home = await $.process.run(['printenv', 'HOME'])
-        base = home.exitCode === 0 && home.stdout.trim() ? `${home.stdout.trim()}/.claude/plugins/` : undefined
-      }
-    }
+    const base = await pluginsBase($)
     if (!base) return null
     const path = codex.companionFrom(await $.fs.read(`${base}installed_plugins.json`))
 
@@ -1494,6 +1509,95 @@ async function detectCodex($: $): Promise<string | null> {
   } catch {
     return null
   }
+}
+
+// The vhdb plugin's own approval check: the file means "the person said yes in the /swb vhdb on dialog". Created only after that answer, removed right after the call.
+const APPROVE_SCRIPT = "const fs=require('fs'),p=require('path'),f=process.argv[1];fs.mkdirSync(p.dirname(f),{recursive:true});fs.writeFileSync(f,'')"
+const UNLINK_SCRIPT = "require('fs').rmSync(process.argv[1],{force:true})"
+
+async function detectVhdb($: $): Promise<string | undefined> {
+  try {
+    const base = await pluginsBase($)
+    if (!base) return undefined
+    const path = vhdb.installPathFrom(await $.fs.read(`${base}installed_plugins.json`))
+
+    return path && (await $.fs.exists(path)) ? path : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function vhdbRun($: $, path: string, args: string[], timeoutMs = 5000): Promise<{ exitCode: number; stdout: string; stderr: string } | undefined> {
+  return $.process.run(['node', path, ...args], { cwd: await $.session.root(), timeoutMs }).catch(() => undefined)
+}
+
+async function vhdbShow($: $, path: string): Promise<{ status: vhdb.VhdbStatus } | { problem: string }> {
+  const ran = await vhdbRun($, path, ['remote', 'show', '--json'])
+  if (!ran) return { problem: 'vhdb did not answer.' }
+  if (ran.exitCode !== 0) return { problem: `vhdb status failed: ${vhdb.shown(ran.stderr) || `exit ${ran.exitCode}`}` }
+  const status = vhdb.parseStatus(ran.stdout)
+
+  return status ? { status } : { problem: 'vhdb printed an unreadable status.' }
+}
+
+// /swb vhdb [status|on|off]: the vhdb plugin uploads its records and the decision ledger to a team server. Turning it on needs the person's answer to a question that says what leaves.
+async function vhdbCommand($: $, args: string): Promise<{ text: string }> {
+  const op = (args.trim().split(/\s+/)[0] ?? '').toLowerCase() || 'status'
+  if (op !== 'status' && op !== 'on' && op !== 'off') return { text: 'Usage: /swb vhdb [status|on|off]' }
+  const path = await detectVhdb($)
+  if (!path) return { text: 'The vhdb plugin is not installed (no vhdb@ entry in installed_plugins.json), so nothing is uploaded from here.' }
+  const configure = `Configure it in a terminal: node ${path} remote set ...`
+
+  if (op === 'off') {
+    const ran = await vhdbRun($, path, ['remote', 'off'])
+    if (!ran || ran.exitCode !== 0) return { text: `vhdb could not turn the upload off: ${vhdb.shown(ran?.stderr) || 'no answer'}. Run it in a terminal: node ${path} remote off` }
+    await audit($, 'vhdb.off', {})
+
+    return { text: 'vhdb upload off. Later sends stop; data already uploaded must be deleted by the server admin.' }
+  }
+
+  const first = await vhdbShow($, path)
+  if ('problem' in first) return { text: first.problem }
+  const s = first.status
+  if (op === 'status') return { text: `${vhdb.statusLine(s)}${s.ready ? '' : ` ${configure}`}` }
+
+  if (!s.ready) return { text: `vhdb is not ready: ${s.reason || 'no reason given'}. ${configure}` }
+  if (s.upload && s.approved) return { text: `vhdb upload is already on. ${vhdb.statusLine(s)}` }
+  const dirEnv = await $.process.run(['printenv', 'VHDB_DIR']).catch(() => undefined)
+  const approval = s.approvalPath ?? vhdb.approvalPathOf(await gitCommonDir($), dirEnv?.exitCode === 0 ? dirEnv.stdout.trim() : '')
+  if (!approval) return { text: 'Cannot tell where vhdb keeps its approval (not a git repository and VHDB_DIR is not set), so nothing was turned on.' }
+
+  const answer = await $.ui.ask(vhdb.consentText(s), { header: 'vhdb upload', options: [vhdb.VHDB_FROM_NOW, vhdb.VHDB_WITH_PAST, vhdb.VHDB_CANCEL] }).catch(() => vhdb.VHDB_CANCEL)
+  if (answer !== vhdb.VHDB_FROM_NOW && answer !== vhdb.VHDB_WITH_PAST) return { text: 'vhdb upload stays off.' }
+
+  // The settings may have changed while the question was open: what the person read must be what is sent to.
+  const second = await vhdbShow($, path)
+  if ('problem' in second || !vhdb.sameTarget(s, second.status)) return { text: 'The vhdb settings changed while the question was open; nothing was turned on. Run /swb vhdb on again.' }
+
+  const made = await $.process.run(['node', '-e', APPROVE_SCRIPT, '--', approval], { cwd: await $.session.root() }).catch(() => undefined)
+  if (!made || made.exitCode !== 0) return { text: 'Could not write the approval file, so nothing was turned on.' }
+  // Longer than a status call: vhdb may send the past history before it answers.
+  const ran = await vhdbRun($, path, ['remote', 'on', '--from-ui', ...(answer === vhdb.VHDB_FROM_NOW ? ['--from-now'] : [])], 60000).finally(async () => {
+    await $.process.run(['node', '-e', UNLINK_SCRIPT, '--', approval], { cwd: await $.session.root() }).catch(() => undefined)
+  })
+  const last = await vhdbShow($, path)
+  const now = 'status' in last ? ` ${vhdb.statusLine(last.status)}` : ''
+
+  // No answer in time, yet vhdb now reports the upload on: say what is true, not what the missing answer suggests.
+  if (!ran && 'status' in last && last.status.upload && last.status.approved) {
+    await audit($, 'vhdb.on', { fromNow: answer === vhdb.VHDB_FROM_NOW, url: s.url, project: s.project, ledger: s.ledger, timedOut: true })
+
+    return { text: `vhdb did not answer in time, but it reports the upload on.${now} Turn it off with /swb vhdb off.` }
+  }
+  if (!ran || ran.exitCode !== 0) {
+    await audit($, 'vhdb.on.refused', { exitCode: ran?.exitCode ?? null, text: vhdb.shown(ran?.stderr) })
+
+    return { text: `vhdb did not turn the upload on: ${vhdb.shown(ran?.stderr) || 'no answer'}.${now}` }
+  }
+  await audit($, 'vhdb.on', { fromNow: answer === vhdb.VHDB_FROM_NOW, url: s.url, project: s.project, ledger: s.ledger })
+  if ('status' in last && !last.status.upload) return { text: `vhdb accepted the command but still reports the upload off.${now}` }
+
+  return { text: `vhdb upload on${answer === vhdb.VHDB_FROM_NOW ? ' from now' : ', history included'}.${now} Turn it off with /swb vhdb off; data already uploaded stays on the server until its admin deletes it.` }
 }
 
 async function codexCommand($: $, words: string[], from = ''): Promise<string> {
@@ -2760,6 +2864,7 @@ async function runCommand($: $, args: string): Promise<{ text: string }> {
   }
 
   if (word === 'ledger') return ledgerCommand($, name)
+  if (word === 'vhdb') return vhdbCommand($, name)
   if (word === 'scope') return scopeCommand($, name)
   if (word === 'notify') return notifyCommand($, name)
 
@@ -3568,7 +3673,7 @@ export const register: Register = on => {
     bgAgents.clear()
     ledger = undefined
     await setLive($, current => ({ ...current, loop: undefined })).catch(() => undefined)
-    const argumentHint = '[new|suggest|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|scope|notify|why|policy|ci|issue|share|pickup|audit|clear]'
+    const argumentHint = '[new|suggest|team|advise|loop|live|lock|unlock|intent|context|run|verify|status|preview|save|load|templates|export|guard|ledger|vhdb|scope|notify|why|policy|ci|issue|share|pickup|audit|clear]'
     const description = 'SmartWorkbench: task contract, context pins, guard and evidence'
     await $.command.register({ name: 'smartworkbench', description, argumentHint })
     await $.command.register({ name: 'swb', description, argumentHint })

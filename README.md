@@ -28,7 +28,7 @@ Claude Code on its own is fast. What it lacks on a long or risky task is a way t
 - **Tokens go to the work, not to the searching.** Explorers read files in their own context and bring back only the conclusion with paths and line numbers, so the lead's context does not fill with file dumps. `import_graph` answers "what uses this file" with a short list of paths instead of grepping and reading half the project. Pins can be a line range (`src/auth.ts:10-40`) instead of a whole file, and `Preview` shows the exact text that will be sent, with `~` token estimates. The advisor gets a focused brief rather than the conversation, and a design before a big edit and a check before the end cut rework. The live view's context gauge and per-model token counts show where the tokens went. No percentage is promised: team mode adds Opus calls, which pay off on larger tasks and not on a small one.
 - **You can see the work as it happens.** The live view shows every prompt, tool call, guard decision, agent and token count in a browser, for every session on the machine, and from a phone through a reverse proxy you set up. You notice a wrong turn while it is happening, not after.
 - **Work survives the session.** State is restored when you reopen the project, `/swb share` and `/swb pickup` carry a task to another machine, and the decision ledger can answer why a line changed (`/swb why <file:line>`).
-- **Light and local.** About 2 ms per prompt and 4 ms per tool call, no network requests of its own unless you run `/swb ci`, `/swb issue` or `/swb ledger publish`, and no telemetry.
+- **Light and local.** About 2 ms per prompt and 4 ms per tool call, no network requests of its own unless you run `/swb ci`, `/swb issue` or `/swb ledger publish` (the separate vhdb plugin uploads only while it is on, and from SmartWorkbench turning it on takes the `/swb vhdb on` question), and no telemetry.
 
 It pays off most on multi-step changes, shared repositories, unattended or `/swb loop` runs, and anything you will hand to someone else. For a one-line question it adds nothing.
 
@@ -89,6 +89,7 @@ To use the panel from the keyboard, focus it with `ctrl+x tab` (or click it). Ho
 | `/swb notify [on\|off\|test]` | Send a notification through your terminal's channel when the guard waits for your answer (on by default; it names the tool and the reason, never the command) |
 | `/swb guard [high\|medium\|low\|off]` | Show or set the guard sensitivity (see *Guard sensitivity*) |
 | `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | Record conversation, actions and guard decisions beside the repository, share them through a branch, search them (see *Decision ledger*) |
+| `/swb vhdb [status\|on\|off]` | Show, turn on (after a question) or turn off the vhdb plugin's upload to a team server |
 | `/swb why <file[:line]\|commit>` | Show the turn, decisions and guard calls behind a change |
 | `/swb policy [init\|reload]` | Show, create or re-read the project guard file |
 | `/swb ci` | Import CI results for the current commit |
@@ -168,6 +169,14 @@ Repeats a task; `stop` ends it after the current turn and `status` shows the pas
 
 #### `/swb team codex ...`
 Switches for the optional Codex second opinion: `on`, `off`, `check`, `review on|off`, `rescue on|off`. See *Team mode*.
+
+#### `/swb vhdb [status|on|off]`
+Shows, turns on or turns off the upload that the separate **vhdb** plugin ([nathak/vhdb-plugin](https://github.com/nathak/vhdb-plugin)) makes to a team server. SmartWorkbench itself sends nothing: it runs the plugin's own commands and the plugin uploads. It needs the plugin installed and set up in a terminal first (`node <vhdb>/bin/vhdb.mjs remote set ...`; the token never goes through the conversation).
+- `status` (the default) shows the server, the project, whether the decision ledger goes along, how much was sent and the last error. A plugin that is not ready shows its reason and `on` is refused.
+- `on` asks first. The question shows the server, the project and that the decision ledger is included (your prompts, Claude's replies, tool summaries, edits and commits leave this machine), that history gathered so far is uploaded too, and that turning it off only stops later sends: **data already uploaded must be deleted by the server admin.** Choose *Turn on from now only*, *Turn on with past history* or *Cancel*. Only after that answer, and after reading the settings again to see they did not change while the question was open, does SmartWorkbench write the plugin's approval file, run `remote on --from-ui` and remove the file again.
+- `off` runs `remote off` and needs no question.
+- The guard blocks a tool call that runs `remote on` or `--from-ui`, or writes the approval file `vhdb/state/ui-approval`, in every profile including `off`, and asks before `remote set`. Like the rest of the guard this is a barrier against an accident or a careless command, not against a program that means to get round it: the approval file is a marker anything running as you could also create.
+- The audit log records `vhdb.on`, `vhdb.on.refused` and `vhdb.off`.
 
 ### Panel
 
@@ -296,6 +305,8 @@ By default each session keeps its own workbench and live view (`/swb scope sessi
 | Broad delete | `rm -r`, `find -delete` | Block |
 | Disk overwrite | `dd of=/dev/sda`, `mkfs …` (any target; `--help` is fine) | Block |
 | Remote script | `curl … \| sh`, `bash <(curl …)` | Ask (even under Permissive) |
+| vhdb upload approval | `vhdb.mjs remote on`, `--from-ui`, any command that names `vhdb/state` or `state/ui-approval` (reading the state folder too: look in a terminal), writing the approval file | Block (in every profile, `off` too; only `/swb vhdb on` approves) |
+| vhdb upload settings | `vhdb.mjs remote set` | Ask (even under Permissive and `off`; "Allow for session" is not offered; chained with a blocked command it is blocked, `off` included) |
 | MCP deploy/release | `mcp__vercel__deploy_project` | Ask (even under Permissive) |
 | MCP issue/alert changes | `mcp__linear__create_issue`, `mcp__pagerduty__acknowledge_incident` | Ask |
 | MCP issue/observability reads | `mcp__linear__list_issues`, `mcp__sentry__search_events` | Allow |
@@ -467,7 +478,7 @@ Measured in a live session (Claude Code 2.1.295), the mod's own work per event: 
 
 See [docs/PERMISSIONS.md](docs/PERMISSIONS.md) for the full list of hooks, calls, files and commands.
 
-- No network requests of its own, no extra model calls, no telemetry. `/swb ci` and `/swb issue #n` run the local `gh` CLI only when you call them.
+- No network requests of its own, no extra model calls, no telemetry. `/swb ci` and `/swb issue #n` run the local `gh` CLI only when you call them. The separate vhdb plugin can upload prompts and replies (through the decision ledger) to a team server; what leaves is sent by that plugin, not by SmartWorkbench. `/swb vhdb on` asks first, showing where it goes and what is included, and the guard keeps Claude from turning it on or changing where it goes; the plugin's own terminal command is outside SmartWorkbench's reach.
 - State is kept in `$.store` per project (working directory) and restored on restart; state saved by an earlier version is filled in on load. Templates and context sets are kept across projects. Live pin contents, environment variables and the conversation are not stored. History is capped at 100 tool calls and 200 evidence records.
 - Local commands run with argument lists (the full list is in [docs/PERMISSIONS.md](docs/PERMISSIONS.md)): `git diff` at turn end, `git rev-parse` for `/swb new`, `git config user.name` when audit is on, `git`/`gh` for `/swb ci` and `/swb issue`, and `tee`, `node` and `printenv` for the live feed and the Codex lookup. Files are written only for the handoff, `policy init`, `share`, the audit log the guard file turns on, and the live feed while `/swb live` runs.
 - `claude plugin validate .` lists every hook and call the mod uses.
@@ -537,7 +548,7 @@ Claude Code는 혼자서도 빠릅니다. 길거나 위험한 작업에서 모�
 - **토큰이 검색이 아니라 작업에 쓰입니다.** 탐색기는 자기 컨텍스트에서 파일을 읽고 경로와 줄 번호가 붙은 결론만 가져오므로, 리드의 컨텍스트가 파일 내용으로 차지 않습니다. `import_graph`는 "이 파일을 누가 쓰나"에 프로젝트 절반을 grep하고 읽는 대신 짧은 경로 목록으로 답합니다. Pin은 파일 전체 대신 줄 범위(`src/auth.ts:10-40`)로 걸 수 있고, `Preview`는 실제로 보낼 텍스트를 `~` 토큰 추정치와 함께 보여 줍니다. 어드바이저는 대화 전체가 아니라 요점을 정리한 브리프만 받으며, 큰 수정 전의 설계와 끝내기 전의 점검이 재작업을 줄입니다. 실시간 보기의 컨텍스트 게이지와 모델별 토큰 수로 토큰이 어디에 쓰였는지 볼 수 있습니다. 몇 퍼센트 줄어든다고는 약속하지 않습니다. 팀 모드는 Opus 호출이 더해지므로 큰 작업에서 이득이고 작은 작업에서는 아닙니다.
 - **일하는 모습을 바로 봅니다.** 실시간 보기는 모든 프롬프트, 도구 호출, Guard 판정, 에이전트, 토큰을 브라우저에 보여 주고, 이 컴퓨터의 모든 세션을 볼 수 있고, 직접 설정한 역방향 프록시를 거치면 휴대폰에서도 열 수 있습니다. 잘못된 방향을 끝난 뒤가 아니라 진행 중에 알아챕니다.
 - **세션이 끝나도 작업이 이어집니다.** 프로젝트를 다시 열면 상태가 복원되고, `/swb share`·`/swb pickup`으로 다른 컴퓨터에 작업을 넘기며, 결정 기록은 어떤 줄이 왜 바뀌었는지 답해 줍니다(`/swb why <파일:줄>`).
-- **가볍고 로컬입니다.** 프롬프트당 약 2ms, 도구 호출당 약 4ms이고, `/swb ci`, `/swb issue`, `/swb ledger publish`를 실행하지 않는 한 자체 네트워크 요청이 없고 텔레메트리도 없습니다.
+- **가볍고 로컬입니다.** 프롬프트당 약 2ms, 도구 호출당 약 4ms이고, `/swb ci`, `/swb issue`, `/swb ledger publish`를 실행하지 않는 한 자체 네트워크 요청이 없고(별도의 vhdb 플러그인은 켜져 있을 때만 올리며, SmartWorkbench에서 켜려면 `/swb vhdb on`의 질문을 거칩니다) 텔레메트리도 없습니다.
 
 여러 단계에 걸친 변경, 여럿이 쓰는 저장소, 무인 실행이나 `/swb loop`, 다른 사람에게 넘겨야 하는 작업에서 가장 값어치가 큽니다. 한 줄짜리 질문에는 더해 주는 것이 없습니다.
 
@@ -597,6 +608,7 @@ claude plugin update smartworkbench
 | `/swb scope [session\|project]` | 워크벤치와 라이브 화면을 세션별로 따로 두거나(`session`, 기본), 프로젝트의 모든 세션이 공유(`project`)(*세션별 분리* 참고) |
 | `/swb notify [on\|off\|test]` | Guard가 답을 기다릴 때 터미널의 알림 채널로 알림을 보냅니다(기본 켜짐. 도구와 이유만 알리고 명령어는 담지 않음) |
 | `/swb guard [high\|medium\|low\|off]` | Guard 민감도 보기·설정(*Guard 민감도* 참고) |
+| `/swb vhdb [status\|on\|off]` | vhdb 플러그인의 팀 서버 업로드를 보고, (질문 뒤에) 켜고, 끕니다 |
 | `/swb ledger [on\|off\|publish\|fetch\|search\|forget\|export-wiki]` | 대화·행동·Guard 판정을 저장소 옆에 기록하고, 브랜치로 공유하고, 검색(*결정 기록* 참고) |
 | `/swb why <파일[:줄]\|커밋>` | 변경 뒤의 턴, 판단, Guard 호출 보기 |
 | `/swb policy [init\|reload]` | 프로젝트 Guard 파일 보기·생성·다시 읽기 |
@@ -804,6 +816,8 @@ cd desktop && npm run dist                  # electron-builder로 AppImage·deb(
 | 광범위 삭제 | `rm -r`, `find -delete` | Block |
 | 디스크 덮어쓰기 | `dd of=/dev/sda`, `mkfs …`(대상 무관, `--help`는 허용) | Block |
 | 원격 스크립트 실행 | `curl … \| sh`, `bash <(curl …)` | Ask (Permissive에서도) |
+| vhdb 업로드 승인 | `vhdb.mjs remote on`, `--from-ui`, `vhdb/state`나 `state/ui-approval`을 이름에 담은 모든 명령(상태 폴더 읽기도 막으니 터미널에서 보세요), 승인 파일 쓰기 | Block (모든 프로필, `off`에서도. 승인은 `/swb vhdb on`만 합니다) |
+| vhdb 업로드 설정 | `vhdb.mjs remote set` | Ask (Permissive와 `off`에서도. "Allow for session"은 없음. 막히는 명령과 이어 쓰면 `off`에서도 Block) |
 | MCP 배포·릴리스 | `mcp__vercel__deploy_project` | Ask (Permissive에서도) |
 | MCP 이슈·알림 변경 | `mcp__linear__create_issue`, `mcp__pagerduty__acknowledge_incident` | Ask |
 | MCP 이슈·관측 조회 | `mcp__linear__list_issues`, `mcp__sentry__search_events` | Allow |
@@ -973,7 +987,7 @@ location / {
 
 hook, 호출, 파일, 명령의 전체 목록은 [docs/PERMISSIONS.md](docs/PERMISSIONS.md)에 있습니다.
 
-- 자체 네트워크 요청 없음, 모델 추가 호출 없음, 텔레메트리 없음. `/swb ci`와 `/swb issue #n`만 직접 실행할 때 로컬 `gh` CLI를 씁니다.
+- 자체 네트워크 요청 없음, 모델 추가 호출 없음, 텔레메트리 없음. `/swb ci`와 `/swb issue #n`만 직접 실행할 때 로컬 `gh` CLI를 씁니다. 별도의 vhdb 플러그인은 프롬프트와 응답(결정 기록을 통해)을 팀 서버로 올릴 수 있고, 보내는 쪽은 SmartWorkbench가 아니라 그 플러그인입니다. `/swb vhdb on`은 어디로 무엇이 나가는지 먼저 묻고, Guard는 Claude가 이를 켜거나 보낼 곳을 바꾸지 못하게 합니다. 플러그인을 터미널에서 직접 실행하는 것은 SmartWorkbench의 손이 닿지 않습니다.
 - 상태는 `$.store`에 프로젝트(작업 디렉터리)별로 저장되어 재시작 후 복원됩니다. 이전 버전에서 저장한 상태도 새 필드를 채워 그대로 읽습니다. 템플릿과 Context set은 프로젝트와 무관하게 저장됩니다. Live Pin 파일 내용, 환경 변수, 대화 기록은 저장하지 않습니다. 툴 기록 100개, 증거 200개로 제한합니다.
 - 로컬 명령은 모두 인자 배열로 실행합니다(전체 목록은 [docs/PERMISSIONS.md](docs/PERMISSIONS.md)). 턴 종료 시 `git diff`, `/swb new`에서 `git rev-parse`, 감사 로그가 켜져 있으면 `git config user.name`, `/swb ci`·`/swb issue`에서 `git`/`gh`, 실시간 피드와 Codex 탐색에서 `tee`·`node`·`printenv`. 파일 쓰기는 handoff, `policy init`, `share`, Guard 파일이 켠 감사 로그, 그리고 `/swb live`가 도는 동안의 실시간 피드뿐입니다.
 - 사용하는 hook과 호출 목록은 `claude plugin validate .`로 확인할 수 있습니다.

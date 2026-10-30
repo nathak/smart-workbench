@@ -30,7 +30,7 @@ A mod runs with your own user rights and is not sandboxed. This page lists every
 | `.claude/smartworkbench.json` | session start, `/swb policy`, after a tool edits it |
 | `.claude/smartworkbench-task.json` | `/swb pickup` (its elements are rebuilt from known fields; it comes in unlocked) |
 | The audit log | to append, and on `/swb audit` |
-| Claude Code's `<config dir>/plugins/installed_plugins.json` | session start, to find the Codex plugin |
+| Claude Code's `<config dir>/plugins/installed_plugins.json` | session start, to find the Codex plugin; `/swb vhdb`, to find the vhdb plugin |
 | `.claude/smartworkbench-live.pid` | `/swb live`, `/swb live stop` and the live feed writes, to tell a running view from a leftover one |
 
 | Writes | When |
@@ -40,9 +40,10 @@ A mod runs with your own user rights and is not sandboxed. This page lists every
 | `.claude/smartworkbench.json` | `/swb policy init`, only when absent |
 | `.claude/smartworkbench-audit.jsonl` (+ `.1`) | only when the guard file sets `audit` |
 | `.claude/smartworkbench-live.jsonl` | `/swb live` creates it once the server is listening and removes it when the server ends; while it exists the mod appends one JSON line per event (prompt text up to 2000 characters with secrets masked, or only its first 120 with `/swb live --no-prompts`; tool name and summary; the brief of an Agent call, the answer a subagent returned and the text of a Codex task; guard decision, loop, turn with the context use and token counts). The server empties it in place once it has read past 8 MB, and a feed that is a link or a second view for the same project is refused. The mod writes it only while the server's process note (`.claude/smartworkbench-live.pid`) is beside it. Do not commit it |
+| `<git common dir>/vhdb/state/ui-approval` (or under `VHDB_DIR`, or the path vhdb reports), an empty file | `/swb vhdb on`, only after the person chose *Turn on from now only* or *Turn on with past history* and the settings read again were the same; removed right after the `remote on --from-ui` call, whatever its result |
 | Its own store under `~/.claude/plugins/store/` | state per project, templates, context sets |
 
-It reads no environment variable except `CLAUDE_CONFIG_DIR` and `HOME` (through `printenv`, at session start, to find the Codex plugin list), and never stores the conversation or Live pin contents. The one exception is the live feed below: while you run `/swb live`, each prompt (up to 2000 characters, secrets masked by a heuristic; `/swb live --no-prompts` keeps only the first 120) and a summary of each tool call are appended to a file inside the project.
+It reads no environment variable except `CLAUDE_CONFIG_DIR` and `HOME` (through `printenv`, at session start, to find the Codex plugin list; `VHDB_DIR` too, in `/swb vhdb on`, to find where vhdb keeps its approval), and never stores the conversation or Live pin contents. The one exception is the live feed below: while you run `/swb live`, each prompt (up to 2000 characters, secrets masked by a heuristic; `/swb live --no-prompts` keeps only the first 120) and a summary of each tool call are appended to a file inside the project.
 
 ### Processes (argument lists, no shell)
 
@@ -51,6 +52,8 @@ It reads no environment variable except `CLAUDE_CONFIG_DIR` and `HOME` (through 
 | `git -c core.quotePath=false diff -U0 --relative --no-color --no-ext-diff HEAD` | end of each turn |
 | `printenv CLAUDE_CONFIG_DIR`, `printenv HOME` | session start, only when the plugin path does not show where Claude Code's plugins live |
 | `node <codex plugin>/scripts/codex-companion.mjs setup --json` | `/swb team codex check` only |
+| `node <vhdb plugin>/bin/vhdb.mjs remote show --json` (twice for `on`, once more after it), `remote off`, `remote on --from-ui [--from-now]` | `/swb vhdb status`, `off`, `on`; run in the project root; the status calls are meant to end within seconds and `remote on` may take longer (up to a minute is waited for), and what the plugin itself does on the network is the plugin's |
+| `node -e <mkdirSync + writeFileSync ''>`, `node -e <rmSync>` on the vhdb approval file, `printenv VHDB_DIR`, `git rev-parse --git-common-dir` | `/swb vhdb on`, to write the approval file after the answer and remove it right after the call |
 | `git rev-parse --abbrev-ref HEAD` | `/swb new`, to draft a goal |
 | `git config user.name` | session start, only when audit is on |
 | `git rev-parse HEAD`, `git status --porcelain`, `gh run list …` | `/swb ci`, Check CI |
@@ -64,7 +67,7 @@ It reads no environment variable except `CLAUDE_CONFIG_DIR` and `HOME` (through 
 
 ### Network
 
-None of its own. `/swb live` starts a local web server that listens on `127.0.0.1` only (default port 4317) and answers only requests (the page, `/events` and `/info`, which gives the project's absolute path, the feed path, the process id and how many lines it has read; the hub also answers `/sessions` and `/events?all=1`, which list every session's project path and carry every session's feed, and its `/info` adds the registry path, the host name and the trusted names) whose Host is `127.0.0.1`, `localhost`, or a name listed in the `SWB_LIVE_HOSTS` environment variable (comma separated, none by default; format, proxy settings and the security trade-off are in the README under `SWB_LIVE_HOSTS`); it makes no outgoing requests. `gh` reaches GitHub only when you run `/swb ci` or `/swb issue` with a GitHub reference.
+None of its own, with one thing beside it: the separate **vhdb** plugin can upload its records and the decision ledger (prompts, Claude's replies, tool summaries, edits and commits) to a team server. That is vhdb's connection, not SmartWorkbench's, and it is off until the person answers the question `/swb vhdb on` asks (server, project, ledger included, past history, and that data already uploaded stays until the server's admin deletes it). SmartWorkbench's guard blocks a tool call that turns it on or writes the approval file; that is a barrier against an accident, not against a program that means to get round it. `/swb live` starts a local web server that listens on `127.0.0.1` only (default port 4317) and answers only requests (the page, `/events` and `/info`, which gives the project's absolute path, the feed path, the process id and how many lines it has read; the hub also answers `/sessions` and `/events?all=1`, which list every session's project path and carry every session's feed, and its `/info` adds the registry path, the host name and the trusted names) whose Host is `127.0.0.1`, `localhost`, or a name listed in the `SWB_LIVE_HOSTS` environment variable (comma separated, none by default; format, proxy settings and the security trade-off are in the README under `SWB_LIVE_HOSTS`); it makes no outgoing requests. `gh` reaches GitHub only when you run `/swb ci` or `/swb issue` with a GitHub reference.
 
 ### Codex (optional, off by default)
 
@@ -102,7 +105,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 | `.claude/smartworkbench.json` | 세션 시작, `/swb policy`, 툴이 이 파일을 고친 직후 |
 | `.claude/smartworkbench-task.json` | `/swb pickup`(각 요소는 알려진 필드로 다시 만들고, 잠기지 않은 상태로 들어옴) |
 | 감사 로그 | 덧붙일 때, `/swb audit` |
-| Claude Code의 `<설정 폴더>/plugins/installed_plugins.json` | 세션 시작, Codex 플러그인을 찾을 때 |
+| Claude Code의 `<설정 폴더>/plugins/installed_plugins.json` | 세션 시작, Codex 플러그인을 찾을 때. `/swb vhdb`, vhdb 플러그인을 찾을 때 |
 | `.claude/smartworkbench-live.pid` | `/swb live`, `/swb live stop`, 실시간 피드 기록. 실행 중인 보기와 남은 파일을 구별할 때 |
 
 | 쓰기 | 시점 |
@@ -112,9 +115,10 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 | `.claude/smartworkbench.json` | `/swb policy init`, 파일이 없을 때만 |
 | `.claude/smartworkbench-audit.jsonl`(+ `.1`) | Guard 파일에서 `audit`을 켰을 때만 |
 | `.claude/smartworkbench-live.jsonl` | `/swb live`의 서버가 포트를 연 뒤 만들고 종료할 때 지웁니다. 파일이 있는 동안 Mod가 이벤트(프롬프트 본문 2000자까지, 비밀은 가림. `/swb live --no-prompts`면 앞 120자만. 툴 이름·요약, Agent 호출의 브리프와 서브에이전트가 돌려준 답변, Codex 작업 문구, Guard 판정, 루프, 컨텍스트 사용량과 토큰 수가 든 턴)마다 JSON 한 줄을 덧붙입니다. 서버는 8MB를 넘게 읽으면 파일을 제자리에서 비웁니다. 피드가 링크이거나 같은 프로젝트에 두 번째 보기를 띄우면 거부합니다. Mod는 서버의 프로세스 메모(`.claude/smartworkbench-live.pid`)가 옆에 있을 때만 씁니다. 커밋하지 마세요 |
+| `<git 공통 폴더>/vhdb/state/ui-approval`(또는 `VHDB_DIR` 아래, 또는 vhdb가 알려 준 경로), 빈 파일 | `/swb vhdb on`. 사람이 *Turn on from now only* 또는 *Turn on with past history*를 고르고 다시 읽은 설정이 같을 때만 만들고, `remote on --from-ui` 호출 직후 결과와 상관없이 지움 |
 | `~/.claude/plugins/store/` 아래 자기 저장소 | 프로젝트별 상태, 템플릿, Context set |
 
-환경 변수는 세션 시작 때 Codex 플러그인 목록을 찾으려고 `printenv`로 읽는 `CLAUDE_CONFIG_DIR`·`HOME`뿐이고, 대화 내용과 Live Pin 파일 내용은 저장하지 않습니다. 예외는 아래의 실시간 피드뿐입니다. `/swb live`를 실행하는 동안에는 프롬프트(2000자까지, 비밀은 가림. `--no-prompts`면 앞 120자)와 툴 호출 요약이 프로젝트 안의 파일에 덧붙습니다.
+환경 변수는 세션 시작 때 Codex 플러그인 목록을 찾으려고 `printenv`로 읽는 `CLAUDE_CONFIG_DIR`·`HOME`(그리고 `/swb vhdb on`에서 vhdb의 승인 위치를 찾으려고 읽는 `VHDB_DIR`)뿐이고, 대화 내용과 Live Pin 파일 내용은 저장하지 않습니다. 예외는 아래의 실시간 피드뿐입니다. `/swb live`를 실행하는 동안에는 프롬프트(2000자까지, 비밀은 가림. `--no-prompts`면 앞 120자)와 툴 호출 요약이 프로젝트 안의 파일에 덧붙습니다.
 
 ### 실행하는 명령 (인자 배열, 셸 없음)
 
@@ -122,6 +126,8 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 |---|---|
 | `git -c core.quotePath=false diff -U0 --relative --no-color --no-ext-diff HEAD` | 턴마다 |
 | `printenv CLAUDE_CONFIG_DIR`, `printenv HOME` | 세션 시작. 플러그인 경로에서 Claude Code의 플러그인 위치를 알 수 없을 때만 |
+| `node <vhdb 플러그인>/bin/vhdb.mjs remote show --json`(`on`은 두 번, 끝난 뒤 한 번 더), `remote off`, `remote on --from-ui [--from-now]` | `/swb vhdb status`, `off`, `on`. 프로젝트 루트에서 실행. 상태 조회는 몇 초 안에 끝나게 되어 있고 `remote on`은 더 걸릴 수 있어 최대 1분을 기다리며, 플러그인 자신의 네트워크 사용은 플러그인의 몫 |
+| vhdb 승인 파일에 `node -e <mkdirSync + writeFileSync ''>`, `node -e <rmSync>`, `printenv VHDB_DIR`, `git rev-parse --git-common-dir` | `/swb vhdb on`. 답을 받은 뒤 승인 파일을 만들고 호출 직후 지움 |
 | `node <codex 플러그인>/scripts/codex-companion.mjs setup --json` | `/swb team codex check`에서만 |
 | `git rev-parse --abbrev-ref HEAD` | `/swb new`(목표 초안) |
 | `git config user.name` | 세션 시작, 감사 로그가 켜졌을 때만 |
@@ -136,7 +142,7 @@ Mod는 사용자 권한 그대로 실행되며 샌드박스가 없습니다. 설
 
 ### 네트워크
 
-자체 요청은 없습니다. `/swb live`는 `127.0.0.1`에서만 듣는 로컬 웹 서버(기본 포트 4317)를 띄우며, (페이지, `/events`, 그리고 프로젝트 절대 경로·피드 경로·프로세스 id·읽은 줄 수를 알려 주는 `/info`. 허브는 모든 세션의 프로젝트 경로를 알려 주는 `/sessions`와 모든 세션의 피드를 싣는 `/events?all=1`도 답하고, 허브의 `/info`에는 registry 경로·호스트 이름·신뢰한 이름이 더해짐) Host가 `127.0.0.1`, `localhost`, 또는 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분, 기본값 없음. 형식, 프록시 설정, 보안상 주의는 README의 `SWB_LIVE_HOSTS` 절)에 적은 이름인 요청에만 응답하고 밖으로 나가는 요청은 없습니다. `gh`가 GitHub에 접속하는 것은 `/swb ci` 또는 GitHub 이슈 번호로 `/swb issue`를 실행할 때뿐입니다.
+자체 요청은 없습니다. 다만 별도의 **vhdb** 플러그인은 자신의 기록과 결정 기록(프롬프트, Claude의 응답, 도구 요약, 편집, 커밋)을 팀 서버로 올릴 수 있습니다. 이것은 SmartWorkbench가 아니라 vhdb의 연결이며, 사람이 `/swb vhdb on`의 질문(서버, 프로젝트, 결정 기록 포함, 과거 이력, 이미 올라간 데이터는 서버 관리자가 지울 때까지 남는다는 점)에 답하기 전까지 꺼져 있습니다. SmartWorkbench의 Guard는 이를 켜거나 승인 파일을 쓰는 툴 호출을 막으며, 이는 실수를 막는 장치이지 일부러 우회하려는 프로그램을 막는 벽이 아닙니다. `/swb live`는 `127.0.0.1`에서만 듣는 로컬 웹 서버(기본 포트 4317)를 띄우며, (페이지, `/events`, 그리고 프로젝트 절대 경로·피드 경로·프로세스 id·읽은 줄 수를 알려 주는 `/info`. 허브는 모든 세션의 프로젝트 경로를 알려 주는 `/sessions`와 모든 세션의 피드를 싣는 `/events?all=1`도 답하고, 허브의 `/info`에는 registry 경로·호스트 이름·신뢰한 이름이 더해짐) Host가 `127.0.0.1`, `localhost`, 또는 환경변수 `SWB_LIVE_HOSTS`(쉼표 구분, 기본값 없음. 형식, 프록시 설정, 보안상 주의는 README의 `SWB_LIVE_HOSTS` 절)에 적은 이름인 요청에만 응답하고 밖으로 나가는 요청은 없습니다. `gh`가 GitHub에 접속하는 것은 `/swb ci` 또는 GitHub 이슈 번호로 `/swb issue`를 실행할 때뿐입니다.
 
 ### Codex(선택, 기본 꺼짐)
 

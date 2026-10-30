@@ -34,9 +34,13 @@ type WorldOptions = {
   commands?: Record<string, Run | Run[]>
   answer?: string
   // Answers a guard question from its option labels; the default takes the first.
-  ask?: (labels: string[]) => string | Promise<string>
+  ask?: (labels: string[], question?: string) => string | Promise<string>
   // Collects the commands (or tool names) that actually ran.
   ran?: string[]
+  // The exit code of a node -e script on the vhdb approval file, by its source; the default is 0.
+  approvalScript?: (source: string) => number | undefined
+  // Makes a process call fail to finish, as a timeout does (by its argv joined with spaces).
+  throwOn?: (command: string) => boolean
   // Collects every process.run call with its stdin.
   processed?: Array<{ argv: string[]; stdin?: string; env?: Record<string, string> }>
   // What tools/desktop-state.mjs prints (the desktop app's heartbeat); none = the app does not run.
@@ -106,6 +110,7 @@ function world(on: On, options: WorldOptions = {}) {
   })
   on('process.run', async ($, e) => {
     options.processed?.push({ argv: e.argv, stdin: e.init?.stdin, env: e.init?.env })
+    if (options.throwOn?.(e.argv.join(' '))) throw new Error('timed out')
     if (String(e.argv[1] ?? '').endsWith('tools/desktop-policy-write.mjs')) {
       // The script, as the plugin sees it: it writes when the file still hashes to what the caller expected (3 when it does not).
       const forced = options.policyWrite
@@ -127,6 +132,10 @@ function world(on: On, options: WorldOptions = {}) {
     }
     if (String(e.argv[1] ?? '').endsWith('tools/desktop-channel.mjs')) return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (String(e.argv[1] ?? '').endsWith('tools/desktop-state.mjs')) return { value: { exitCode: 0, stdout: options.desktop ? JSON.stringify(options.desktop) : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    // The script that writes or removes the vhdb approval file succeeds (the tests read the order of the calls).
+    if (e.argv[0] === 'node' && e.argv[1] === '-e' && String(e.argv[e.argv.length - 1]).endsWith('/state/ui-approval')) {
+      return { value: { exitCode: options.approvalScript?.(String(e.argv[2])) ?? 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     const answer = commands[e.argv.join(' ')]
     // A list answers one call after another, the last one for every call after that.
     const run = (Array.isArray(answer) ? (answer.length > 1 ? answer.shift() : answer[0]) : answer) ?? { exitCode: 1, stdout: '', stderr: `unexpected: ${e.argv.join(' ')}` }
@@ -145,7 +154,7 @@ function world(on: On, options: WorldOptions = {}) {
     if (e.tool === 'AskUserQuestion') {
       const question = e.questions[0]
       const labels = (question?.options ?? []).map(one => one.label)
-      const answer = options.ask ? await options.ask(labels) : (options.answer ?? labels[0] ?? '')
+      const answer = options.ask ? await options.ask(labels, question?.question) : (options.answer ?? labels[0] ?? '')
       return { result: { questions: e.questions, answers: { [question?.question ?? '']: answer } } }
     }
     const command = 'command' in e ? String(e.command) : String(e.tool)
@@ -3154,4 +3163,186 @@ test('a declined confirmation leaves the proposal open and the locked contract a
   expect(ackOf(seen)).toEqual([expect.objectContaining({ id: 'x1', status: 'declined' })])
   expect(workbench().proposals?.[0]?.status).toBe('open')
   expect(workbench().task.doneConditions.map(one => one.text)).not.toContain('Typecheck passes')
+})
+
+const VHDB_DIR = '/home/u/.claude/plugins/cache/vhdb/vhdb/0.2.0'
+const VHDB = `node ${VHDB_DIR}/bin/vhdb.mjs`
+// Fresh for each test: the world writes into it (the audit log), and one test must not read another's.
+const vhdbFiles = (): Record<string, string> => ({
+  '.claude/smartworkbench.json': JSON.stringify(GUARD),
+  '/home/u/.claude/plugins/installed_plugins.json': JSON.stringify({ plugins: { 'vhdb@vhdb': [{ installPath: VHDB_DIR }] } }),
+  [`${VHDB_DIR}/bin/vhdb.mjs`]: '',
+})
+const APPROVAL = `${CWD}/.git/vhdb/state/ui-approval`
+const vhdbStatus = (extra: Record<string, unknown> = {}): Run => ({
+  exitCode: 0,
+  stdout: JSON.stringify({ upload: false, configured: true, ready: true, approved: false, reason: '', url: 'https://team.example/api', project: 'app', ledger: true, tokenSource: 'env', lastSentAt: null, sent: 0, error: null, backoffUntil: null, ...extra }),
+})
+const vhdbRuns = (show: Run | Run[], more: Record<string, Run> = {}): Record<string, Run | Run[]> => ({
+  'printenv HOME': { exitCode: 0, stdout: '/home/u\n' },
+  'git rev-parse --git-common-dir': { exitCode: 0, stdout: '.git\n' },
+  [`${VHDB} remote show --json`]: show,
+  [`${VHDB} remote on --from-ui --from-now`]: { exitCode: 0, stdout: '' },
+  [`${VHDB} remote on --from-ui`]: { exitCode: 0, stdout: '' },
+  [`${VHDB} remote off`]: { exitCode: 0, stdout: '' },
+  ...more,
+})
+// The vhdb calls and the approval file scripts, in the order they ran.
+const vhdbCalls = (processed: Array<{ argv: string[] }>) =>
+  processed
+    .filter(one => one.argv[0] === 'node' && (one.argv[1] === '-e' ? String(one.argv[one.argv.length - 1]).endsWith('/state/ui-approval') : String(one.argv[1]).endsWith('/bin/vhdb.mjs')))
+    .map(one => (one.argv[1] === '-e' ? `${String(one.argv[2]).includes('writeFileSync') ? 'approve' : 'unlink'} ${one.argv[one.argv.length - 1]}` : one.argv.slice(2).join(' ')))
+
+test('/swb vhdb says so when the plugin is not installed, and runs nothing', async ($, on) => {
+  const processed: Array<{ argv: string[] }> = []
+  world(on, { commands: { 'printenv HOME': { exitCode: 0, stdout: '/home/u\n' } }, processed })
+  await $.session.start(start)
+  for (const args of ['', 'status', 'on', 'off']) expect((await $.command.run({ command: 'swb', args: `vhdb ${args}`, ...COMMAND })).text).toContain('not installed')
+  expect(vhdbCalls(processed)).toEqual([])
+})
+
+test('/swb vhdb status shows where the upload goes and how much was sent', async ($, on) => {
+  world(on, { files: vhdbFiles(), commands: vhdbRuns(vhdbStatus({ upload: true, approved: true, sent: 3, lastSentAt: '2026-10-30T01:00:00Z' })) })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'vhdb status', ...COMMAND })).text
+  expect(text).toContain('upload on')
+  expect(text).toContain('https://team.example/api / app')
+  expect(text).toContain('3 sent')
+})
+
+test('/swb vhdb with no word shows why it is not ready when it is not', async ($, on) => {
+  world(on, { files: vhdbFiles(), commands: vhdbRuns(vhdbStatus({ ready: false, configured: false, reason: 'no setup: run remote set' })) })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'vhdb', ...COMMAND })).text
+  expect(text).toContain('not ready: no setup: run remote set')
+  expect(text).toContain('Configure it in a terminal')
+})
+
+test('/swb vhdb on asks first, and approves, turns on and clears the approval in that order', async ($, on) => {
+  const processed: Array<{ argv: string[] }> = []
+  const asked: Array<{ labels: string[]; question?: string }> = []
+  world(on, {
+    files: vhdbFiles(),
+    commands: vhdbRuns([vhdbStatus(), vhdbStatus(), vhdbStatus({ upload: true, approved: true })]),
+    processed,
+    ask: (labels, question) => {
+      asked.push({ labels, question })
+      expect(vhdbCalls(processed)).toEqual(['remote show --json'])
+      return 'Turn on from now only'
+    },
+  })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text
+
+  expect(asked).toHaveLength(1)
+  expect(asked[0]?.labels).toEqual(['Turn on from now only', 'Turn on with past history', 'Cancel'])
+  for (const part of ['https://team.example/api', 'Project: app', 'prompts', 'History gathered so far is uploaded too', 'must be deleted by the server admin']) expect(asked[0]?.question).toContain(part)
+  expect(vhdbCalls(processed)).toEqual(['remote show --json', 'remote show --json', `approve ${APPROVAL}`, 'remote on --from-ui --from-now', `unlink ${APPROVAL}`, 'remote show --json'])
+  expect(text).toContain('upload on from now')
+})
+
+test('/swb vhdb on with the past history leaves out --from-now; the approval path the plugin reports wins over the computed one', async ($, on) => {
+  const processed: Array<{ argv: string[] }> = []
+  const shows = [vhdbStatus({ approvalPath: '/data/vhdb/state/ui-approval' }), vhdbStatus({ approvalPath: '/data/vhdb/state/ui-approval' }), vhdbStatus({ upload: true, approved: true })]
+  world(on, { files: vhdbFiles(), commands: vhdbRuns(shows), processed, answer: 'Turn on with past history' })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text
+
+  expect(vhdbCalls(processed)).toContain('approve /data/vhdb/state/ui-approval')
+  expect(vhdbCalls(processed)).toContain('remote on --from-ui')
+  expect(vhdbCalls(processed)).not.toContain('remote on --from-ui --from-now')
+  expect(text).toContain('history included')
+})
+
+for (const answer of ['Cancel', 'yes', '']) {
+  test(`/swb vhdb on writes no approval and runs no on when the answer is "${answer}"`, async ($, on) => {
+    const processed: Array<{ argv: string[] }> = []
+    world(on, { files: vhdbFiles(), commands: vhdbRuns(vhdbStatus()), processed, answer })
+    await $.session.start(start)
+    expect((await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text).toContain('stays off')
+    expect(vhdbCalls(processed)).toEqual(['remote show --json'])
+  })
+}
+
+const NO_ASK: Array<[string, Record<string, Run | Run[]>, string]> = [
+  ['not ready', vhdbRuns(vhdbStatus({ ready: false, reason: 'no setup' })), 'not ready: no setup'],
+  ['already on', vhdbRuns(vhdbStatus({ upload: true, approved: true })), 'already on'],
+  ['unreadable', vhdbRuns({ exitCode: 0, stdout: 'garbage' }), 'unreadable status'],
+  ['failing', vhdbRuns({ exitCode: 2, stdout: '', stderr: 'boom' }), 'vhdb status failed: boom'],
+  ['no git and no VHDB_DIR', vhdbRuns(vhdbStatus(), { 'git rev-parse --git-common-dir': { exitCode: 128, stdout: '' } }), 'Cannot tell where vhdb keeps its approval'],
+]
+for (const [label, commands, expected] of NO_ASK) {
+  test(`/swb vhdb on does not ask when ${label}`, async ($, on) => {
+    const processed: Array<{ argv: string[] }> = []
+    let asked = 0
+    world(on, { files: vhdbFiles(), commands, processed, ask: () => (asked++, 'Turn on from now only') })
+    await $.session.start(start)
+    const text = (await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text
+    expect(text).toContain(expected)
+    expect(asked).toBe(0)
+    expect(vhdbCalls(processed).filter(one => one.startsWith('approve') || one.startsWith('remote on'))).toEqual([])
+  })
+}
+
+test('/swb vhdb on turns nothing on when the server changed while the question was open', async ($, on) => {
+  const processed: Array<{ argv: string[] }> = []
+  world(on, { files: vhdbFiles(), commands: vhdbRuns([vhdbStatus(), vhdbStatus({ url: 'https://other.example/api' })]), processed })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text
+
+  expect(text).toContain('changed while the question was open')
+  expect(vhdbCalls(processed)).toEqual(['remote show --json', 'remote show --json'])
+})
+
+test('/swb vhdb on that vhdb refuses still removes the approval and says why', async ($, on) => {
+  const processed: Array<{ argv: string[] }> = []
+  const refused = world(on, { files: vhdbFiles(), commands: vhdbRuns(vhdbStatus(), { [`${VHDB} remote on --from-ui --from-now`]: { exitCode: 1, stdout: '', stderr: 'no approval found' } }), processed })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text
+  expect(text).toContain('did not turn the upload on: no approval found')
+  expect(vhdbCalls(processed)).toContain(`unlink ${APPROVAL}`)
+  expect(refused.file('.claude/smartworkbench-audit.jsonl')).toContain('vhdb.on.refused')
+})
+
+test('/swb vhdb on that gets no answer in time reports the upload as on when vhdb says so, and as refused when it does not', async ($, on) => {
+  const processed: Array<{ argv: string[] }> = []
+  const { file } = world(on, {
+    files: vhdbFiles(),
+    commands: vhdbRuns([vhdbStatus(), vhdbStatus(), vhdbStatus({ upload: true, approved: true })]),
+    processed,
+    throwOn: command => command.endsWith('remote on --from-ui --from-now'),
+  })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text
+
+  expect(text).toContain('did not answer in time, but it reports the upload on')
+  expect(vhdbCalls(processed)).toContain(`unlink ${APPROVAL}`)
+  expect(file('.claude/smartworkbench-audit.jsonl')).toContain('timedOut')
+  expect(file('.claude/smartworkbench-audit.jsonl')).not.toContain('vhdb.on.refused')
+})
+
+test('/swb vhdb on that gets no answer in time and still shows the upload off says it did not turn on', async ($, on) => {
+  world(on, { files: vhdbFiles(), commands: vhdbRuns(vhdbStatus()), throwOn: command => command.endsWith('remote on --from-ui --from-now') })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text).toContain('did not turn the upload on')
+})
+
+test('/swb vhdb on turns nothing on when the approval file cannot be written', async ($, on) => {
+  const failed: Array<{ argv: string[] }> = []
+  world(on, { files: vhdbFiles(), commands: vhdbRuns(vhdbStatus()), processed: failed, approvalScript: source => (source.includes('writeFileSync') ? 1 : 0) })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'swb', args: 'vhdb on', ...COMMAND })).text).toContain('Could not write the approval file')
+  expect(vhdbCalls(failed).some(one => one.startsWith('remote on'))).toBe(false)
+})
+
+test('/swb vhdb off runs remote off, says what stays on the server, and is audited', async ($, on) => {
+  const processed: Array<{ argv: string[] }> = []
+  const { file } = world(on, { files: vhdbFiles(), commands: vhdbRuns(vhdbStatus({ upload: true, approved: true })), processed })
+  await $.session.start(start)
+  const text = (await $.command.run({ command: 'swb', args: 'vhdb off', ...COMMAND })).text
+
+  expect(vhdbCalls(processed)).toEqual(['remote off'])
+  expect(text).toContain('must be deleted by the server admin')
+  expect(file('.claude/smartworkbench-audit.jsonl')).toContain('vhdb.off')
+  expect((await $.command.run({ command: 'swb', args: 'vhdb sideways', ...COMMAND })).text).toContain('Usage')
 })

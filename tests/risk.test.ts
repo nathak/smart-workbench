@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { applyRule } from '../hooks/policy'
-import { classify, commandPrefix, decide, effectiveProfile, normalisePath, redact, sessionScope } from '../hooks/risk'
+import { classify, commandPrefix, decide, effectiveProfile, normalisePath, redact, sessionScope, summarize } from '../hooks/risk'
 
 describe('risk rules', () => {
   test('destructive git and recursive delete are blocked', async () => {
@@ -385,6 +385,69 @@ describe('the desktop app channel', () => {
     expect(blocked('Read', { file_path: '/home/u/src/smartworkbench-desktop/README.md' })).toBe('allow')
     expect(blocked('Edit', { file_path: '/home/u/src/smartworkbench-desktop/main.mjs' })).toBe('allow')
     expect(blocked('Bash', { command: 'git commit -m "fix smartworkbench-desktop heartbeat"' })).toBe('allow')
+  })
+})
+
+describe('the vhdb upload approval', () => {
+  const verdict = (tool: string, input: Record<string, unknown>, profile: 'balanced' | 'permissive' | 'off' | 'strict' = 'balanced') => decide(classify(tool, input), profile, false)
+
+  test('no tool call turns the upload on or writes the approval file, in any profile', () => {
+    for (const command of [
+      'node /p/vhdb/bin/vhdb.mjs remote on --from-ui',
+      'node /p/vhdb/bin/vhdb.mjs remote on',
+      'node vhdb.mjs "remote" \'on\'',
+      'node vhdb.mjs remote on --from-u""i',
+      'touch .git/vhdb/state/ui-approval',
+      ': > "$(git rev-parse --git-common-dir)/vhdb/state/ui-approval"',
+      'cat .env; node vhdb.mjs remote on --from-ui',
+      'rm -rf tmp; node vhdb.mjs remote on --from-ui',
+      'git push --force; touch .git/vhdb/state/ui-approval',
+      'dd of=/dev/sda if=x && node /p/vhdb/bin/vhdb.mjs remote on',
+    ]) {
+      for (const profile of ['balanced', 'permissive', 'off', 'strict'] as const) expect(verdict('Bash', { command }, profile)).toBe('block')
+    }
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) expect(verdict(tool, { file_path: '/r/.git/vhdb/state/ui-approval' }, 'off')).toBe('block')
+    expect(verdict('NotebookEdit', { notebook_path: 'C:\\r\\.git\\vhdb\\state\\ui-approval' })).toBe('block')
+    expect(verdict('mcp__files__write_file', { path: 'C:\\r\\.git\\vhdb\\state\\ui-approval' }, 'permissive')).toBe('block')
+  })
+
+  test('showing the status, turning the upload off and ordinary work stay allowed; changing where it goes is asked in every profile', () => {
+    for (const command of ['node /p/vhdb/bin/vhdb.mjs remote show --json', 'node /p/vhdb/bin/vhdb.mjs remote off', 'git commit -m "vhdb remote on --from-ui"', 'grep "ui-approval" docs/a.md']) {
+      expect(verdict('Bash', { command })).toBe('allow')
+    }
+    expect(verdict('Read', { file_path: '/r/.git/vhdb/state/ui-approval' })).toBe('allow')
+    expect(verdict('Write', { file_path: 'docs/ui-approval.md' })).toBe('allow')
+    for (const profile of ['balanced', 'permissive', 'off', 'strict'] as const) {
+      expect(verdict('Bash', { command: 'node /p/vhdb/bin/vhdb.mjs remote set --url https://x' }, profile)).toBe('ask')
+    }
+    // A change of the destination chained with a blocked command stays blocked, also where the profile relaxes the other block.
+    for (const profile of ['balanced', 'permissive', 'off', 'strict'] as const) {
+      expect(verdict('Bash', { command: 'rm -rf tmp; node /p/vhdb/bin/vhdb.mjs remote set --url https://x' }, profile)).toBe('block')
+    }
+  })
+})
+
+describe('the vhdb settings and the session allowance', () => {
+  test('"Allow for session" never opens a change of where vhdb uploads', () => {
+    const command = 'node /x/bin/vhdb.mjs remote set --url https://a'
+    expect(classify('Bash', { command }).category).toBe('vhdb-config')
+    expect(sessionScope('Bash', { command }, classify('Bash', { command }))).toBeUndefined()
+  })
+
+  test('the summary of a settings call hides the token and the address credentials', () => {
+    const summary = summarize('Bash', { command: 'node /x/bin/vhdb.mjs remote set --token sk-abcdefghijklmnop1234 --url https://u:pw@h/x' })
+    expect(summary).not.toContain('sk-abcdefghijklmnop1234')
+    expect(summary).not.toContain('u:pw')
+    expect(summarize('Bash', { command: 'git status' })).toBe('git status')
+  })
+
+  test('what the rules take and leave: a flag that only starts like --from-ui, git remote set-url under a vhdb folder, and any command that names the vhdb state folder', () => {
+    const decided = (command: string) => decide(classify('Bash', { command }), 'off', false)
+    expect(decided('cmd --from-ui-tests')).toBe('allow')
+    expect(decided('git -C ~/src/vhdb remote set-url origin https://x')).toBe('allow')
+    // Intended: the state folder is named only by a command that reaches the approval; read it in a terminal.
+    expect(decided('ls .git/vhdb/state')).toBe('block')
+    expect(decided('rm -rf tmp && node /p/vhdb/bin/vhdb.mjs remote set --url x')).toBe('block')
   })
 })
 
