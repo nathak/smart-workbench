@@ -33,6 +33,16 @@ describe('the status vhdb prints', () => {
     }
   })
 
+  test('the status vhdb 0.2.1 prints with nothing set is read, and says nothing about the ledger', () => {
+    const real =
+      '{"upload":false,"approvalPath":"/r/.git/vhdb/state/ui-approval","configured":false,"ready":false,"approved":false,"reason":"설정 없음: node bin/vhdb.mjs remote set --url <주소> --project <이름>","url":null,"project":null,"ledger":null,"tokenSource":null,"lastSentAt":null,"sent":0,"error":null,"backoffUntil":null}'
+    const read = parseStatus(real)
+    expect(read).toMatchObject({ ready: false, upload: false, url: '', project: '', approvalPath: '/r/.git/vhdb/state/ui-approval' })
+    expect(read?.reason).toContain('설정 없음')
+    expect(statusLine(read!)).toContain('no server set')
+    expect(statusLine(read!)).not.toContain('ledger')
+  })
+
   test('the error and the retry time are carried', () => {
     const read = parseStatus(line({ error: { status: 503, text: 'busy', at: 't' }, backoffUntil: 'later', sent: 4, lastSentAt: 'then' }))
     expect(read?.error).toEqual({ status: '503', text: 'busy', at: 't' })

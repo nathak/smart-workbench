@@ -112,7 +112,8 @@ export function statusLine(s: VhdbStatus): string {
   const parts = [
     `vhdb upload ${state}`,
     where,
-    s.ledger ? 'decision ledger included' : 'decision ledger not included',
+    // Nothing to say about the ledger until a server is set (vhdb shows null there).
+    s.url ? (s.ledger ? 'decision ledger included' : 'decision ledger not included') : '',
     s.sent > 0 ? `${s.sent} sent${s.lastSentAt ? `, last ${s.lastSentAt}` : ''}` : '',
     s.error ? `last error ${s.error.status} ${s.error.text}`.trim() : '',
     s.backoffUntil ? `retrying after ${s.backoffUntil}` : '',
