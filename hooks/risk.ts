@@ -445,7 +445,7 @@ const VHDB_SET = /\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/
 export const hidesCommand = (text: string): boolean => {
   const joined = text.replace(/\\\r?\n/g, ' ')
 
-  return VHDB_SET.test(text) || VHDB_SET.test(joined.replace(/\\(?=\S)/g, '').replace(/["']/g, ''))
+  return VHDB_SET.test(joined) || VHDB_SET.test(joined.replace(/\\(?=\S)/g, '').replace(/["']/g, ''))
 }
 
 export function summarize(tool: string, input: unknown): string {

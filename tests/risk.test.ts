@@ -449,6 +449,17 @@ describe('the vhdb settings and the session allowance', () => {
       expect(classify('Bash', { command }).category).toBe('vhdb-config')
     }
     for (const command of ['git remote set-url origin x', 'node /x/vhdb.mjs remote show --json', 'echo remote set']) expect(hidesCommand(command)).toBe(false)
+    // A quote that ends the word vhdb (a boundary only before the quotes are removed), on a continued line: read as typed, not only unquoted.
+    const split = 'node ~/vhdb"_x"/v.mjs \\\nremote set URL'
+    expect(classify('Bash', { command: split }).category).toBe('vhdb-config')
+    expect(hidesCommand(split)).toBe(true)
+  })
+
+  test('hiding goes by the text alone, so a message or a search that only names the words is hidden too: harmless, and pinned', () => {
+    for (const command of ['git commit -m "vhdb: remote set fix"', 'grep -r "vhdb remote set" docs/']) {
+      expect(classify('Bash', { command }).category).not.toBe('vhdb-config')
+      expect(hidesCommand(command)).toBe(true)
+    }
   })
 
   test('what the rules take and leave: a flag that only starts like --from-ui, git remote set-url under a vhdb folder, and any command that names the vhdb state folder', () => {
