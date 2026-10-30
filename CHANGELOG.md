@@ -4,6 +4,9 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+- `/swb vhdb status` no longer says "decision ledger included" while no server is set (vhdb 0.2.1 prints `ledger: null` there).
+
 ## [0.27.0] - 2026-10-30
 
 ### Added
