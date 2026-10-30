@@ -439,7 +439,14 @@ export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolea
 // A command that sets where vhdb uploads, or its token (which `remote set` reads from stdin, so it can stand in an echo before the command): no part of it is kept in a summary, the feed or a record.
 // Read from the text, not from the category, which a chained command or a project rule can change.
 export const HIDDEN_SUMMARY = 'vhdb remote set (arguments hidden)'
-export const hidesCommand = (text: string): boolean => /\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/.test(text)
+const VHDB_SET = /\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/
+
+// Read the way classify reads a command: as typed, with a line continued by a backslash joined, and with quotes and escapes removed ("remote" 'set', re\\mote set).
+export const hidesCommand = (text: string): boolean => {
+  const joined = text.replace(/\\\r?\n/g, ' ')
+
+  return VHDB_SET.test(text) || VHDB_SET.test(joined.replace(/\\(?=\S)/g, '').replace(/["']/g, ''))
+}
 
 export function summarize(tool: string, input: unknown): string {
   if (tool === 'Workflow') return workflowLabel(input)

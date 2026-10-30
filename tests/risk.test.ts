@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { applyRule } from '../hooks/policy'
-import { classify, commandPrefix, decide, effectiveProfile, normalisePath, redact, sessionScope, summarize } from '../hooks/risk'
+import { classify, commandPrefix, decide, effectiveProfile, hidesCommand, normalisePath, redact, sessionScope, summarize } from '../hooks/risk'
 
 describe('risk rules', () => {
   test('destructive git and recursive delete are blocked', async () => {
@@ -440,6 +440,15 @@ describe('the vhdb settings and the session allowance', () => {
       expect(summary).toBe('vhdb remote set (arguments hidden)')
     }
     expect(summarize('Bash', { command: 'git status' })).toBe('git status')
+  })
+
+  test('a settings command is hidden however it is spelled: quoted words, an escape, a line continued with a backslash; and a lookalike is not', () => {
+    for (const command of ['echo TOK | node /x/vhdb.mjs "remote" set', "node /x/vhdb.mjs remote 'set' --url x", 'node /x/vhdb.mjs re\\mote set', 'printf TOK | node /x/vhdb.mjs \\\nremote set && npm test']) {
+      expect(hidesCommand(command)).toBe(true)
+      expect(summarize('Bash', { command })).toBe('vhdb remote set (arguments hidden)')
+      expect(classify('Bash', { command }).category).toBe('vhdb-config')
+    }
+    for (const command of ['git remote set-url origin x', 'node /x/vhdb.mjs remote show --json', 'echo remote set']) expect(hidesCommand(command)).toBe(false)
   })
 
   test('what the rules take and leave: a flag that only starts like --from-ui, git remote set-url under a vhdb folder, and any command that names the vhdb state folder', () => {
