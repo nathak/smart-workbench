@@ -22,7 +22,7 @@ import * as vhdb from './vhdb'
 import { AUDIT_PATH, POLICY_PATH, POLICY_TEMPLATE, applyRule, matchRule, parsePolicy, repoPath } from './policy'
 import { SHARE_PATH, appendAudit, auditLine, ciEvidence, ciSummary, formatAudit, issueRef, parseIssueArg, readAudit, readShare, shareText, type GhRun } from './team'
 import { badgeOf, handoffMarkdown } from './report'
-import { ALWAYS_ASK, classify, decide, effectiveProfile, redact, sessionScope, summarize } from './risk'
+import { ALWAYS_ASK, HIDDEN_SUMMARY, classify, decide, effectiveProfile, hidesCommand, redact, sessionScope, summarize } from './risk'
 import { workflowOf } from './workflow'
 
 type $ = EngineInterface
@@ -303,6 +303,13 @@ function pathField(live: Live, tool: string, input: unknown): Record<string, unk
 // The input and the result of an ordinary tool call, as text for the call's input and output tabs. Agent, Workflow and Codex calls carry their own fields.
 // A call that touches a secrets file shows neither, and every text goes through the same masking and length limits as a prompt.
 const NO_IO = new Set(['secret-output', 'secret-file', 'guard-policy', 'desktop-channel', 'vhdb-config'])
+
+// The command text of a call, or '' for a tool that has none.
+function commandOf(input: unknown): string {
+  const command = ((input ?? {}) as Record<string, unknown>).command
+
+  return typeof command === 'string' ? command : ''
+}
 
 function inputText(input: unknown): string {
   const args = (input ?? {}) as Record<string, unknown>
@@ -4005,10 +4012,10 @@ export const register: Register = on => {
       ...(typeof sub === 'string' ? { subagent: sub } : {}),
       ...(codexRun ? { codex: codexRun.op, ...(codexRun.background ? { codexBg: true } : {}), ...(codexRun.write ? { codexWrite: true } : {}) } : {}),
       ...(e.tool === 'Agent' && typeof (e as unknown as Record<string, unknown>).prompt === 'string' ? promptOf(live, (e as unknown as Record<string, string>).prompt as string) : {}),
-      ...(codexRun && e.tool === 'Bash' ? promptOf(live, e.command) : {}),
+      ...(codexRun && e.tool === 'Bash' && !hidesCommand(e.command) ? promptOf(live, e.command) : {}),
       ...(e.tool === 'Workflow' ? workflowFields(live, e) : {}),
       ...pathField(live, e.tool, e),
-      ...(e.tool !== 'Agent' && e.tool !== 'Workflow' && !codexRun && !NO_IO.has(verdict.category) ? promptOf(live, inputText(e), 'toolIn') : {}),
+      ...(e.tool !== 'Agent' && e.tool !== 'Workflow' && !codexRun && !NO_IO.has(verdict.category) && !hidesCommand(commandOf(e)) ? promptOf(live, inputText(e), 'toolIn') : {}),
     })
 
     if (policy === 'block') {
@@ -4119,7 +4126,7 @@ export const register: Register = on => {
     // A finished Workflow call only means the run started in the background; nothing here tells when or how it ends.
     const bg = e.tool === 'Workflow' && ran.deny === undefined && !ran.isError ? { workflowBg: true } : {}
     const agentOut = e.tool === 'Agent' && ran.deny === undefined && !ran.isError ? await agentOutput($, ran.result) : {}
-    const toolOut = e.tool !== 'Agent' && e.tool !== 'Workflow' && !codexRun && !NO_IO.has(verdict.category) && ran.deny === undefined && resultText(ran.result) !== '' ? promptOf(await read($, liveAtom), resultText(ran.result), 'toolOut') : {}
+    const toolOut = e.tool !== 'Agent' && e.tool !== 'Workflow' && !codexRun && !NO_IO.has(verdict.category) && !hidesCommand(commandOf(e)) && ran.deny === undefined && resultText(ran.result) !== '' ? promptOf(await read($, liveAtom), resultText(ran.result), 'toolOut') : {}
     const notebookPath = (e as unknown as Record<string, unknown>).notebook_path
     const rawPath =
       'file_path' in e && typeof e.file_path === 'string' ? e.file_path : typeof notebookPath === 'string' ? notebookPath : undefined
@@ -4152,7 +4159,7 @@ export const register: Register = on => {
           const ok = isUnsettled ? null : (checkOutcome(e.command, kind, isOk) ?? (read?.ok === false ? false : (outcomeFromOutput(e.command, kind, streams, isOk) ?? read?.ok ?? null)))
           // The counts the run's own summary line shows, for a test run that finished: what a condition's expectation is judged by.
           const facts = read?.facts
-          const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: e.command.slice(0, 200), ok, at: endedAt, ...(facts ? { facts } : {}), ...(isUnsettled ? { unsettled: true as const } : {}) }
+          const record: EvidenceRecord = { id: i === 0 ? call.id : `${call.id}#${kind}`, kind, command: hidesCommand(e.command) ? HIDDEN_SUMMARY : e.command.slice(0, 200), ok, at: endedAt, ...(facts ? { facts } : {}), ...(isUnsettled ? { unsettled: true as const } : {}) }
           updated = model.addEvidence(updated, record)
           fresh.push(record)
         })
@@ -4447,8 +4454,8 @@ export const register: Register = on => {
         {isFailed && (
           <Box gap={1} marginLeft={2}>
             <Button key={`explain-${id}`} plain dimColor label="Explain" onPress={() => void explainCall($, e.props.tool, summary)} />
-            <Button key={`retry-${id}`} plain dimColor label="Retry" onPress={() => void retryCall($, e.props.tool, summary)} />
-            {command !== undefined && !isCounted && (
+            {!hidesCommand(summary) && <Button key={`retry-${id}`} plain dimColor label="Retry" onPress={() => void retryCall($, e.props.tool, summary)} />}
+            {command !== undefined && !isCounted && !hidesCommand(command) && !hidesCommand(summary) && (
               <Button key={`count-${id}`} plain dimColor label="Add evidence" onPress={() => void countAsCheck($, id, command, false)} />
             )}
           </Box>

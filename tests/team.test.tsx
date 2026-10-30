@@ -1198,6 +1198,25 @@ test('the live feed carries the masked input and output of an ordinary tool call
   expect(secret?.toolIn).toBeUndefined()
 })
 
+test('a vhdb remote set command reaches the live feed and the evidence in no form: not as input, not as output, not as a command, whatever category the rules gave it', async ($, on) => {
+  const writes: Array<{ argv: string[]; stdin?: string }> = []
+  const token = 'vhdb_abcdefgh12345678'
+  world(on, { files: { ...FEED_FILES, '.claude/smartworkbench.json': JSON.stringify({ ...GUARD, rules: [{ match: { command: '/team\\.example/' }, policy: 'allow' }] }) }, commands: FEED_RUNS, processed: writes, bashOut: `saved ${token}` })
+  await $.session.start(start)
+  const set = `echo ${token} | node /p/bin/vhdb.mjs remote set --url https://team.example --project app`
+  // Alone, chained with a command the vhdb approval rule takes, and chained with a test run (which the evidence collector records).
+  for (const command of [set, `${set} && node /p/bin/vhdb.mjs remote on`, `npm test && ${set}`]) await $.tool.call({ tool: 'Bash', command }).catch(() => undefined)
+
+  const text = JSON.stringify(feedLines(writes))
+  expect(text).not.toContain(token)
+  expect(text).not.toContain('team.example')
+  for (const line of feedLines(writes).filter(one => one.kind === 'tool.start' && String(one.summary).includes('remote set'))) {
+    expect(line.toolIn).toBeUndefined()
+    expect(line.summary).toBe('vhdb remote set (arguments hidden)')
+  }
+  expect(feedLines(writes).filter(one => one.kind === 'tool.end' && one.toolOut !== undefined && String(one.toolOut).includes('saved')).length).toBe(0)
+})
+
 test('the live feed carries the whole path of a file call (its summary is cut at 120 characters), none for a shell call, and none with --no-prompts', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })

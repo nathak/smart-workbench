@@ -436,6 +436,11 @@ export function decide(verdict: Verdict, profile: GuardProfile, isPaused: boolea
   return verdict.policy
 }
 
+// A command that sets where vhdb uploads, or its token (which `remote set` reads from stdin, so it can stand in an echo before the command): no part of it is kept in a summary, the feed or a record.
+// Read from the text, not from the category, which a chained command or a project rule can change.
+export const HIDDEN_SUMMARY = 'vhdb remote set (arguments hidden)'
+export const hidesCommand = (text: string): boolean => /\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/.test(text)
+
 export function summarize(tool: string, input: unknown): string {
   if (tool === 'Workflow') return workflowLabel(input)
   const args = (input ?? {}) as Record<string, unknown>
@@ -444,8 +449,7 @@ export function summarize(tool: string, input: unknown): string {
 
   const line = String(text).replace(/\s+/g, ' ').trim()
 
-  // Where vhdb uploads and its token (which `remote set` reads from stdin, so it can stand in an echo before the command): the summary goes to the feed and the records, so none of the command is kept.
-  if (/\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/.test(line)) return 'vhdb remote set (arguments hidden)'
+  if (hidesCommand(line)) return HIDDEN_SUMMARY
 
   return line.slice(0, 120)
 }
