@@ -444,8 +444,10 @@ export function summarize(tool: string, input: unknown): string {
 
   const line = String(text).replace(/\s+/g, ' ').trim()
 
-  // Where vhdb uploads and its token: the summary goes to the feed and the records, so the values are masked.
-  return (/\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/.test(line) ? redact(line) : line).slice(0, 120)
+  // Where vhdb uploads and its token (which `remote set` reads from stdin, so it can stand in an echo before the command): the summary goes to the feed and the records, so none of the command is kept.
+  if (/\bvhdb(?:\.mjs)?\b[^;&|\n]*\bremote\s+set(?![\w-])/.test(line)) return 'vhdb remote set (arguments hidden)'
+
+  return line.slice(0, 120)
 }
 
 // ---- "Allow for session"

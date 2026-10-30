@@ -434,10 +434,11 @@ describe('the vhdb settings and the session allowance', () => {
     expect(sessionScope('Bash', { command }, classify('Bash', { command }))).toBeUndefined()
   })
 
-  test('the summary of a settings call hides the token and the address credentials', () => {
-    const summary = summarize('Bash', { command: 'node /x/bin/vhdb.mjs remote set --token sk-abcdefghijklmnop1234 --url https://u:pw@h/x' })
-    expect(summary).not.toContain('sk-abcdefghijklmnop1234')
-    expect(summary).not.toContain('u:pw')
+  test('the summary of a settings call keeps none of the command: the token may be a flag value, or piped in on stdin', () => {
+    for (const command of ['node /x/bin/vhdb.mjs remote set --token sk-abcdefghijklmnop1234 --url https://u:pw@h/x', 'echo vhdb_abcdefgh12345678 | node /x/bin/vhdb.mjs remote set --url https://team.example --project app']) {
+      const summary = summarize('Bash', { command })
+      expect(summary).toBe('vhdb remote set (arguments hidden)')
+    }
     expect(summarize('Bash', { command: 'git status' })).toBe('git status')
   })
 
