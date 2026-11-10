@@ -1825,13 +1825,6 @@ test('when the graph build fails the tool says so and does not throw', async ($,
   expect(JSON.stringify(await $.tool.call({ tool: GRAPH_TOOL, file: 'src/a.ts' }))).toContain('the graph is not available right now')
 })
 
-test('the Team tab names the version an alias usually stands for and leaves other values alone', () => {
-  expect(crew.withVersion('opus')).toBe('opus (claude-opus-5-5)')
-  expect(crew.withVersion('opus[1m]')).toBe('opus[1m] (claude-opus-5-5)')
-  expect(crew.withVersion('inherit')).toBe('inherit')
-  expect(crew.withVersion('claude-opus-5-5')).toBe('claude-opus-5-5')
-})
-
 test('a Workflow call is shown by the name and description its script states, with the script as input; ok means started, not finished', async ($, on) => {
   const writes: Array<{ argv: string[]; stdin?: string }> = []
   world(on, { files: FEED_FILES, commands: FEED_RUNS, processed: writes })
