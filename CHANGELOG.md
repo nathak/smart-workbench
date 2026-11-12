@@ -4,6 +4,8 @@ All notable changes to SmartWorkbench, newest first. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-11-12
+
 ### Changed
 - The Team tab and `/swb team` show a model by its alias or id alone (`fable`, `opus`), no longer with a version such as `claude-fable-5-1` beside it. That version was a hint written into the plugin, and an alias moves to the newest model in Claude Code, so it could name an older model than the one in use.
 
